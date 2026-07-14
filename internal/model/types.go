@@ -80,6 +80,7 @@ func (s Status) String() string {
 // Item represents a single updatable/cleanable entity.
 type Item struct {
 	Name         string   // display name (e.g., "btop", "OpenCode")
+	PackageID    string   // source-specific ID (e.g. MAS adam ID)
 	Category     Category // group
 	CurrentVer   string   // installed version ("" if N/A)
 	AvailableVer string   // version available ("" if up to date)

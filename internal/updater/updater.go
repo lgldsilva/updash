@@ -6,9 +6,10 @@ import (
 	"context"
 	"fmt"
 	"os/exec"
+	"sort"
 	"strings"
-	"sync"
 
+	"github.com/lgldsilva/updash/internal/elevate"
 	"github.com/lgldsilva/updash/internal/model"
 )
 
@@ -20,20 +21,36 @@ type Result struct {
 	Error   string
 }
 
-// UpdateAll runs update commands for the given items.
-// Items of the same category that support batching are grouped into a single command.
+// UpdateAll runs update commands for the given items (silent/buffered — for TUI).
 func UpdateAll(ctx context.Context, items []*model.Item) []*Result {
-	// Group by category for batch updates
+	return UpdateAllWithOptions(ctx, items, SilentOptions())
+}
+
+// UpdateAllWithOptions runs updates with the given execution options.
+func UpdateAllWithOptions(ctx context.Context, items []*model.Item, opts Options) []*Result {
 	groups := groupByCategory(items)
 	results := make([]*Result, 0, len(items))
-
-	// Process each group
-	for cat, groupItems := range groups {
-		batchResult := updateBatch(ctx, cat, groupItems)
+	for _, cat := range sortedCategories(groups) {
+		batchCtx, cancel := withBatchTimeout(ctx, cat)
+		batchResult := updateBatch(batchCtx, cat, groups[cat], opts)
+		cancel()
 		results = append(results, batchResult...)
 	}
-
 	return results
+}
+
+// UpdateCategory updates one category batch (used by CLI for per-step progress).
+func UpdateCategory(ctx context.Context, cat model.Category, items []*model.Item, opts Options) []*Result {
+	return updateBatch(ctx, cat, items, opts)
+}
+
+func sortedCategories(groups map[model.Category][]*model.Item) []model.Category {
+	cats := make([]model.Category, 0, len(groups))
+	for cat := range groups {
+		cats = append(cats, cat)
+	}
+	sort.Slice(cats, func(i, j int) bool { return cats[i] < cats[j] })
+	return cats
 }
 
 // groupByCategory organizes items by their category.
@@ -46,48 +63,61 @@ func groupByCategory(items []*model.Item) map[model.Category][]*model.Item {
 }
 
 // updateBatch processes a group of items of the same category.
-func updateBatch(ctx context.Context, cat model.Category, items []*model.Item) []*Result {
+func updateBatch(ctx context.Context, cat model.Category, items []*model.Item, opts Options) []*Result {
 	switch cat {
 	case model.CatBrew:
-		// Single brew upgrade --greedy for all
-		return batchBrewUpgrade(ctx, items)
+		return batchBrewUpgrade(ctx, items, opts)
 	case model.CatMAS:
-		// Single mas upgrade for all
-		return batchMASUpgrade(ctx, items)
+		return batchMASUpgrade(ctx, items, opts)
 	case model.CatApt:
-		return batchAptUpgrade(ctx, items)
+		return batchAptUpgrade(ctx, items, opts)
 	case model.CatPacman:
-		return batchPacmanUpgrade(ctx, items)
+		return batchPacmanUpgrade(ctx, items, opts)
+	case model.CatWinget:
+		return batchWingetUpgrade(ctx, items, opts)
+	case model.CatChoco:
+		return batchChocoUpgrade(ctx, items, opts)
+	case model.CatScoop:
+		return batchScoopUpgrade(ctx, items, opts)
+	case model.CatNpm:
+		return batchNpmUpgrade(ctx, items, opts)
+	case model.CatPipx:
+		return batchPipxUpgrade(ctx, items, opts)
+	case model.CatAgent, model.CatAI:
+		return batchSequential(ctx, items, opts)
 	default:
-		// Run each item individually in parallel
-		var wg sync.WaitGroup
-		results := make([]*Result, len(items))
-		for i, it := range items {
-			wg.Add(1)
-			go func(idx int, item *model.Item) {
-				defer wg.Done()
-				results[idx] = updateOne(ctx, item)
-			}(i, it)
-		}
-		wg.Wait()
-		return results
+		return batchSequential(ctx, items, opts)
 	}
+}
+
+func batchSequential(ctx context.Context, items []*model.Item, opts Options) []*Result {
+	results := make([]*Result, len(items))
+	for i, it := range items {
+		results[i] = updateOne(ctx, it, opts)
+	}
+	return results
 }
 
 // batchBrewUpgrade runs brew upgrade --greedy.
 // Even if brew exits non-zero (warnings, validations), we verify which items
 // were actually upgraded by re-checking brew outdated after the run.
-func batchBrewUpgrade(ctx context.Context, items []*model.Item) []*Result {
+func batchBrewUpgrade(ctx context.Context, items []*model.Item, opts Options) []*Result {
 	// Mark all as updating
 	for _, it := range items {
 		it.Status = model.StatusUpdating
 	}
 
-	// Run brew upgrade --greedy
+	// Run brew upgrade --greedy (detached from TTY — no sudo prompt)
 	cmd := exec.CommandContext(ctx, "brew", "upgrade", "--greedy")
 	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
+	if opts.Output != nil {
+		opts.ConfigureCmd(cmd)
+	} else if opts.Verbose || opts.Interactive {
+		opts.ConfigureCmd(cmd)
+	} else {
+		cmd.Stdout = &stdout
+		cmd.Stderr = &stderr
+	}
 	_ = cmd.Run() // ignore exit code — we verify results below
 
 	output := stdout.String() + stderr.String()
@@ -136,59 +166,142 @@ func brewOutdatedNames(ctx context.Context) []string {
 	return names
 }
 
-// batchMASUpgrade runs mas upgrade for all.
-// Uses sudo -S for TTY-less environments (reads password via stdin pipe).
-func batchMASUpgrade(ctx context.Context, items []*model.Item) []*Result {
-	for _, it := range items {
-		it.Status = model.StatusUpdating
-	}
-
-	// mas upgrade needs sudo to install apps
-	cmd := exec.CommandContext(ctx, "sudo", "-S", "mas", "upgrade")
-	cmd.Stdin = strings.NewReader("") // empty pipe to avoid sudo hang
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-	err := cmd.Run()
-
-	output := stdout.String() + stderr.String()
-	success := err == nil
-
+// batchMASUpgrade updates each MAS app individually and verifies via mas outdated.
+// mas manages its own sudo (see mas README) — do not wrap it in elevate.Sudo.
+func batchMASUpgrade(ctx context.Context, items []*model.Item, opts Options) []*Result {
 	results := make([]*Result, len(items))
 	for i, it := range items {
-		results[i] = &Result{
-			Item:    it,
-			Success: success,
-			Output:  output,
-		}
-		if success {
-			it.Status = model.StatusDone
-		} else {
-			it.Status = model.StatusError
-			results[i].Error = fmt.Sprintf("mas upgrade: %v (sudo may need TTY)", err)
-		}
+		it.Status = model.StatusUpdating
+		results[i] = upgradeMASApp(ctx, it, opts)
 	}
 
 	return results
 }
 
+func upgradeMASApp(ctx context.Context, item *model.Item, opts Options) *Result {
+	args := []string{"update"}
+	if item.PackageID != "" {
+		args = append(args, item.PackageID)
+	}
+
+	// mas calls /usr/bin/sudo internally; prime the OS sudo timestamp first.
+	if !opts.Interactive {
+		if err := elevate.EnsureSudoReady(ctx); err != nil {
+			item.Status = model.StatusError
+			return &Result{
+				Item:    item,
+				Success: false,
+				Error:   err.Error() + " — enter your Mac login password in updash before MAS updates",
+			}
+		}
+	}
+
+	cmd := exec.CommandContext(ctx, "mas", args...)
+	var stdout, stderr bytes.Buffer
+	if opts.Output != nil {
+		opts.ConfigureCmd(cmd)
+	} else if opts.Verbose || opts.Interactive {
+		opts.ConfigureCmd(cmd)
+	} else {
+		cmd.Stdout = &stdout
+		cmd.Stderr = &stderr
+	}
+
+	err := cmd.Run()
+	output := stdout.String() + stderr.String()
+	stillOutdated := masStillOutdated(ctx, item)
+
+	result := &Result{Item: item, Output: output}
+	if err == nil && !stillOutdated {
+		result.Success = true
+		item.Status = model.StatusDone
+		return result
+	}
+
+	item.Status = model.StatusError
+	result.Success = false
+	if err != nil {
+		stderrStr := strings.TrimSpace(stderr.String())
+		msg := fmt.Sprintf("mas update: %v", err)
+		if stderrStr != "" {
+			msg += " — " + stderrStr
+		}
+		if elevate.FromContext(ctx) == nil || !elevate.FromContext(ctx).Ready() {
+			msg += " (sudo password required)"
+		}
+		result.Error = msg
+		return result
+	}
+
+	result.Error = "still outdated after mas update (App Store download may still be in progress — try again or update manually)"
+	return result
+}
+
+type masOutdatedEntry struct {
+	id   string
+	name string
+}
+
+func masOutdatedEntries(ctx context.Context) []masOutdatedEntry {
+	out, err := exec.CommandContext(ctx, "mas", "outdated").Output()
+	if err != nil {
+		return nil
+	}
+	var entries []masOutdatedEntry
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		parts := strings.Fields(line)
+		if len(parts) < 2 {
+			continue
+		}
+		name := strings.Join(parts[1:], " ")
+		if idx := strings.Index(name, "("); idx >= 0 {
+			name = strings.TrimSpace(name[:idx])
+		}
+		entries = append(entries, masOutdatedEntry{id: parts[0], name: name})
+	}
+	return entries
+}
+
+func masStillOutdated(ctx context.Context, item *model.Item) bool {
+	for _, entry := range masOutdatedEntries(ctx) {
+		if item.PackageID != "" && entry.id == item.PackageID {
+			return true
+		}
+		if entry.name == item.Name {
+			return true
+		}
+	}
+	return false
+}
+
 // batchAptUpgrade runs apt-get dist-upgrade.
-func batchAptUpgrade(ctx context.Context, items []*model.Item) []*Result {
+func batchAptUpgrade(ctx context.Context, items []*model.Item, opts Options) []*Result {
 	for _, it := range items {
 		it.Status = model.StatusUpdating
 	}
 
 	cmds := [][]string{
-		{"sudo", "apt-get", "update"},
-		{"sudo", "apt-get", "dist-upgrade", "-y"},
+		{"apt-get", "update"},
+		{"apt-get", "dist-upgrade", "-y"},
 	}
 
 	var allOutput strings.Builder
 	var lastErr error
 	for _, args := range cmds {
-		cmd := exec.CommandContext(ctx, args[0], args[1:]...)
-		out, err := cmd.CombinedOutput()
-		allOutput.Write(out)
+		cmd := elevate.Sudo(ctx, args[0], args[1:]...)
+		var out []byte
+		var err error
+		if opts.Verbose || opts.Interactive {
+			opts.ConfigureCmd(cmd)
+			err = cmd.Run()
+		} else {
+			out, err = cmd.CombinedOutput()
+			allOutput.Write(out)
+		}
 		if err != nil {
 			lastErr = err
 			fmt.Fprintf(&allOutput, "error: %s\n", err)
@@ -215,7 +328,7 @@ func batchAptUpgrade(ctx context.Context, items []*model.Item) []*Result {
 }
 
 // batchPacmanUpgrade runs yay/pacman -Syu.
-func batchPacmanUpgrade(ctx context.Context, items []*model.Item) []*Result {
+func batchPacmanUpgrade(ctx context.Context, items []*model.Item, opts Options) []*Result {
 	for _, it := range items {
 		it.Status = model.StatusUpdating
 	}
@@ -224,12 +337,16 @@ func batchPacmanUpgrade(ctx context.Context, items []*model.Item) []*Result {
 	if _, err := exec.LookPath("yay"); err == nil {
 		cmd = exec.CommandContext(ctx, "yay", "-Syu", "--noconfirm")
 	} else {
-		cmd = exec.CommandContext(ctx, "sudo", "pacman", "-Syu", "--noconfirm")
+		cmd = elevate.Sudo(ctx, "pacman", "-Syu", "--noconfirm")
 	}
 
 	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
+	if opts.Verbose || opts.Interactive {
+		opts.ConfigureCmd(cmd)
+	} else {
+		cmd.Stdout = &stdout
+		cmd.Stderr = &stderr
+	}
 	err := cmd.Run()
 
 	output := stdout.String() + stderr.String()
@@ -245,56 +362,101 @@ func batchPacmanUpgrade(ctx context.Context, items []*model.Item) []*Result {
 			it.Status = model.StatusDone
 		} else {
 			it.Status = model.StatusError
-			results[i].Error = err.Error()
+			if err != nil {
+				results[i].Error = err.Error()
+			}
 		}
 	}
 
 	return results
 }
 
+func batchWingetUpgrade(ctx context.Context, items []*model.Item, opts Options) []*Result {
+	for _, it := range items {
+		it.Status = model.StatusUpdating
+	}
+	cmd := exec.CommandContext(ctx, "winget", "upgrade", "--all",
+		"--accept-package-agreements", "--accept-source-agreements")
+	return batchMarkAll(items, runCmdWithBuilder(ctx, items[0], cmd, opts))
+}
+
+func batchChocoUpgrade(ctx context.Context, items []*model.Item, opts Options) []*Result {
+	for _, it := range items {
+		it.Status = model.StatusUpdating
+	}
+	cmd := exec.CommandContext(ctx, "choco", "upgrade", "all", "-y")
+	return batchMarkAll(items, runCmdWithBuilder(ctx, items[0], cmd, opts))
+}
+
+func batchScoopUpgrade(ctx context.Context, items []*model.Item, opts Options) []*Result {
+	for _, it := range items {
+		it.Status = model.StatusUpdating
+	}
+	cmd := exec.CommandContext(ctx, "scoop", "update", "*")
+	return batchMarkAll(items, runCmdWithBuilder(ctx, items[0], cmd, opts))
+}
+
+func batchNpmUpgrade(ctx context.Context, items []*model.Item, opts Options) []*Result {
+	for _, it := range items {
+		it.Status = model.StatusUpdating
+	}
+	cmd := exec.CommandContext(ctx, "npm", "update", "-g")
+	return batchMarkAll(items, runCmdWithBuilder(ctx, items[0], cmd, opts))
+}
+
+func batchPipxUpgrade(ctx context.Context, items []*model.Item, opts Options) []*Result {
+	for _, it := range items {
+		it.Status = model.StatusUpdating
+	}
+	cmd := exec.CommandContext(ctx, "pipx", "upgrade-all")
+	return batchMarkAll(items, runCmdWithBuilder(ctx, items[0], cmd, opts))
+}
+
+func batchMarkAll(items []*model.Item, single *Result) []*Result {
+	results := make([]*Result, len(items))
+	for i, it := range items {
+		results[i] = &Result{
+			Item:    it,
+			Success: single.Success,
+			Output:  single.Output,
+			Error:   single.Error,
+		}
+		if single.Success {
+			it.Status = model.StatusDone
+		} else {
+			it.Status = model.StatusError
+		}
+	}
+	return results
+}
+
 // updateOne runs the appropriate update command for a single item.
-func updateOne(ctx context.Context, item *model.Item) *Result {
+func updateOne(ctx context.Context, item *model.Item, opts Options) *Result {
 	item.Status = model.StatusUpdating
 
 	switch item.Category {
 	case model.CatFlatpak:
-		return runCmd(ctx, item, "flatpak", "update", "-y")
-
-	// Windows updaters
-	case model.CatWinget:
-		return runCmd(ctx, item, "winget", "upgrade", "--all", "--accept-package-agreements", "--accept-source-agreements")
-
-	case model.CatChoco:
-		// choco upgrade all -y
-		return runCmd(ctx, item, "choco", "upgrade", "all", "-y")
-
-	case model.CatScoop:
-		// scoop update * updates all apps; scoop update itself first
-		return runCmd(ctx, item, "scoop", "update", "*")
+		return runCmd(ctx, item, opts, "flatpak", "update", "-y")
 	case model.CatSnap:
-		return runCmd(ctx, item, "sudo", "snap", "refresh")
-	case model.CatNpm:
-		return runCmd(ctx, item, "npm", "update", "-g")
-	case model.CatPipx:
-		return runCmd(ctx, item, "pipx", "upgrade-all")
+		return runElevatedCmd(ctx, item, opts, "snap", "refresh")
 	case model.CatGo:
-		return runCmd(ctx, item, "gup", "update")
+		return runCmd(ctx, item, opts, "gup", "update")
 	case model.CatRustup:
-		return runCmd(ctx, item, "rustup", "update")
+		return runCmd(ctx, item, opts, "rustup", "update")
 	case model.CatCargo:
-		return runCmd(ctx, item, "cargo", "install-update", "-a")
+		return runCmd(ctx, item, opts, "cargo", "install-update", "-a")
 	case model.CatSDKMAN:
-		return runSDKMANUpgrade(ctx, item)
+		return runSDKMANUpgrade(ctx, item, opts)
 	case model.CatNvm:
-		return runCmd(ctx, item, "bash", "-c", "source $HOME/.nvm/nvm.sh && nvm install-latest-npm")
+		return runCmd(ctx, item, opts, "bash", "-c", "source $HOME/.nvm/nvm.sh && nvm install-latest-npm")
 	case model.CatOmz:
-		return runCmd(ctx, item, "bash", "-c", "source $HOME/.oh-my-zsh/tools/upgrade.sh")
+		return runCmd(ctx, item, opts, "bash", "-c", "source $HOME/.oh-my-zsh/tools/upgrade.sh")
 	case model.CatAgent:
-		return updateAgent(ctx, item)
+		return updateAgent(ctx, item, opts)
 	case model.CatGHExt:
-		return runCmd(ctx, item, "gh", "extension", "upgrade", "--all")
+		return runCmd(ctx, item, opts, "gh", "extension", "upgrade", "--all")
 	case model.CatAI:
-		return updateAIInfra(ctx, item)
+		return updateAIInfra(ctx, item, opts)
 	default:
 		return &Result{
 			Item:    item,
@@ -304,11 +466,22 @@ func updateOne(ctx context.Context, item *model.Item) *Result {
 	}
 }
 
-func runCmd(ctx context.Context, item *model.Item, name string, args ...string) *Result {
-	cmd := exec.CommandContext(ctx, name, args...)
+func runElevatedCmd(ctx context.Context, item *model.Item, opts Options, name string, args ...string) *Result {
+	return runCmdWithBuilder(ctx, item, elevate.Sudo(ctx, name, args...), opts)
+}
+
+func runCmd(ctx context.Context, item *model.Item, opts Options, name string, args ...string) *Result {
+	return runCmdWithBuilder(ctx, item, exec.CommandContext(ctx, name, args...), opts)
+}
+
+func runCmdWithBuilder(ctx context.Context, item *model.Item, cmd *exec.Cmd, opts Options) *Result {
 	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
+	if opts.Verbose || opts.Interactive {
+		opts.ConfigureCmd(cmd)
+	} else {
+		cmd.Stdout = &stdout
+		cmd.Stderr = &stderr
+	}
 
 	err := cmd.Run()
 	result := &Result{Item: item}
@@ -329,22 +502,22 @@ func runCmd(ctx context.Context, item *model.Item, name string, args ...string) 
 	return result
 }
 
-func runSDKMANUpgrade(ctx context.Context, item *model.Item) *Result {
+func runSDKMANUpgrade(ctx context.Context, item *model.Item, opts Options) *Result {
 	bashCmd := `
 		source $HOME/.sdkman/bin/sdkman-init.sh
 		echo "Y" | sdk upgrade
 	`
-	return runCmd(ctx, item, "bash", "-c", bashCmd)
+	return runCmd(ctx, item, opts, "bash", "-c", bashCmd)
 }
 
-func updateAgent(ctx context.Context, item *model.Item) *Result {
+func updateAgent(ctx context.Context, item *model.Item, opts Options) *Result {
 	switch {
 	case strings.Contains(item.Name, "Claude"):
-		return runCmd(ctx, item, "claude", "update")
+		return runCmd(ctx, item, opts, "claude", "update")
 	case strings.Contains(item.Name, "Grok"):
-		return runCmd(ctx, item, "grok", "update")
+		return runCmd(ctx, item, opts, "grok", "update")
 	case strings.Contains(item.Name, "Gemini"):
-		return runCmd(ctx, item, "gemini", "update")
+		return runCmd(ctx, item, opts, "gemini", "update")
 	default:
 		return &Result{
 			Item:    item,
@@ -354,14 +527,14 @@ func updateAgent(ctx context.Context, item *model.Item) *Result {
 	}
 }
 
-func updateAIInfra(ctx context.Context, item *model.Item) *Result {
+func updateAIInfra(ctx context.Context, item *model.Item, opts Options) *Result {
 	switch {
 	case strings.Contains(item.Name, "ai-memory"):
-		return runCmd(ctx, item, "ai-memory", "upgrade")
+		return runCmd(ctx, item, opts, "ai-memory", "upgrade")
 	case strings.Contains(item.Name, "semidx"):
-		return runCmd(ctx, item, "semidx", "upgrade")
+		return runCmd(ctx, item, opts, "semidx", "upgrade")
 	case strings.Contains(item.Name, "gcloud"):
-		return runCmd(ctx, item, "gcloud", "components", "update", "--quiet")
+		return runCmd(ctx, item, opts, "gcloud", "components", "update", "--quiet")
 	default:
 		return &Result{
 			Item:    item,

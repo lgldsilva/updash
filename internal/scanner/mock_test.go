@@ -167,6 +167,9 @@ func TestMASScan_Outdated(t *testing.T) {
 	if items[0].Name != "Xcode" || items[0].AvailableVer != "16.1" {
 		t.Errorf("item[0] = %+v", items[0])
 	}
+	if items[0].PackageID != "1234567890" {
+		t.Errorf("item[0].PackageID = %q, want 1234567890", items[0].PackageID)
+	}
 }
 
 func TestMASScan_Empty(t *testing.T) {

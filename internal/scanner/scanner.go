@@ -35,34 +35,7 @@ func RunAll(ctx context.Context, plat model.PlatformInfo, includeCleanup bool) [
 		s := src
 		go func() {
 			defer wg.Done()
-			items, err := s.Scan(ctx, plat)
-			summary := &model.SourceSummary{
-				Category: s.Category(),
-				Label:    s.Label(),
-				Icon:     s.Icon(),
-				Items:    items,
-			}
-			if err != nil {
-				summary.ErrorCount = 1
-			}
-			for _, it := range items {
-				summary.Total++
-				switch it.Status {
-				case model.StatusOutdated, model.StatusCleanCandidate:
-					summary.Outdated++
-				case model.StatusOK:
-					summary.OK++
-				case model.StatusError:
-					summary.ErrorCount++
-				}
-				if it.Reclaimable != "" && it.Reclaimable != "0 versions" {
-					if summary.Reclaimable != "" {
-						summary.Reclaimable += " + " + it.Reclaimable
-					} else {
-						summary.Reclaimable = it.Reclaimable
-					}
-				}
-			}
+			summary := ScanSource(ctx, s, plat)
 			mu.Lock()
 			results = append(results, summary)
 			mu.Unlock()

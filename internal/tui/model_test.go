@@ -3,6 +3,7 @@ package tui
 import (
 	"testing"
 
+	"github.com/lgldsilva/updash/internal/elevate"
 	"github.com/lgldsilva/updash/internal/model"
 )
 
@@ -106,20 +107,58 @@ func TestState_CurrentItems(t *testing.T) {
 		t.Errorf("item name = %q, want %q", items[0].Name, "brew-pkg")
 	}
 
-	// Cleanup tab
+	// Cleanup tab — only navigable clean candidates (not hidden OK-only summaries)
 	s.ActiveTab = model.TabCleanup
 	s.CleanItems = []*model.SourceSummary{
 		{
+			Category: model.CatDockerClean,
+			Items:    []*model.Item{{Name: "docker", Status: model.StatusOK, CurrentVer: "nothing to clean"}},
+		},
+		{
 			Category: model.CatCache,
-			Items:    []*model.Item{{Name: "go-cache"}},
+			Items: []*model.Item{
+				{Name: "npm-cache", Status: model.StatusOK, CurrentVer: "no cache"},
+				{Name: "go-cache", Status: model.StatusCleanCandidate},
+			},
 		},
 	}
 	items = s.CurrentItems()
 	if len(items) != 1 {
-		t.Fatalf("expected 1 item in cleanup tab, got %d", len(items))
+		t.Fatalf("expected 1 navigable cleanup item, got %d", len(items))
 	}
 	if items[0].Name != "go-cache" {
 		t.Errorf("item name = %q, want %q", items[0].Name, "go-cache")
+	}
+}
+
+func TestState_CleanupToggleMatchesCursor(t *testing.T) {
+	s := New()
+	s.ActiveTab = model.TabCleanup
+	s.Ready = true
+	s.CleanItems = []*model.SourceSummary{
+		{
+			Category: model.CatDockerClean,
+			Items:    []*model.Item{{Name: "docker", Status: model.StatusOK}},
+		},
+		{
+			Category: model.CatCache,
+			Items: []*model.Item{
+				{Name: "go-cache", Status: model.StatusCleanCandidate},
+				{Name: "npm-cache", Status: model.StatusCleanCandidate},
+			},
+		},
+	}
+
+	s.Cursor = 0
+	s.HandleAction(KeySelect)
+	if !s.CleanItems[1].Items[0].Selected {
+		t.Fatal("cursor 0 should toggle go-cache")
+	}
+
+	s.Cursor = 1
+	s.HandleAction(KeySelect)
+	if !s.CleanItems[1].Items[1].Selected {
+		t.Fatal("cursor 1 should toggle npm-cache")
 	}
 }
 
@@ -200,5 +239,49 @@ func TestState_HandleActions(t *testing.T) {
 	s.HandleAction(KeySelect)
 	if s.Summaries[0].Items[0].Selected {
 		t.Error("item should be deselected after second toggle")
+	}
+}
+
+func TestState_SelectedCount(t *testing.T) {
+	s := New()
+	s.Summaries = []*model.SourceSummary{{
+		Items: []*model.Item{
+			{Selected: true},
+			{Selected: false},
+			{Selected: true},
+		},
+	}}
+	if got := s.SelectedCount(); got != 2 {
+		t.Fatalf("SelectedCount = %d, want 2", got)
+	}
+}
+
+func TestState_ClampCursor_Empty(t *testing.T) {
+	s := New()
+	s.Cursor = 5
+	s.ClampCursor()
+	if s.Cursor != 0 {
+		t.Fatalf("cursor = %d, want 0", s.Cursor)
+	}
+}
+
+func TestState_FlattenItems(t *testing.T) {
+	s := New()
+	s.Summaries = []*model.SourceSummary{
+		{Items: []*model.Item{{Name: "a"}, {Name: "b"}}},
+		{Items: []*model.Item{{Name: "c"}}},
+	}
+	if len(s.FlattenItems()) != 3 {
+		t.Fatalf("flatten = %d", len(s.FlattenItems()))
+	}
+}
+
+func TestState_CtxWithElev(t *testing.T) {
+	s := New()
+	s.ElevSession = elevate.NewSession()
+	s.ElevSession.SetPasswordless()
+	ctx := s.ctxWithElev()
+	if elevate.FromContext(ctx) == nil {
+		t.Fatal("expected session in context")
 	}
 }

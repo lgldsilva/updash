@@ -125,4 +125,11 @@ var (
 			Background(ColorBlue).
 			Padding(0, 1).
 			Bold(true)
+
+	// Confirmation dialog
+	ConfirmStyle = lipgloss.NewStyle().
+			Foreground(ColorYellow).
+			Bold(true).
+			MarginTop(1).
+			MarginBottom(1)
 )
