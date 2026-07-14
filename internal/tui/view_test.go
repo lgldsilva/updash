@@ -438,9 +438,9 @@ func TestRenderCategoryHeader_Updating(t *testing.T) {
 	s := New()
 	s.Updating = true
 	summary := &model.SourceSummary{
-		Icon:   "🍺",
-		Label:  "Homebrew",
-		Total:  2,
+		Icon:  "🍺",
+		Label: "Homebrew",
+		Total: 2,
 		Items: []*model.Item{
 			{Name: "a", Status: model.StatusUpdating},
 			{Name: "b", Status: model.StatusOutdated},
