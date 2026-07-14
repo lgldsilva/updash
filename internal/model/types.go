@@ -92,6 +92,7 @@ type Item struct {
 	Reclaimable string // human-readable reclaimable info ("4 versões" / "13 GB")
 	KeepPolicy  string // retention policy ("keep latest per major")
 	RemoveCount int    // number of items that would be removed
+	Freed       string // human-readable space reclaimed after clean (e.g. "106M")
 }
 
 // SourceSummary is the aggregated state for one category/source.

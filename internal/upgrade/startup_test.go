@@ -1,0 +1,28 @@
+package upgrade
+
+import "testing"
+
+func TestShouldAutoUpgrade(t *testing.T) {
+	if !ShouldAutoUpgrade("v1.0.0", false) {
+		t.Fatal("expected auto upgrade enabled")
+	}
+	if ShouldAutoUpgrade("v1.0.0", true) {
+		t.Fatal("skip flag should disable")
+	}
+}
+
+func TestFormatBuild(t *testing.T) {
+	got := FormatBuild("841d04d")
+	if got == "" || got == "dev" {
+		t.Fatalf("FormatBuild = %q", got)
+	}
+}
+
+func TestModeSkipsStartupUpgrade(t *testing.T) {
+	if !ModeSkipsStartupUpgrade("upgrade") {
+		t.Fatal("upgrade mode should skip")
+	}
+	if ModeSkipsStartupUpgrade("check") {
+		t.Fatal("check mode should not skip")
+	}
+}

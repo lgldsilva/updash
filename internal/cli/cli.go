@@ -19,10 +19,13 @@ import (
 
 // Config controls headless CLI behaviour.
 type Config struct {
-	Verbose bool
-	DryRun  bool
-	Only    string // category filter, e.g. "brew", "mas"
-	Clean   bool   // include cleanup in RunAll
+	Verbose      bool
+	DryRun       bool
+	Only         string // category filter, e.g. "brew", "mas"
+	Clean        bool   // include cleanup in RunAll
+	SkipPassword      bool // skip batches that need sudo instead of macOS dialog
+	Strict            bool // exit non-zero if any item remains outdated
+	SkipAutoUpgrade   bool // skip release self-update on startup
 }
 
 // Scan runs a single full scan and splits update vs cleanup summaries.
@@ -42,62 +45,7 @@ func Scan(ctx context.Context) (updates, cleanup []*model.SourceSummary, elapsed
 
 // PrintCheck renders scan results to stdout.
 func PrintCheck(updates, cleanup []*model.SourceSummary) (outdated, cleanable int) {
-	fmt.Println("\n📦 Updates:")
-	for _, s := range updates {
-		if s.Category == model.CatAgent {
-			fmt.Printf("  %s %s:", s.Icon, s.Label)
-			agentsOut := 0
-			for _, it := range s.Items {
-				if it.Status == model.StatusOutdated {
-					agentsOut++
-				}
-			}
-			fmt.Printf(" %d installed (%d outdated)\n", len(s.Items), agentsOut)
-			for _, it := range s.Items {
-				if it.Status == model.StatusOutdated {
-					fmt.Printf("    • %s  %s → %s\n", it.Name, it.CurrentVer, it.AvailableVer)
-					outdated++
-				} else if it.CurrentVer != "" {
-					fmt.Printf("    ✓ %s  %s\n", it.Name, it.CurrentVer)
-				}
-			}
-			continue
-		}
-
-		if s.Outdated > 0 {
-			fmt.Printf("  %s %s: %d outdated\n", s.Icon, s.Label, s.Outdated)
-			for _, it := range s.Items {
-				if it.Status == model.StatusOutdated {
-					fmt.Printf("    • %s  %s → %s\n", it.Name, it.CurrentVer, it.AvailableVer)
-					outdated++
-				}
-			}
-		}
-	}
-
-	fmt.Println("\n🧹 Cleanup:")
-	for _, s := range cleanup {
-		count := 0
-		for _, it := range s.Items {
-			if it.Status == model.StatusCleanCandidate {
-				count++
-			}
-		}
-		if count > 0 {
-			reclaim := s.Reclaimable
-			if reclaim == "" {
-				reclaim = fmt.Sprintf("%d item(s)", count)
-			}
-			fmt.Printf("  %s %s: %s\n", s.Icon, s.Label, reclaim)
-			cleanable += count
-		}
-	}
-
-	if outdated == 0 && cleanable == 0 {
-		fmt.Println("\n✓ Everything is up to date!")
-	} else {
-		fmt.Printf("\n%d outdated · %d cleanable\n", outdated, cleanable)
-	}
+	outdated, cleanable, _, _ = printCheckEnhanced(updates, cleanup)
 	return outdated, cleanable
 }
 
@@ -131,8 +79,17 @@ func RunUpdate(ctx context.Context, cfg Config) (int, int, error) {
 		return 0, 0, nil
 	}
 
+	updatable, manualOnly := partitionUpdatable(items)
+	if len(updatable) == 0 && len(manualOnly) == 0 {
+		fmt.Println("✓ Nothing to update")
+		return 0, 0, nil
+	}
+	if len(manualOnly) > 0 {
+		fmt.Printf("ℹ %d item(s) só atualização manual — não serão tentados\n", len(manualOnly))
+	}
+
 	if cfg.DryRun {
-		printDryRun("update", items)
+		printDryRun("update", updatable)
 		return 0, 0, nil
 	}
 
@@ -141,25 +98,22 @@ func RunUpdate(ctx context.Context, cfg Config) (int, int, error) {
 		opts.Verbose = false
 	}
 
-	ctx = prepareElevation(ctx, plat, items, opts.Interactive)
-
-	fmt.Printf("\n📦 Updating %d item(s)...\n", len(items))
+	fmt.Printf("\n📦 Updating %d item(s)...\n", len(updatable))
 	start := time.Now()
-	ok, fail := runUpdateBatches(ctx, plat, updates, items, opts)
-	fmt.Printf("\n⏱ update %s — %d ok, %d failed\n", time.Since(start).Round(time.Second), ok, fail)
+	ok, fail, skipped, results := runUpdateBatches(ctx, plat, updates, updatable, opts, cfg)
+	results = append(results, manualOnlyResults(manualOnly)...)
+	fmt.Printf("\n⏱ update %s — %d ok, %d skipped, %d failed\n",
+		time.Since(start).Round(time.Second), ok, skipped, fail)
 
 	fmt.Println("\n🔍 Verifying...")
 	updates2, _, _, _ := Scan(ctx)
-	remaining := countOutdated(updates2)
-	if remaining > 0 {
-		fmt.Printf("\n⚠ %d item(s) still outdated after update:\n", remaining)
-		PrintCheck(updates2, nil)
-	} else {
-		fmt.Println("✓ All updated items verified — nothing outdated remains")
-	}
+	stats := PrintVerifyReport(updates2, results, ok, fail, skipped)
 
-	if fail > 0 {
-		return ok, fail, fmt.Errorf("%d update(s) failed", fail)
+	if shouldFailExit(cfg, stats) {
+		if fail > 0 {
+			return ok, fail, fmt.Errorf("%d update(s) failed", fail)
+		}
+		return ok, fail, fmt.Errorf("%d item(s) still outdated", stats.remaining)
 	}
 	return ok, fail, nil
 }
@@ -192,8 +146,12 @@ func RunClean(ctx context.Context, cfg Config) (int, int, error) {
 
 	fmt.Printf("\n🧹 Cleaning %d item(s)...\n", len(items))
 	start := time.Now()
-	ok, fail := runCleanBatches(ctx, cleanup, items, opts)
-	fmt.Printf("\n⏱ clean %s — %d ok, %d failed\n", time.Since(start).Round(time.Second), ok, fail)
+	ok, fail, freed := runCleanBatches(ctx, cleanup, items, opts)
+	fmt.Printf("\n⏱ clean %s — %d ok, %d failed", time.Since(start).Round(time.Second), ok, fail)
+	if freed > 0 {
+		fmt.Printf(", %s freed", cleaner.FormatBytes(freed))
+	}
+	fmt.Println()
 	if fail > 0 {
 		return ok, fail, fmt.Errorf("%d clean(s) failed", fail)
 	}
@@ -224,13 +182,13 @@ type cleanGroup struct {
 	items []*model.Item
 }
 
-func runCleanBatches(ctx context.Context, summaries []*model.SourceSummary, items []*model.Item, opts cleaner.Options) (ok, fail int) {
+func runCleanBatches(ctx context.Context, summaries []*model.SourceSummary, items []*model.Item, opts cleaner.Options) (ok, fail int, freed int64) {
 	for _, g := range groupCleanBySummary(summaries, items) {
 		fmt.Printf("\n→ %s (%d item(s))\n", g.label, len(g.items))
 		for _, it := range g.items {
 			detail := it.Name
 			if it.Reclaimable != "" {
-				detail = fmt.Sprintf("%s (%s)", it.Name, it.Reclaimable)
+				detail = fmt.Sprintf("%s (~%s reclaimable)", it.Name, it.Reclaimable)
 			}
 			fmt.Printf("  • %s\n", detail)
 
@@ -239,7 +197,12 @@ func runCleanBatches(ctx context.Context, summaries []*model.SourceSummary, item
 			cancel()
 
 			if r.Success {
-				fmt.Printf("  ✓ %s\n", it.Name)
+				freed += r.BytesFreed
+				if r.BytesFreed > 0 {
+					fmt.Printf("  ✓ %s (freed %s)\n", it.Name, cleaner.FormatBytes(r.BytesFreed))
+				} else {
+					fmt.Printf("  ✓ %s (nothing to remove)\n", it.Name)
+				}
 				ok++
 			} else {
 				errMsg := r.Error
@@ -251,7 +214,7 @@ func runCleanBatches(ctx context.Context, summaries []*model.SourceSummary, item
 			}
 		}
 	}
-	return ok, fail
+	return ok, fail, freed
 }
 
 func groupCleanBySummary(summaries []*model.SourceSummary, items []*model.Item) []cleanGroup {
@@ -278,23 +241,31 @@ func groupCleanBySummary(summaries []*model.SourceSummary, items []*model.Item) 
 	return groups
 }
 
-func runUpdateBatches(ctx context.Context, plat model.PlatformInfo, summaries []*model.SourceSummary, items []*model.Item, opts updater.Options) (ok, fail int) {
-	groups := groupByCategory(items)
-	cats := sortedCategories(groups)
+func runUpdateBatches(
+	ctx context.Context,
+	plat model.PlatformInfo,
+	summaries []*model.SourceSummary,
+	items []*model.Item,
+	opts updater.Options,
+	cfg Config,
+) (ok, fail, skipped int, allResults []*updater.Result) {
+	nativeItems, normalItems := partitionNativeElevated(plat, items, cfg)
+	var elevSession *elevate.Session
+	ctx = primeElevationSession(ctx, plat, normalItems, cfg, &elevSession)
 
-	for _, cat := range cats {
-		groupItems := groups[cat]
-		label := categoryLabel(summaries, cat)
-		fmt.Printf("\n→ %s (%d item(s))\n", label, len(groupItems))
-
-		batchCtx, cancel := context.WithTimeout(ctx, updater.BatchTimeout(cat))
-		results := updater.UpdateCategory(batchCtx, cat, groupItems, opts)
-		cancel()
-
-		for _, r := range results {
+	if len(nativeItems) > 0 {
+		fmt.Printf("\n→ 🔐 Atualizações privilegiadas (%d item(s))\n", len(nativeItems))
+		for _, it := range nativeItems {
+			fmt.Printf("  • %s\n", it.Name)
+		}
+		for _, r := range runNativeElevatedItems(ctx, plat, nativeItems, opts, cfg, &elevSession) {
+			allResults = append(allResults, r)
 			if r.Success {
 				fmt.Printf("  ✓ %s\n", r.Item.Name)
 				ok++
+			} else if isSkippedResult(r) {
+				fmt.Printf("  ⊘ %s: %s\n", r.Item.Name, strings.TrimPrefix(r.Error, "⊘ "))
+				skipped++
 			} else {
 				errMsg := r.Error
 				if errMsg == "" {
@@ -305,19 +276,52 @@ func runUpdateBatches(ctx context.Context, plat model.PlatformInfo, summaries []
 			}
 		}
 	}
-	return ok, fail
-}
 
-func countOutdated(summaries []*model.SourceSummary) int {
-	n := 0
-	for _, s := range summaries {
-		for _, it := range s.Items {
-			if it.Status == model.StatusOutdated {
-				n++
+	groups := groupByCategory(normalItems)
+	cats := sortedCategories(groups)
+
+	for _, cat := range cats {
+		groupItems := groups[cat]
+		label := categoryLabel(summaries, cat)
+		fmt.Printf("\n→ %s (%d item(s))\n", label, len(groupItems))
+
+		batchCtx, cancel := context.WithTimeout(ctx, updater.BatchTimeout(cat))
+
+		var results []*updater.Result
+		if cat == model.CatBrew {
+			results = runBrewUpdateBatch(batchCtx, groupItems, opts, cfg, &elevSession)
+		} else {
+			elevCtx := batchCtx
+			batchSkipped := false
+			skipReason := ""
+			elevCtx, batchSkipped, skipReason = ensureCategoryElevation(elevCtx, plat, cat, cfg, &elevSession)
+			if batchSkipped {
+				results = skipBatchResults(groupItems, skipReason)
+			} else {
+				results = updater.UpdateCategory(elevCtx, cat, groupItems, opts)
+			}
+		}
+		cancel()
+
+		for _, r := range results {
+			allResults = append(allResults, r)
+			if r.Success {
+				fmt.Printf("  ✓ %s\n", r.Item.Name)
+				ok++
+			} else if isSkippedResult(r) {
+				fmt.Printf("  ⊘ %s: %s\n", r.Item.Name, strings.TrimPrefix(r.Error, "⊘ "))
+				skipped++
+			} else {
+				errMsg := r.Error
+				if errMsg == "" {
+					errMsg = "failed"
+				}
+				fmt.Printf("  ✘ %s: %s\n", r.Item.Name, errMsg)
+				fail++
 			}
 		}
 	}
-	return n
+	return ok, fail, skipped, allResults
 }
 
 func collectOutdated(summaries []*model.SourceSummary, only string) []*model.Item {
@@ -396,21 +400,6 @@ func categoryLabel(summaries []*model.SourceSummary, cat model.Category) string 
 		}
 	}
 	return string(cat)
-}
-
-func prepareElevation(ctx context.Context, plat model.PlatformInfo, items []*model.Item, interactive bool) context.Context {
-	if !elevate.ItemsNeedElevation(items, plat, false) {
-		return ctx
-	}
-	if elevate.CanElevateWithoutPassword(ctx) {
-		sess := elevate.NewSession()
-		sess.SetPasswordless()
-		return elevate.WithSession(ctx, sess)
-	}
-	if interactive {
-		fmt.Fprintln(os.Stderr, "ℹ sudo may prompt for your password (mas, apt, etc.)")
-	}
-	return ctx
 }
 
 func prepareCleanElevation(ctx context.Context, plat model.PlatformInfo, items []*model.Item, interactive bool) context.Context {

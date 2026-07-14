@@ -10,3 +10,9 @@ var execCommand = func(ctx context.Context, name string, args ...string) ([]byte
 	cmd := exec.CommandContext(ctx, name, args...)
 	return cmd.Output()
 }
+
+// execCombined captures stdout+stderr (for actionable error messages).
+var execCombined = func(ctx context.Context, name string, args ...string) ([]byte, error) {
+	cmd := exec.CommandContext(ctx, name, args...)
+	return cmd.CombinedOutput()
+}
