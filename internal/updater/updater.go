@@ -225,20 +225,10 @@ func upgradeMASApp(ctx context.Context, item *model.Item, opts Options) *Result 
 		item.Status = model.StatusError
 	}
 	result.Success = false
+	result.Error = explainMasFailure(item.Name, item.PackageID, output, err)
 	if err != nil {
-		stderrStr := strings.TrimSpace(stderr.String())
-		msg := fmt.Sprintf("mas update: %v", err)
-		if stderrStr != "" {
-			msg += " — " + stderrStr
-		}
-		if elevate.FromContext(ctx) == nil || !elevate.FromContext(ctx).Ready() {
-			msg += " (sudo password required)"
-		}
-		result.Error = msg
-		return result
+		item.CurrentVer = truncatePlainDiagnosis(result.Error)
 	}
-
-	result.Error = "still outdated after mas update (App Store download may still be in progress — try again or update manually)"
 	return result
 }
 
