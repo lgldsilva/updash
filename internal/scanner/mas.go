@@ -43,6 +43,7 @@ func (s *MASource) Scan(ctx context.Context, plat model.PlatformInfo) ([]*model.
 		if len(parts) < 2 {
 			continue
 		}
+		appID := parts[0]
 		name := strings.Join(parts[1:], " ")
 		cur := ""
 		avail := ""
@@ -61,6 +62,7 @@ func (s *MASource) Scan(ctx context.Context, plat model.PlatformInfo) ([]*model.
 
 		items = append(items, &model.Item{
 			Name:         name,
+			PackageID:    appID,
 			Category:     model.CatMAS,
 			CurrentVer:   cur,
 			AvailableVer: avail,

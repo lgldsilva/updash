@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/lgldsilva/updash/internal/elevate"
 	"github.com/lgldsilva/updash/internal/model"
 )
 
@@ -23,27 +24,39 @@ type Result struct {
 	Error   string
 }
 
-// CleanAll runs cleanup operations for the given items.
+// CleanAll runs cleanup operations for the given items (silent/buffered — for TUI).
 func CleanAll(ctx context.Context, items []*model.Item) []*Result {
+	return CleanAllWithOptions(ctx, items, SilentOptions())
+}
+
+// CleanAllWithOptions runs cleanup with the given execution options.
+func CleanAllWithOptions(ctx context.Context, items []*model.Item, opts Options) []*Result {
 	var results []*Result
 	for _, it := range items {
-		results = append(results, cleanOne(ctx, it))
+		itemCtx, cancel := context.WithTimeout(ctx, ItemTimeout(it))
+		results = append(results, CleanOne(itemCtx, it, opts))
+		cancel()
 	}
 	return results
 }
 
-func cleanOne(ctx context.Context, item *model.Item) *Result {
+// CleanOne cleans a single item.
+func CleanOne(ctx context.Context, item *model.Item, opts Options) *Result {
+	return cleanOne(ctx, item, opts)
+}
+
+func cleanOne(ctx context.Context, item *model.Item, opts Options) *Result {
 	item.Status = model.StatusCleaning
 
 	switch item.Category {
 	case model.CatCache:
-		return cleanCache(ctx, item)
+		return cleanCache(ctx, item, opts)
 	case model.CatSDKMAN, model.CatSDKClean:
-		return cleanSDKMAN(ctx, item)
+		return cleanSDKMAN(ctx, item, opts)
 	case model.CatDockerClean:
-		return cleanDocker(ctx, item)
+		return cleanDocker(ctx, item, opts)
 	case model.CatVSCodeClean:
-		return cleanVSCodeExt(ctx, item)
+		return cleanVSCodeExt(ctx, item, opts)
 	default:
 		return &Result{
 			Item:    item,
@@ -54,23 +67,23 @@ func cleanOne(ctx context.Context, item *model.Item) *Result {
 }
 
 // cleanCache handles general cache cleanup.
-func cleanCache(ctx context.Context, item *model.Item) *Result {
+func cleanCache(ctx context.Context, item *model.Item, opts Options) *Result {
 	switch {
 	case strings.HasPrefix(item.Name, "brew"):
-		return runCmd(ctx, item, "brew", "cleanup")
+		return runCmd(ctx, item, opts, "brew", "cleanup", "-s")
 	case strings.HasPrefix(item.Name, "apt"):
-		return runMultiCmd(ctx, item,
-			[]string{"sudo", "apt-get", "autoremove", "-y"},
-			[]string{"sudo", "apt-get", "autoclean"},
+		return runMultiElevatedCmd(ctx, item, opts,
+			[]string{"apt-get", "autoremove", "-y"},
+			[]string{"apt-get", "autoclean"},
 		)
 	case strings.HasPrefix(item.Name, "go"):
-		return runCmd(ctx, item, "go", "clean", "-cache")
+		return runCmd(ctx, item, opts, "go", "clean", "-cache")
 	case strings.HasPrefix(item.Name, "npm"):
-		return runCmd(ctx, item, "npm", "cache", "clean", "--force")
+		return runCmd(ctx, item, opts, "npm", "cache", "clean", "--force")
 	case strings.HasPrefix(item.Name, "snap"):
-		return runCmd(ctx, item, "sudo", "snap", "set", "system", "refresh.retain=2")
+		return runElevatedCmd(ctx, item, opts, "snap", "set", "system", "refresh.retain=2")
 	case strings.HasPrefix(item.Name, "win"):
-		return cleanWindowsCache(ctx, item)
+		return cleanWindowsCache(ctx, item, opts)
 	default:
 		return &Result{
 			Item:    item,
@@ -81,7 +94,7 @@ func cleanCache(ctx context.Context, item *model.Item) *Result {
 }
 
 // cleanSDKMAN removes old SDKMAN versions, keeping only the latest per major.
-func cleanSDKMAN(ctx context.Context, item *model.Item) *Result {
+func cleanSDKMAN(ctx context.Context, item *model.Item, opts Options) *Result {
 	home := os.Getenv("HOME")
 	candidatesDir := filepath.Join(home, ".sdkman", "candidates")
 
@@ -136,11 +149,31 @@ func cleanSDKMAN(ctx context.Context, item *model.Item) *Result {
 		safeVer := sanitizeIdent(ver)
 		cmd := exec.CommandContext(ctx, "bash", "-c",
 			fmt.Sprintf("source $HOME/.sdkman/bin/sdkman-init.sh && sdk uninstall %s %s", safeCandidate, safeVer))
-		out, err := cmd.CombinedOutput()
-		fmt.Fprintf(&allOutput, "removed %s %s\n", candidate, ver)
-		allOutput.Write(out)
-		if err != nil {
-			fmt.Fprintf(&allOutput, "error: %s\n", err)
+		var hadError bool
+		if opts.Verbose || opts.Interactive {
+			configureCmd(opts, cmd)
+			fmt.Fprintf(&allOutput, "removing %s %s...\n", candidate, ver)
+			if err := cmd.Run(); err != nil {
+				hadError = true
+				fmt.Fprintf(&allOutput, "error: %s\n", err)
+			}
+		} else {
+			out, err := cmd.CombinedOutput()
+			fmt.Fprintf(&allOutput, "removed %s %s\n", candidate, ver)
+			allOutput.Write(out)
+			if err != nil {
+				hadError = true
+				fmt.Fprintf(&allOutput, "error: %s\n", err)
+			}
+		}
+		if hadError {
+			item.Status = model.StatusError
+			return &Result{
+				Item:    item,
+				Success: false,
+				Error:   fmt.Sprintf("sdk uninstall %s %s failed", candidate, ver),
+				Output:  allOutput.String(),
+			}
 		}
 	}
 
@@ -154,23 +187,23 @@ func cleanSDKMAN(ctx context.Context, item *model.Item) *Result {
 
 // cleanDocker prunes Docker resources.
 // Uses --filter "until=336h" (14 days) to avoid removing recent images/containers.
-func cleanDocker(ctx context.Context, item *model.Item) *Result {
+func cleanDocker(ctx context.Context, item *model.Item, opts Options) *Result {
 	switch {
 	case strings.Contains(item.Name, "images"):
-		return runCmd(ctx, item, "docker", "image", "prune", "-a", "--filter", "until=336h", "-f")
+		return runCmd(ctx, item, opts, "docker", "image", "prune", "-a", "--filter", "until=336h", "-f")
 	case strings.Contains(item.Name, "builder") || strings.Contains(item.Name, "build"):
-		return runCmd(ctx, item, "docker", "builder", "prune", "--filter", "until=336h", "-f")
+		return runCmd(ctx, item, opts, "docker", "builder", "prune", "--filter", "until=336h", "-f")
 	case strings.Contains(item.Name, "container"):
-		return runCmd(ctx, item, "docker", "container", "prune", "-f", "--filter", "until=336h")
+		return runCmd(ctx, item, opts, "docker", "container", "prune", "-f", "--filter", "until=336h")
 	case strings.Contains(item.Name, "volume"):
-		return runCmd(ctx, item, "docker", "volume", "prune", "-f") // volumes don't support --filter until
+		return runCmd(ctx, item, opts, "docker", "volume", "prune", "-f")
 	default:
-		return runCmd(ctx, item, "docker", "system", "prune", "-af", "--filter", "until=336h")
+		return runCmd(ctx, item, opts, "docker", "system", "prune", "-af", "--filter", "until=336h")
 	}
 }
 
 // cleanVSCodeExt removes old versions of VS Code extensions.
-func cleanVSCodeExt(ctx context.Context, item *model.Item) *Result {
+func cleanVSCodeExt(ctx context.Context, item *model.Item, opts Options) *Result {
 	// Determine the extensions directory from the item name or context
 	var candidates []string
 	home := os.Getenv("HOME")
@@ -244,6 +277,20 @@ func cleanVSCodeExt(ctx context.Context, item *model.Item) *Result {
 		}
 	}
 
+	var hadError bool
+	if allOutput.Len() > 0 && strings.Contains(allOutput.String(), "error removing") {
+		hadError = true
+	}
+	if hadError {
+		item.Status = model.StatusError
+		return &Result{
+			Item:    item,
+			Success: false,
+			Error:   "some extension versions could not be removed",
+			Output:  allOutput.String(),
+		}
+	}
+
 	item.Status = model.StatusCleaned
 	return &Result{
 		Item:    item,
@@ -254,11 +301,22 @@ func cleanVSCodeExt(ctx context.Context, item *model.Item) *Result {
 
 // --- Helpers ---
 
-func runCmd(ctx context.Context, item *model.Item, name string, args ...string) *Result {
-	cmd := exec.CommandContext(ctx, name, args...)
+func runElevatedCmd(ctx context.Context, item *model.Item, opts Options, name string, args ...string) *Result {
+	return runCmdWithBuilder(ctx, item, elevate.Sudo(ctx, name, args...), opts)
+}
+
+func runCmd(ctx context.Context, item *model.Item, opts Options, name string, args ...string) *Result {
+	return runCmdWithBuilder(ctx, item, exec.CommandContext(ctx, name, args...), opts)
+}
+
+func runCmdWithBuilder(ctx context.Context, item *model.Item, cmd *exec.Cmd, opts Options) *Result {
 	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
+	if opts.Verbose || opts.Interactive {
+		configureCmd(opts, cmd)
+	} else {
+		cmd.Stdout = &stdout
+		cmd.Stderr = &stderr
+	}
 
 	err := cmd.Run()
 	result := &Result{Item: item}
@@ -277,22 +335,39 @@ func runCmd(ctx context.Context, item *model.Item, name string, args ...string) 
 	return result
 }
 
-func runMultiCmd(ctx context.Context, item *model.Item, cmds ...[]string) *Result {
+func runMultiElevatedCmd(ctx context.Context, item *model.Item, opts Options, cmds ...[]string) *Result {
 	var allOutput strings.Builder
+	var lastErr error
 	for _, args := range cmds {
-		cmd := exec.CommandContext(ctx, args[0], args[1:]...)
-		out, err := cmd.CombinedOutput()
-		allOutput.Write(out)
-		if err != nil {
-			fmt.Fprintf(&allOutput, "error: %s\n", err)
+		cmd := elevate.Sudo(ctx, args[0], args[1:]...)
+		if opts.Verbose || opts.Interactive {
+			configureCmd(opts, cmd)
+			if err := cmd.Run(); err != nil {
+				lastErr = err
+				fmt.Fprintf(&allOutput, "error: %s\n", err)
+			}
+		} else {
+			out, err := cmd.CombinedOutput()
+			allOutput.Write(out)
+			if err != nil {
+				lastErr = err
+				fmt.Fprintf(&allOutput, "error: %s\n", err)
+			}
 		}
 	}
-	item.Status = model.StatusCleaned
-	return &Result{
-		Item:    item,
-		Success: true,
-		Output:  allOutput.String(),
+	result := &Result{
+		Item:   item,
+		Output: allOutput.String(),
 	}
+	if lastErr != nil {
+		result.Success = false
+		result.Error = lastErr.Error()
+		item.Status = model.StatusError
+	} else {
+		result.Success = true
+		item.Status = model.StatusCleaned
+	}
+	return result
 }
 
 func getMajorVersion(ver string) string {
@@ -354,14 +429,14 @@ func parseVersionParts(ver string) []int {
 }
 
 // cleanWindowsCache handles Windows temp/cache cleanup.
-func cleanWindowsCache(ctx context.Context, item *model.Item) *Result {
+func cleanWindowsCache(ctx context.Context, item *model.Item, opts Options) *Result {
 	switch {
 	case strings.Contains(item.Name, "temp") || strings.Contains(item.Name, "TEMP"):
-		return runCmd(ctx, item, "cmd", "/c", "del /q /s %TEMP%\\* >nul 2>&1")
+		return runCmd(ctx, item, opts, "cmd", "/c", "del /q /s %TEMP%\\* >nul 2>&1")
 	case strings.Contains(item.Name, "npm"):
-		return runCmd(ctx, item, "npm", "cache", "clean", "--force")
+		return runCmd(ctx, item, opts, "npm", "cache", "clean", "--force")
 	default:
-		return runCmd(ctx, item, "cmd", "/c", "echo No Windows cleaner defined")
+		return runCmd(ctx, item, opts, "cmd", "/c", "echo No Windows cleaner defined")
 	}
 }
 
