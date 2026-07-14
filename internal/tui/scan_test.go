@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	"testing"
 
 	"github.com/lgldsilva/updash/internal/model"
@@ -24,6 +25,12 @@ func TestMergeSummary_InsertAndReplace(t *testing.T) {
 	if len(list) != 2 {
 		t.Fatalf("insert failed: len=%d", len(list))
 	}
+}
+
+func TestRescanCategory_nilProgram(t *testing.T) {
+	s := New()
+	// must not panic when program is nil
+	s.rescanCategory(context.Background(), nil, model.CatBrew, false)
 }
 
 func TestStartScan_Idempotent(t *testing.T) {
