@@ -7,8 +7,6 @@ import (
 	"github.com/lgldsilva/updash/internal/model"
 )
 
-
-
 func TestRunAll_NoSources(t *testing.T) {
 	// With an empty platform (no tools installed), RunAll should return empty summaries
 	plat := model.PlatformInfo{OS: "linux"}
