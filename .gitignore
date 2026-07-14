@@ -1,5 +1,5 @@
-# Binaries
-updash
+# Binaries (root only — do not match cmd/updash/)
+/updash
 *.test
 *.out
 
@@ -12,3 +12,11 @@ updash
 # OS
 .DS_Store
 Thumbs.db
+
+# Deepwork session state (git-local, readable by OpenCode)
+.slim/deepwork/
+
+# Local env / tooling
+.env
+.scannerwork/
+.ignore

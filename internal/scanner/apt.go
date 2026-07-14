@@ -2,7 +2,6 @@ package scanner
 
 import (
 	"context"
-	"os/exec"
 	"strings"
 
 	"github.com/lgldsilva/updash/internal/model"
@@ -16,11 +15,8 @@ func (s *AptSource) Label() string            { return "apt" }
 func (s *AptSource) Icon() string             { return "🐧" }
 
 func (s *AptSource) Scan(ctx context.Context, plat model.PlatformInfo) ([]*model.Item, error) {
-	// First update package lists (required for apt list --upgradable)
-	update := exec.CommandContext(ctx, "sudo", "apt-get", "update")
-	_ = update.Run() // ignore errors, proceed anyway
-
-	// List upgradable packages
+	// Fast scan only — apt-get update is slow and may block on sudo.
+	// Package lists are refreshed during apt upgrade, not here.
 	out, err := execCommand(ctx, "apt", "list", "--upgradable", "-q")
 	if err != nil {
 		return []*model.Item{

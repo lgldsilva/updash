@@ -7,6 +7,82 @@ import (
 	"github.com/lgldsilva/updash/internal/model"
 )
 
+func TestHasUpdateItems(t *testing.T) {
+	tests := []struct {
+		name string
+		sum  *model.SourceSummary
+		want bool
+	}{
+		{
+			name: "outdated",
+			sum:  &model.SourceSummary{Items: []*model.Item{{Status: model.StatusOutdated}}},
+			want: true,
+		},
+		{
+			name: "done",
+			sum:  &model.SourceSummary{Items: []*model.Item{{Status: model.StatusDone}}},
+			want: true,
+		},
+		{
+			name: "only ok",
+			sum:  &model.SourceSummary{Items: []*model.Item{{Status: model.StatusOK}}},
+			want: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := hasUpdateItems(tt.sum); got != tt.want {
+				t.Errorf("hasUpdateItems() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestRenderUpdatesTab_agentsUpToDate(t *testing.T) {
+	s := New()
+	s.Summaries = []*model.SourceSummary{
+		{
+			Category: model.CatAgent,
+			Icon:     "🤖",
+			Label:    "AI Agents",
+			Total:    3,
+			Items: []*model.Item{
+				{Name: "Claude", Status: model.StatusOK},
+				{Name: "Grok", Status: model.StatusOK},
+			},
+		},
+	}
+	out := s.renderUpdatesTab()
+	if !strings.Contains(out, "installed, up to date") {
+		t.Fatalf("expected agents summary line: %s", out)
+	}
+	if strings.Contains(out, "Claude") {
+		t.Fatalf("should not list individual agents when all OK: %s", out)
+	}
+}
+
+func TestRenderCategoryHeader_liveOutdated(t *testing.T) {
+	s := New()
+	s.Updating = false
+	summary := &model.SourceSummary{
+		Icon:     "🍺",
+		Label:    "Homebrew",
+		Total:    2,
+		Outdated: 2, // stale
+		Items: []*model.Item{
+			{Name: "a", Status: model.StatusOK},
+			{Name: "b", Status: model.StatusOutdated},
+		},
+	}
+	out := s.renderCategoryHeader(summary)
+	if strings.Contains(out, "2 outdated") {
+		t.Fatalf("header should use live count (1 outdated), got: %s", out)
+	}
+	if !strings.Contains(out, "1 outdated") {
+		t.Fatalf("expected 1 outdated in header: %s", out)
+	}
+}
+
 func TestHasCleanupItems(t *testing.T) {
 	tests := []struct {
 		name string
@@ -270,7 +346,7 @@ func TestRenderLogsTab_Empty(t *testing.T) {
 	}
 }
 
-func TestRenderItem(t *testing.T) {
+func TestRenderItemStyled(t *testing.T) {
 	s := New()
 
 	tests := []struct {
@@ -279,43 +355,28 @@ func TestRenderItem(t *testing.T) {
 	}{
 		{"ok", &model.Item{Name: "brew", Status: model.StatusOK, CurrentVer: "up to date"}},
 		{"outdated", &model.Item{Name: "btop", Status: model.StatusOutdated, CurrentVer: "1.3.0", AvailableVer: "1.5.0"}},
-		{"outdated no version", &model.Item{Name: "test", Status: model.StatusOutdated}},
 		{"error", &model.Item{Name: "brew", Status: model.StatusError, CurrentVer: "error"}},
 		{"updating", &model.Item{Name: "brew", Status: model.StatusUpdating}},
 		{"done", &model.Item{Name: "brew", Status: model.StatusDone}},
-		{"clean candidate", &model.Item{Name: "go-cache", Status: model.StatusCleanCandidate, CurrentVer: "23G", Reclaimable: "23G"}},
-		{"cleaning", &model.Item{Name: "go-cache", Status: model.StatusCleaning}},
-		{"cleaned", &model.Item{Name: "go-cache", Status: model.StatusCleaned}},
 		{"unknown", &model.Item{Name: "test", Status: 99}},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			output := s.renderItem(tt.item, 0)
+			output := s.renderItemStyled(tt.item)
 			if output == "" {
-				t.Errorf("renderItem() returned empty for %s", tt.name)
+				t.Errorf("renderItemStyled() returned empty for %s", tt.name)
 			}
 		})
 	}
 }
 
-func TestApplyItemStyle(t *testing.T) {
+func TestFormatRow(t *testing.T) {
 	s := New()
-
-	states := []model.Status{
-		model.StatusOK, model.StatusOutdated, model.StatusError,
-		model.StatusUpdating, model.StatusDone,
-		model.StatusCleanCandidate, model.StatusCleaning, model.StatusCleaned,
-	}
-
-	for _, st := range states {
-		t.Run(st.String(), func(t *testing.T) {
-			item := &model.Item{Name: "test", Status: st}
-			output := s.applyItemStyle("test", item, 0)
-			if output == "" {
-				t.Errorf("applyItemStyle returned empty for %s", st)
-			}
-		})
+	s.Cursor = 0
+	row := s.formatRow("btop  1.3.0 → 1.5.0", 0)
+	if row == "" {
+		t.Fatal("formatRow returned empty")
 	}
 }
 
@@ -393,5 +454,76 @@ func TestFullRender(t *testing.T) {
 	// Should have the updash title
 	if !strings.Contains(output, "updash") {
 		t.Errorf("Render() missing updash title: %s", output)
+	}
+}
+
+func TestRenderPassword(t *testing.T) {
+	s := New()
+	s.ShowPassword = true
+	s.PasswordInput = "abc"
+	s.PasswordError = "wrong"
+	out := s.renderPassword()
+	if !strings.Contains(out, "password") && !strings.Contains(out, "Administrator") {
+		t.Fatalf("missing password prompt: %s", out)
+	}
+	if !strings.Contains(out, "wrong") {
+		t.Fatal("missing error")
+	}
+}
+
+func TestRenderConfirm(t *testing.T) {
+	s := New()
+	s.ConfirmMsg = "Update 3 items?"
+	out := s.renderConfirm()
+	if !strings.Contains(out, "Update 3 items?") {
+		t.Fatalf("missing confirm msg: %s", out)
+	}
+}
+
+func TestRenderPasswordFooter(t *testing.T) {
+	s := New()
+	if !strings.Contains(s.renderPasswordFooter(), "submit") {
+		t.Fatal("missing submit hint")
+	}
+}
+
+func TestRenderConfirmFooter(t *testing.T) {
+	s := New()
+	if !strings.Contains(s.renderConfirmFooter(), "yes") {
+		t.Fatal("missing yes hint")
+	}
+}
+
+func TestRenderUpdatesTab_UpdatingProgress(t *testing.T) {
+	s := New()
+	s.Updating = true
+	s.UpdateTotal = 5
+	s.UpdateDone = 2
+	s.OperationLabel = "Homebrew"
+	s.Summaries = []*model.SourceSummary{{
+		Icon: "🍺", Label: "Homebrew", Total: 1,
+		Items: []*model.Item{{Name: "pkg", Status: model.StatusUpdating}},
+	}}
+	out := s.renderUpdatesTab()
+	if !strings.Contains(out, "Updating") || !strings.Contains(out, "2/5") {
+		t.Fatalf("missing progress: %s", out)
+	}
+}
+
+func TestRenderCategoryHeader_Updating(t *testing.T) {
+	s := New()
+	s.Updating = true
+	summary := &model.SourceSummary{
+		Icon:  "🍺",
+		Label: "Homebrew",
+		Total: 2,
+		Items: []*model.Item{
+			{Name: "a", Status: model.StatusUpdating},
+			{Name: "b", Status: model.StatusOutdated},
+		},
+	}
+	out := s.renderCategoryHeader(summary)
+	if !strings.Contains(out, "updating") {
+		t.Fatalf("expected updating indicator: %s", out)
 	}
 }
