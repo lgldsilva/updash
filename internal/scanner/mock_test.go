@@ -60,20 +60,26 @@ var realExecCommand = func(ctx context.Context, name string, args ...string) ([]
 }
 
 // defaultExecCommand is the real os/exec implementation, saved at init.
-var defaultExecCommand func(ctx context.Context, name string, args ...string) ([]byte, error)
+var (
+	defaultExecCommand  func(ctx context.Context, name string, args ...string) ([]byte, error)
+	defaultExecCombined func(ctx context.Context, name string, args ...string) ([]byte, error)
+)
 
 func init() {
 	defaultExecCommand = execCommand
+	defaultExecCombined = execCombined
 }
 
 // enableMocks replaces execCommand with the mock.
 func enableMocks() {
 	execCommand = mockExecCommand
+	execCombined = mockExecCommand
 }
 
 // disableMocks restores the real implementation.
 func disableMocks() {
 	execCommand = defaultExecCommand
+	execCombined = defaultExecCombined
 }
 
 // TestMain is not used — we call enable/disable in each test.
@@ -418,10 +424,10 @@ func TestFlatpakScan_Outdated(t *testing.T) {
 	enableMocks()
 	defer disableMocks()
 
-	out := `Updates:
-1.    org.gnome.Platform     3.38     4.0      stable`
-
-	setMock("flatpak", []string{"update", "--dry-run"}, out, nil)
+	setMock("flatpak", []string{"remote-ls", "--app", "--updates", "--json"},
+		`[{"application_id":"org.gnome.Platform","version":"4.0"}]`, nil)
+	setMock("flatpak", []string{"list", "--app", "--json"},
+		`[{"application_id":"org.gnome.Platform","version":"3.38"}]`, nil)
 
 	src := &FlatpakSource{}
 	items, err := src.Scan(context.Background(), model.PlatformInfo{})
@@ -429,8 +435,11 @@ func TestFlatpakScan_Outdated(t *testing.T) {
 		t.Fatalf("Scan failed: %v", err)
 	}
 
-	if len(items) < 1 {
-		t.Fatal("expected at least 1 item")
+	if len(items) != 1 || items[0].Status != model.StatusOutdated {
+		t.Fatalf("expected outdated, got %+v", items)
+	}
+	if items[0].AvailableVer != "4.0" {
+		t.Errorf("AvailableVer = %q, want 4.0", items[0].AvailableVer)
 	}
 }
 
@@ -438,7 +447,7 @@ func TestFlatpakScan_Empty(t *testing.T) {
 	enableMocks()
 	defer disableMocks()
 
-	setMock("flatpak", []string{"update", "--dry-run"}, "Nothing to do.", nil)
+	setMock("flatpak", []string{"remote-ls", "--app", "--updates", "--json"}, "[]", nil)
 
 	src := &FlatpakSource{}
 	items, _ := src.Scan(context.Background(), model.PlatformInfo{})
@@ -854,8 +863,8 @@ func TestFlatpakScan_Fallback(t *testing.T) {
 	enableMocks()
 	defer disableMocks()
 
-	// Output that doesn't match the structured parser
-	setMock("flatpak", []string{"update", "--dry-run"}, "Updates available.\n  1. some.app 1.0 2.0 stable\n", nil)
+	setMock("flatpak", []string{"remote-ls", "--app", "--updates", "--json"}, "", errors.New("remote-ls failed"))
+	setMock("flatpak", []string{"update", "--dry-run"}, "Updates available.\n  1. org.some.App 1.0 2.0 stable\n", nil)
 
 	src := &FlatpakSource{}
 	items, _ := src.Scan(context.Background(), model.PlatformInfo{})

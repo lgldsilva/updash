@@ -226,6 +226,48 @@ func (s *State) TotalOutdated() int {
 	return count
 }
 
+// TotalScanErrors counts scan failures across Updates and Cleanup tabs.
+func (s *State) TotalScanErrors() int {
+	var n int
+	for _, summary := range s.Summaries {
+		n += countStatus(summary.Items, model.StatusError)
+	}
+	for _, summary := range s.CleanItems {
+		n += countStatus(summary.Items, model.StatusError)
+	}
+	return n
+}
+
+func countStatus(items []*model.Item, want model.Status) int {
+	n := 0
+	for _, it := range items {
+		if it.Status == want {
+			n++
+		}
+	}
+	return n
+}
+
+// LogScanErrors writes per-source scan failures to the Logs tab.
+func (s *State) LogScanErrors() {
+	logScanErrors := func(summaries []*model.SourceSummary) {
+		for _, sum := range summaries {
+			for _, it := range sum.Items {
+				if it.Status != model.StatusError {
+					continue
+				}
+				detail := it.CurrentVer
+				if detail == "" {
+					detail = "scan failed"
+				}
+				s.AddLog(fmt.Sprintf("✘ %s %s — %s: %s", sum.Icon, sum.Label, it.Name, detail), false)
+			}
+		}
+	}
+	logScanErrors(s.Summaries)
+	logScanErrors(s.CleanItems)
+}
+
 // TotalCleanable returns total cleanable items.
 func (s *State) TotalCleanable() int {
 	count := 0
