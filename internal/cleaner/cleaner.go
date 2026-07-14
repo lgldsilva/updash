@@ -137,10 +137,10 @@ func cleanSDKMAN(ctx context.Context, item *model.Item) *Result {
 		cmd := exec.CommandContext(ctx, "bash", "-c",
 			fmt.Sprintf("source $HOME/.sdkman/bin/sdkman-init.sh && sdk uninstall %s %s", safeCandidate, safeVer))
 		out, err := cmd.CombinedOutput()
-		allOutput.WriteString(fmt.Sprintf("removed %s %s\n", candidate, ver))
+		fmt.Fprintf(&allOutput, "removed %s %s\n", candidate, ver)
 		allOutput.Write(out)
 		if err != nil {
-			allOutput.WriteString(fmt.Sprintf("error: %s\n", err))
+			fmt.Fprintf(&allOutput, "error: %s\n", err)
 		}
 	}
 
@@ -237,9 +237,9 @@ func cleanVSCodeExt(ctx context.Context, item *model.Item) *Result {
 			oldPath := filepath.Join(extDir, old)
 			err := os.RemoveAll(oldPath)
 			if err != nil {
-				allOutput.WriteString(fmt.Sprintf("error removing %s: %s\n", old, err))
+				fmt.Fprintf(&allOutput, "error removing %s: %s\n", old, err)
 			} else {
-				allOutput.WriteString(fmt.Sprintf("removed %s\n", old))
+				fmt.Fprintf(&allOutput, "removed %s\n", old)
 			}
 		}
 	}
@@ -284,7 +284,7 @@ func runMultiCmd(ctx context.Context, item *model.Item, cmds ...[]string) *Resul
 		out, err := cmd.CombinedOutput()
 		allOutput.Write(out)
 		if err != nil {
-			allOutput.WriteString(fmt.Sprintf("error: %s\n", err))
+			fmt.Fprintf(&allOutput, "error: %s\n", err)
 		}
 	}
 	item.Status = model.StatusCleaned

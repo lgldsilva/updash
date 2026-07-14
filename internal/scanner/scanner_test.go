@@ -7,21 +7,7 @@ import (
 	"github.com/lgldsilva/updash/internal/model"
 )
 
-// mockSource implements Source for testing.
-type mockSource struct {
-	category model.Category
-	label    string
-	icon     string
-	items    []*model.Item
-	err      error
-}
 
-func (m *mockSource) Category() model.Category { return m.category }
-func (m *mockSource) Label() string            { return m.label }
-func (m *mockSource) Icon() string             { return m.icon }
-func (m *mockSource) Scan(ctx context.Context, plat model.PlatformInfo) ([]*model.Item, error) {
-	return m.items, m.err
-}
 
 func TestRunAll_NoSources(t *testing.T) {
 	// With an empty platform (no tools installed), RunAll should return empty summaries

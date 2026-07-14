@@ -31,50 +31,50 @@ const (
 // HandleKey processes a key press and updates state.
 func (s *State) HandleKey(key string) KeyAction {
 	if s.ShowConfirm {
-		switch {
-		case key == "y" || key == "Y":
+		switch key {
+		case "y", "Y":
 			s.ShowConfirm = false
 			if s.ConfirmAction != nil {
 				s.ConfirmAction()
 			}
 			return KeyConfirm
-		case key == "n" || key == "N" || key == "esc":
+		case "n", "N", "esc":
 			s.ShowConfirm = false
 			return KeyCancel
 		}
 		return KeyNone
 	}
 
-	switch {
-	case key == "up" || key == "k":
+	switch key {
+	case "up", "k":
 		return KeyUp
-	case key == "down" || key == "j":
+	case "down", "j":
 		return KeyDown
-	case key == " ":
+	case " ":
 		return KeySelect
-	case key == "u" || key == "U":
+	case "u", "U":
 		return KeyUpdateSelected
-	case key == "a" || key == "A":
+	case "a", "A":
 		return KeyUpdateAll
-	case key == "c" || key == "C":
+	case "c", "C":
 		return KeyCleanSelected
-	case key == "1":
+	case "1":
 		s.ActiveTab = model.TabUpdates
 		s.Cursor = 0
 		return KeyTab
-	case key == "2":
+	case "2":
 		s.ActiveTab = model.TabCleanup
 		s.Cursor = 0
 		return KeyTab
-	case key == "3":
+	case "3":
 		s.ActiveTab = model.TabLogs
 		s.Cursor = 0
 		return KeyTab
-	case key == "r" || key == "R":
+	case "r", "R":
 		return KeyRefresh
-	case key == "?":
+	case "?":
 		return KeyHelp
-	case key == "q" || key == "Q" || key == "ctrl+c":
+	case "q", "Q", "ctrl+c":
 		return KeyQuit
 	}
 

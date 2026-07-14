@@ -16,20 +16,20 @@ func TestSDKMANSource_Scan_WithTempDirs(t *testing.T) {
 
 	// Create Java versions
 	javaDir := filepath.Join(sdkmanDir, "java")
-	os.MkdirAll(javaDir, 0755)
-	os.Mkdir(filepath.Join(javaDir, "11.0.25-tem"), 0755)
-	os.Mkdir(filepath.Join(javaDir, "17.0.13-tem"), 0755)
-	os.Mkdir(filepath.Join(javaDir, "21.0.5-tem"), 0755)
-	os.Mkdir(filepath.Join(javaDir, "21.0.7-tem"), 0755)
-	os.Mkdir(filepath.Join(javaDir, "current"), 0755)
+	_ = os.MkdirAll(javaDir, 0755)
+	_ = os.Mkdir(filepath.Join(javaDir, "11.0.25-tem"), 0755)
+	_ = os.Mkdir(filepath.Join(javaDir, "17.0.13-tem"), 0755)
+	_ = os.Mkdir(filepath.Join(javaDir, "21.0.5-tem"), 0755)
+	_ = os.Mkdir(filepath.Join(javaDir, "21.0.7-tem"), 0755)
+	_ = os.Mkdir(filepath.Join(javaDir, "current"), 0755)
 
 	// Create Gradle versions
 	gradleDir := filepath.Join(sdkmanDir, "gradle")
-	os.MkdirAll(gradleDir, 0755)
-	os.Mkdir(filepath.Join(gradleDir, "8.14.1"), 0755)
-	os.Mkdir(filepath.Join(gradleDir, "8.14.4"), 0755)
-	os.Mkdir(filepath.Join(gradleDir, "9.4.1"), 0755)
-	os.Mkdir(filepath.Join(gradleDir, "current"), 0755)
+	_ = os.MkdirAll(gradleDir, 0755)
+	_ = os.Mkdir(filepath.Join(gradleDir, "8.14.1"), 0755)
+	_ = os.Mkdir(filepath.Join(gradleDir, "8.14.4"), 0755)
+	_ = os.Mkdir(filepath.Join(gradleDir, "9.4.1"), 0755)
+	_ = os.Mkdir(filepath.Join(gradleDir, "current"), 0755)
 
 	// Verify structure
 	entries, err := os.ReadDir(sdkmanDir)
@@ -43,8 +43,8 @@ func TestSDKMANSource_Scan_WithTempDirs(t *testing.T) {
 
 	// Save original HOME and override to point to tmpDir
 	origHome := os.Getenv("HOME")
-	os.Setenv("HOME", tmpDir)
-	defer os.Setenv("HOME", origHome)
+	_ = os.Setenv("HOME", tmpDir)
+	defer func() { _ = os.Setenv("HOME", origHome) }()
 
 	src := &SDKMANSource{}
 	ctx := context.Background()
@@ -81,10 +81,10 @@ func TestVSCodeCleanSource_Scan_WithTempDirs(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	// Create VS Code-like extension dir with duplicate versions
-	os.MkdirAll(tmpDir, 0755)
-	os.Mkdir(filepath.Join(tmpDir, "vscjava.vscode-java-dependency-0.27.2-universal"), 0755)
-	os.Mkdir(filepath.Join(tmpDir, "vscjava.vscode-java-dependency-0.27.4-universal"), 0755)
-	os.Mkdir(filepath.Join(tmpDir, "ms-python.python-2026.4.0-universal"), 0755)
+	_ = os.MkdirAll(tmpDir, 0755)
+	_ = os.Mkdir(filepath.Join(tmpDir, "vscjava.vscode-java-dependency-0.27.2-universal"), 0755)
+	_ = os.Mkdir(filepath.Join(tmpDir, "vscjava.vscode-java-dependency-0.27.4-universal"), 0755)
+	_ = os.Mkdir(filepath.Join(tmpDir, "ms-python.python-2026.4.0-universal"), 0755)
 
 	// Verify structure
 	entries, err := os.ReadDir(tmpDir)

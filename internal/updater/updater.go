@@ -191,7 +191,7 @@ func batchAptUpgrade(ctx context.Context, items []*model.Item) []*Result {
 		allOutput.Write(out)
 		if err != nil {
 			lastErr = err
-			allOutput.WriteString(fmt.Sprintf("error: %s\n", err))
+			fmt.Fprintf(&allOutput, "error: %s\n", err)
 		}
 	}
 

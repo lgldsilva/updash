@@ -7,17 +7,12 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
-	"sync"
 	"testing"
 
 	"github.com/lgldsilva/updash/internal/model"
 )
 
 // mockCommands stores canned responses for execCommand.
-var mockData = struct {
-	mu   sync.Mutex
-	data map[string]mockResult
-}{data: make(map[string]mockResult)}
 
 type mockResult struct {
 	stdout []byte
@@ -30,23 +25,19 @@ func mockKey(name string, args []string) string {
 }
 
 // setMock registers a canned response for a command.
+
+var mockData = struct {
+	data map[string]mockResult
+}{data: make(map[string]mockResult)}
+
 func setMock(name string, args []string, stdout string, err error) {
-	mockData.mu.Lock()
-	defer mockData.mu.Unlock()
 	mockData.data[mockKey(name, args)] = mockResult{[]byte(stdout), err}
 }
 
 // clearMocks removes all canned responses.
-func clearMocks() {
-	mockData.mu.Lock()
-	defer mockData.mu.Unlock()
-	mockData.data = make(map[string]mockResult)
-}
 
 // mockExecCommand is the test replacement for execCommand.
 func mockExecCommand(ctx context.Context, name string, args ...string) ([]byte, error) {
-	mockData.mu.Lock()
-	defer mockData.mu.Unlock()
 	key := mockKey(name, args)
 	if res, ok := mockData.data[key]; ok {
 		return res.stdout, res.err
@@ -605,17 +596,17 @@ func TestBrewCleanSource(t *testing.T) {
 	// Create a temp cache directory
 	tmpDir := t.TempDir()
 	cacheDir := filepath.Join(tmpDir, "cache")
-	os.MkdirAll(cacheDir, 0755)
+	_ = os.MkdirAll(cacheDir, 0755)
 
 	// Override HOME to point to our temp dir
 	origHome := os.Getenv("HOME")
-	os.Setenv("HOME", tmpDir)
-	defer os.Setenv("HOME", origHome)
+	_ = os.Setenv("HOME", tmpDir)
+	defer func() { _ = os.Setenv("HOME", origHome) }()
 
 	// The scanner looks for ~/Library/Caches/Homebrew on macOS
 	// and ~/.cache/Homebrew on Linux
 	macCache := filepath.Join(tmpDir, "Library", "Caches", "Homebrew")
-	os.MkdirAll(macCache, 0755)
+	_ = os.MkdirAll(macCache, 0755)
 
 	// Mock du command
 	enableMocks()
@@ -639,11 +630,11 @@ func TestBrewCleanSource(t *testing.T) {
 func TestNvmScan(t *testing.T) {
 	tmpDir := t.TempDir()
 	nvmDir := filepath.Join(tmpDir, ".nvm")
-	os.MkdirAll(nvmDir, 0755)
+	_ = os.MkdirAll(nvmDir, 0755)
 
 	origHome := os.Getenv("HOME")
-	os.Setenv("HOME", tmpDir)
-	defer os.Setenv("HOME", origHome)
+	_ = os.Setenv("HOME", tmpDir)
+	defer func() { _ = os.Setenv("HOME", origHome) }()
 
 	src := &NvmSource{}
 	items, _ := src.Scan(context.Background(), model.PlatformInfo{})
@@ -655,11 +646,11 @@ func TestNvmScan(t *testing.T) {
 func TestOmzScan(t *testing.T) {
 	tmpDir := t.TempDir()
 	omzDir := filepath.Join(tmpDir, ".oh-my-zsh")
-	os.MkdirAll(omzDir, 0755)
+	_ = os.MkdirAll(omzDir, 0755)
 
 	origHome := os.Getenv("HOME")
-	os.Setenv("HOME", tmpDir)
-	defer os.Setenv("HOME", origHome)
+	_ = os.Setenv("HOME", tmpDir)
+	defer func() { _ = os.Setenv("HOME", origHome) }()
 
 	src := &OmzSource{}
 	items, _ := src.Scan(context.Background(), model.PlatformInfo{})
@@ -708,20 +699,20 @@ func TestMockFallback(t *testing.T) {
 func TestSDKMANSourceScan_TempDir(t *testing.T) {
 	tmpDir := t.TempDir()
 	candidatesDir := filepath.Join(tmpDir, ".sdkman", "candidates")
-	os.MkdirAll(filepath.Join(candidatesDir, "java"), 0755)
-	os.MkdirAll(filepath.Join(candidatesDir, "gradle"), 0755)
-	os.Mkdir(filepath.Join(candidatesDir, "java", "11.0.25-tem"), 0755)
-	os.Mkdir(filepath.Join(candidatesDir, "java", "21.0.7-tem"), 0755)
-	os.Mkdir(filepath.Join(candidatesDir, "java", "21.0.5-tem"), 0755)
-	os.Mkdir(filepath.Join(candidatesDir, "java", "current"), 0755)
-	os.Mkdir(filepath.Join(candidatesDir, "gradle", "8.14.4"), 0755)
-	os.Mkdir(filepath.Join(candidatesDir, "gradle", "8.14.1"), 0755)
-	os.Mkdir(filepath.Join(candidatesDir, "gradle", "9.4.1"), 0755)
-	os.Mkdir(filepath.Join(candidatesDir, "gradle", "current"), 0755)
+	_ = os.MkdirAll(filepath.Join(candidatesDir, "java"), 0755)
+	_ = os.MkdirAll(filepath.Join(candidatesDir, "gradle"), 0755)
+	_ = os.Mkdir(filepath.Join(candidatesDir, "java", "11.0.25-tem"), 0755)
+	_ = os.Mkdir(filepath.Join(candidatesDir, "java", "21.0.7-tem"), 0755)
+	_ = os.Mkdir(filepath.Join(candidatesDir, "java", "21.0.5-tem"), 0755)
+	_ = os.Mkdir(filepath.Join(candidatesDir, "java", "current"), 0755)
+	_ = os.Mkdir(filepath.Join(candidatesDir, "gradle", "8.14.4"), 0755)
+	_ = os.Mkdir(filepath.Join(candidatesDir, "gradle", "8.14.1"), 0755)
+	_ = os.Mkdir(filepath.Join(candidatesDir, "gradle", "9.4.1"), 0755)
+	_ = os.Mkdir(filepath.Join(candidatesDir, "gradle", "current"), 0755)
 
 	origHome := os.Getenv("HOME")
-	os.Setenv("HOME", tmpDir)
-	defer os.Setenv("HOME", origHome)
+	_ = os.Setenv("HOME", tmpDir)
+	defer func() { _ = os.Setenv("HOME", origHome) }()
 
 	src := &SDKMANSource{}
 	items, err := src.Scan(context.Background(), model.PlatformInfo{})
@@ -890,8 +881,8 @@ func TestSDKMANScan_NoDirectory(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	origHome := os.Getenv("HOME")
-	os.Setenv("HOME", tmpDir)
-	defer os.Setenv("HOME", origHome)
+	_ = os.Setenv("HOME", tmpDir)
+	defer func() { _ = os.Setenv("HOME", origHome) }()
 
 	src := &SDKMANSource{}
 	items, _ := src.Scan(context.Background(), model.PlatformInfo{})
