@@ -11,7 +11,7 @@ import (
 func BatchTimeout(cat model.Category) time.Duration {
 	switch cat {
 	case model.CatBrew:
-		return 45 * time.Minute
+		return 25 * time.Minute
 	case model.CatMAS, model.CatApt, model.CatPacman:
 		return 30 * time.Minute
 	case model.CatWinget, model.CatChoco:
