@@ -101,11 +101,58 @@ func New() *State {
 	}
 }
 
+// isUpdateNavigable reports items shown and selectable on the Updates tab.
+func isUpdateNavigable(status model.Status) bool {
+	switch status {
+	case model.StatusOutdated, model.StatusUpdating, model.StatusError, model.StatusDone:
+		return true
+	default:
+		return false
+	}
+}
+
+// hasUpdateItems reports whether a summary has actionable rows on the Updates tab.
+func hasUpdateItems(summary *model.SourceSummary) bool {
+	for _, it := range summary.Items {
+		if isUpdateNavigable(it.Status) {
+			return true
+		}
+	}
+	return false
+}
+
+// countLiveOutdated returns outdated items from live statuses (not stale summary.Outdated).
+func countLiveOutdated(items []*model.Item) int {
+	n := 0
+	for _, it := range items {
+		if it.Status == model.StatusOutdated {
+			n++
+		}
+	}
+	return n
+}
+
 // FlattenItems returns all items from all summaries as a flat slice.
 func (s *State) FlattenItems() []*model.Item {
 	var items []*model.Item
 	for _, summary := range s.Summaries {
 		items = append(items, summary.Items...)
+	}
+	return items
+}
+
+// FlattenUpdateItems returns update-tab navigable items (hides up-to-date noise like agent inventory).
+func (s *State) FlattenUpdateItems() []*model.Item {
+	var items []*model.Item
+	for _, summary := range s.Summaries {
+		if !hasUpdateItems(summary) {
+			continue
+		}
+		for _, it := range summary.Items {
+			if isUpdateNavigable(it.Status) {
+				items = append(items, it)
+			}
+		}
 	}
 	return items
 }
@@ -141,7 +188,7 @@ func (s *State) CurrentItems() []*model.Item {
 	if s.ActiveTab == model.TabCleanup {
 		return s.FlattenCleanItems()
 	}
-	return s.FlattenItems()
+	return s.FlattenUpdateItems()
 }
 
 // ClampCursor keeps the cursor within the current tab's item list.
@@ -170,11 +217,11 @@ func (s *State) SelectedCount() int {
 	return n
 }
 
-// TotalOutdated returns total outdated/cleanable items.
+// TotalOutdated returns total outdated items from live item statuses.
 func (s *State) TotalOutdated() int {
 	count := 0
 	for _, summary := range s.Summaries {
-		count += summary.Outdated
+		count += countLiveOutdated(summary.Items)
 	}
 	return count
 }

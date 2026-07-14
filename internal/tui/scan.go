@@ -89,9 +89,14 @@ func (s *State) startScan() tea.Cmd {
 }
 
 // rescanCategory re-probes one package manager and pushes fresh summary to the TUI.
-func (s *State) rescanCategory(ctx context.Context, program *tea.Program, cat model.Category, cleanup bool) {
+// Uses s.Ctx (not the caller's batch ctx) so rescans still run after batch timeouts cancel.
+func (s *State) rescanCategory(_ context.Context, program *tea.Program, cat model.Category, cleanup bool) {
 	if program == nil {
 		return
+	}
+	scanCtx := s.Ctx
+	if scanCtx == nil {
+		scanCtx = context.Background()
 	}
 	for _, src := range scanner.EnabledSources(s.Platform, cleanup || scanner.IsCleanupCategory(cat)) {
 		if src.Category() != cat {
@@ -100,7 +105,7 @@ func (s *State) rescanCategory(ctx context.Context, program *tea.Program, cat mo
 		if cleanup != scanner.IsCleanupCategory(src.Category()) {
 			continue
 		}
-		summary := scanner.ScanSource(ctx, src, s.Platform)
+		summary := scanner.ScanSource(scanCtx, src, s.Platform)
 		program.Send(ScanSourceDoneMsg{
 			Summary:   summary,
 			IsCleanup: scanner.IsCleanupCategory(summary.Category),

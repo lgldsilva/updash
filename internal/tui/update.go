@@ -339,7 +339,7 @@ func (s *State) startUpdateAll(items []*model.Item, program *tea.Program) tea.Cm
 			})
 
 			// Refresh this category from the system so the list matches reality.
-			s.rescanCategory(cmdCtx, program, group.category, false)
+			s.rescanCategory(s.Ctx, program, group.category, false)
 		}
 	}()
 
@@ -501,7 +501,7 @@ func (s *State) startCleanSelected(items []*model.Item, program *tea.Program) te
 				Total:   total,
 			})
 
-			s.rescanCategory(cmdCtx, program, it.Category, true)
+			s.rescanCategory(s.Ctx, program, it.Category, true)
 		}
 
 	}()
