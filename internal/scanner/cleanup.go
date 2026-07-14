@@ -41,9 +41,11 @@ func (s *BrewCleanSource) Scan(ctx context.Context, plat model.PlatformInfo) ([]
 	size := strings.TrimSpace(strings.Fields(string(sizeOut))[0])
 
 	reclaimable := "~0B"
-	if dryOut, err := execCommand(ctx, "brew", "cleanup", "-n", "-s"); err == nil {
-		if n := sizefmt.ParseBrewFreed(string(dryOut)); n > 0 {
-			reclaimable = sizefmt.Format(n)
+	if _, err := exec.LookPath("brew"); err == nil {
+		if dryOut, err := execCommand(ctx, "brew", "cleanup", "-n", "-s"); err == nil {
+			if n := sizefmt.ParseBrewFreed(string(dryOut)); n > 0 {
+				reclaimable = sizefmt.Format(n)
+			}
 		}
 	}
 

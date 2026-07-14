@@ -46,8 +46,27 @@ func ScanSource(ctx context.Context, src Source, plat model.PlatformInfo) *model
 	scanCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	items, err := src.Scan(scanCtx, plat)
-	return buildSummary(src, items, err)
+	type scanResult struct {
+		items []*model.Item
+		err   error
+	}
+	ch := make(chan scanResult, 1)
+	go func() {
+		items, err := src.Scan(scanCtx, plat)
+		ch <- scanResult{items: items, err: err}
+	}()
+
+	select {
+	case r := <-ch:
+		return buildSummary(src, r.items, r.err)
+	case <-scanCtx.Done():
+		return buildSummary(src, []*model.Item{{
+			Name:       src.Label(),
+			Category:   src.Category(),
+			Status:     model.StatusError,
+			CurrentVer: "scan timed out",
+		}}, scanCtx.Err())
+	}
 }
 
 func buildSummary(src Source, items []*model.Item, err error) *model.SourceSummary {
