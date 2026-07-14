@@ -365,7 +365,6 @@ func cleanWindowsCache(ctx context.Context, item *model.Item) *Result {
 	}
 }
 
-
 // sanitizeIdent strips characters that could be used for command injection.
 // Allows: alphanumeric, dots, hyphens, underscores.
 func sanitizeIdent(s string) string {
