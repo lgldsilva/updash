@@ -7,6 +7,13 @@ import (
 	"github.com/lgldsilva/updash/internal/model"
 )
 
+func TestCleanAll_Empty(t *testing.T) {
+	results := CleanAll(context.Background(), nil)
+	if len(results) != 0 {
+		t.Fatalf("expected no results, got %d", len(results))
+	}
+}
+
 func TestRunCmd_Success(t *testing.T) {
 	item := &model.Item{Name: "noop", Category: model.CatCache}
 	r := runCmd(context.Background(), item, SilentOptions(), "true")

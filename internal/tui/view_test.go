@@ -7,6 +7,82 @@ import (
 	"github.com/lgldsilva/updash/internal/model"
 )
 
+func TestHasUpdateItems(t *testing.T) {
+	tests := []struct {
+		name string
+		sum  *model.SourceSummary
+		want bool
+	}{
+		{
+			name: "outdated",
+			sum:  &model.SourceSummary{Items: []*model.Item{{Status: model.StatusOutdated}}},
+			want: true,
+		},
+		{
+			name: "done",
+			sum:  &model.SourceSummary{Items: []*model.Item{{Status: model.StatusDone}}},
+			want: true,
+		},
+		{
+			name: "only ok",
+			sum:  &model.SourceSummary{Items: []*model.Item{{Status: model.StatusOK}}},
+			want: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := hasUpdateItems(tt.sum); got != tt.want {
+				t.Errorf("hasUpdateItems() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestRenderUpdatesTab_agentsUpToDate(t *testing.T) {
+	s := New()
+	s.Summaries = []*model.SourceSummary{
+		{
+			Category: model.CatAgent,
+			Icon:     "🤖",
+			Label:    "AI Agents",
+			Total:    3,
+			Items: []*model.Item{
+				{Name: "Claude", Status: model.StatusOK},
+				{Name: "Grok", Status: model.StatusOK},
+			},
+		},
+	}
+	out := s.renderUpdatesTab()
+	if !strings.Contains(out, "installed, up to date") {
+		t.Fatalf("expected agents summary line: %s", out)
+	}
+	if strings.Contains(out, "Claude") {
+		t.Fatalf("should not list individual agents when all OK: %s", out)
+	}
+}
+
+func TestRenderCategoryHeader_liveOutdated(t *testing.T) {
+	s := New()
+	s.Updating = false
+	summary := &model.SourceSummary{
+		Icon:     "🍺",
+		Label:    "Homebrew",
+		Total:    2,
+		Outdated: 2, // stale
+		Items: []*model.Item{
+			{Name: "a", Status: model.StatusOK},
+			{Name: "b", Status: model.StatusOutdated},
+		},
+	}
+	out := s.renderCategoryHeader(summary)
+	if strings.Contains(out, "2 outdated") {
+		t.Fatalf("header should use live count (1 outdated), got: %s", out)
+	}
+	if !strings.Contains(out, "1 outdated") {
+		t.Fatalf("expected 1 outdated in header: %s", out)
+	}
+}
+
 func TestHasCleanupItems(t *testing.T) {
 	tests := []struct {
 		name string
