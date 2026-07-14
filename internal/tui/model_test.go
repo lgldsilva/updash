@@ -68,6 +68,36 @@ func TestState_TotalOutdated(t *testing.T) {
 	if got := s.TotalOutdated(); got != 2 {
 		t.Errorf("TotalOutdated = %d, want 2", got)
 	}
+
+	// Stale summary.Outdated must not inflate the tab badge.
+	s.Summaries[0].Outdated = 99
+	if got := s.TotalOutdated(); got != 2 {
+		t.Errorf("TotalOutdated with stale summary = %d, want 2", got)
+	}
+}
+
+func TestState_FlattenUpdateItems_hidesUpToDateAgents(t *testing.T) {
+	s := New()
+	s.Summaries = []*model.SourceSummary{
+		{
+			Category: model.CatAgent,
+			Items: []*model.Item{
+				{Name: "Claude", Status: model.StatusOK},
+				{Name: "Grok", Status: model.StatusOK},
+			},
+		},
+		{
+			Category: model.CatBrew,
+			Items: []*model.Item{
+				{Name: "btop", Status: model.StatusOutdated},
+				{Name: "neovim", Status: model.StatusOK},
+			},
+		},
+	}
+	items := s.FlattenUpdateItems()
+	if len(items) != 1 || items[0].Name != "btop" {
+		t.Fatalf("FlattenUpdateItems = %+v, want only btop", items)
+	}
 }
 
 func TestState_TotalCleanable(t *testing.T) {
@@ -96,7 +126,7 @@ func TestState_CurrentItems(t *testing.T) {
 	s.Summaries = []*model.SourceSummary{
 		{
 			Category: model.CatBrew,
-			Items:    []*model.Item{{Name: "brew-pkg"}},
+			Items:    []*model.Item{{Name: "brew-pkg", Status: model.StatusOutdated}},
 		},
 	}
 	items := s.CurrentItems()
@@ -208,16 +238,16 @@ func TestState_HandleActions(t *testing.T) {
 		t.Errorf("Cursor after KeyDown = %d, want 1", s.Cursor)
 	}
 
-	// Navigate down again
+	// Navigate down again (pkg2 is StatusOK and hidden from the updates list)
 	s.HandleAction(KeyDown)
-	if s.Cursor != 2 {
-		t.Errorf("Cursor after second KeyDown = %d, want 2", s.Cursor)
+	if s.Cursor != 1 {
+		t.Errorf("Cursor after second KeyDown = %d, want 1", s.Cursor)
 	}
 
 	// Navigate up
 	s.HandleAction(KeyUp)
-	if s.Cursor != 1 {
-		t.Errorf("Cursor after KeyUp = %d, want 1", s.Cursor)
+	if s.Cursor != 0 {
+		t.Errorf("Cursor after KeyUp = %d, want 0", s.Cursor)
 	}
 
 	// Boundary: navigate up past 0
@@ -246,9 +276,9 @@ func TestState_SelectedCount(t *testing.T) {
 	s := New()
 	s.Summaries = []*model.SourceSummary{{
 		Items: []*model.Item{
-			{Selected: true},
-			{Selected: false},
-			{Selected: true},
+			{Selected: true, Status: model.StatusOutdated},
+			{Selected: false, Status: model.StatusOutdated},
+			{Selected: true, Status: model.StatusOutdated},
 		},
 	}}
 	if got := s.SelectedCount(); got != 2 {

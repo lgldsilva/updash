@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/lgldsilva/updash/internal/elevate"
 	"github.com/lgldsilva/updash/internal/model"
@@ -123,7 +124,7 @@ func batchBrewUpgrade(ctx context.Context, items []*model.Item, opts Options) []
 
 	output := stdout.String() + stderr.String()
 
-	stillOutdated, verifyErr := scanner.BrewOutdatedSet(ctx)
+	stillOutdated, verifyErr := brewVerifyAfterUpgrade(ctx)
 
 	results := make([]*Result, len(items))
 	if verifyErr != nil {
@@ -195,7 +196,7 @@ func upgradeMASApp(ctx context.Context, item *model.Item, opts Options) *Result 
 
 	err := cmd.Run()
 	output := stdout.String() + stderr.String()
-	stillOutdated := masStillOutdated(ctx, item)
+	stillOutdated := masStillOutdatedWithRetry(ctx, item)
 
 	result := &Result{Item: item, Output: output}
 	if err == nil && !stillOutdated {
@@ -255,6 +256,46 @@ func masOutdatedEntries(ctx context.Context) []masOutdatedEntry {
 		entries = append(entries, masOutdatedEntry{id: parts[0], name: name})
 	}
 	return entries
+}
+
+func brewVerifyAfterUpgrade(ctx context.Context) (map[string]struct{}, error) {
+	delays := []time.Duration{0, 2 * time.Second, 5 * time.Second}
+	var lastErr error
+	for _, d := range delays {
+		if d > 0 {
+			select {
+			case <-ctx.Done():
+				if lastErr != nil {
+					return nil, lastErr
+				}
+				return scanner.BrewOutdatedSet(ctx)
+			case <-time.After(d):
+			}
+		}
+		set, err := scanner.BrewOutdatedSet(ctx)
+		if err == nil {
+			return set, nil
+		}
+		lastErr = err
+	}
+	return nil, lastErr
+}
+
+func masStillOutdatedWithRetry(ctx context.Context, item *model.Item) bool {
+	delays := []time.Duration{0, 3 * time.Second, 8 * time.Second}
+	for _, d := range delays {
+		if d > 0 {
+			select {
+			case <-ctx.Done():
+				return masStillOutdated(ctx, item)
+			case <-time.After(d):
+			}
+		}
+		if !masStillOutdated(ctx, item) {
+			return false
+		}
+	}
+	return true
 }
 
 func masStillOutdated(ctx context.Context, item *model.Item) bool {

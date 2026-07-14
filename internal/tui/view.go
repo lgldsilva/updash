@@ -136,13 +136,30 @@ func (s *State) renderUpdatesTab() string {
 			continue
 		}
 
-		// Category header with LIVE progress (reads item statuses, not static counts)
+		// Category header with live progress (reads item statuses, not static counts)
 		catLine := s.renderCategoryHeader(summary)
 		b.WriteString(catLine)
 		b.WriteString("\n")
 
-		// Items
+		if !hasUpdateItems(summary) {
+			if summary.Category == model.CatAgent && summary.Total > 0 {
+				b.WriteString(s.formatRow(
+					joinRow(
+						lipgloss.NewStyle().Render("  "),
+						ItemOKStyle.Render(fmt.Sprintf("✓ %d installed, up to date", summary.Total)),
+					),
+					flatIdx,
+				))
+				b.WriteString("\n")
+			}
+			continue
+		}
+
+		// Items (only actionable — matches CurrentItems() / cursor)
 		for _, item := range summary.Items {
+			if !isUpdateNavigable(item.Status) {
+				continue
+			}
 			prefix := "  "
 			sel := ""
 
@@ -340,24 +357,17 @@ func computeCategoryProgress(items []*model.Item) categoryProgress {
 }
 
 // renderCategoryHeader builds the progress header for a summary category.
-// When an update is in progress it reads live item statuses instead of static
-// summary counts, so the user sees "⟳ 3 updating" instead of stale "3 outdated".
+// Always reads live item statuses so counts stay accurate after updates/rescans.
 func (s *State) renderCategoryHeader(summary *model.SourceSummary) string {
+	prog := computeCategoryProgress(summary.Items)
 	total := summary.Total
-	done := total - summary.Outdated - summary.ErrorCount
-	updating := 0
-	outdated := summary.Outdated
-
-	errors := 0
-
-	// Live counts during update operations
-	if s.Updating {
-		prog := computeCategoryProgress(summary.Items)
-		done = prog.ok + prog.done
-		outdated = prog.outdated
-		updating = prog.updating
-		errors = prog.errors
+	if total == 0 {
+		total = len(summary.Items)
 	}
+	done := prog.ok + prog.done
+	outdated := prog.outdated
+	updating := prog.updating
+	errors := prog.errors
 
 	parts := []string{
 		CatLabelStyle.Render(fmt.Sprintf(" %s %s  ", summary.Icon, summary.Label)),
