@@ -21,8 +21,7 @@ func (s *AptSource) Scan(ctx context.Context, plat model.PlatformInfo) ([]*model
 	_ = update.Run() // ignore errors, proceed anyway
 
 	// List upgradable packages
-	cmd := exec.CommandContext(ctx, "apt", "list", "--upgradable", "-q")
-	out, err := cmd.Output()
+	out, err := execCommand(ctx, "apt", "list", "--upgradable", "-q")
 	if err != nil {
 		return []*model.Item{
 			{Name: "apt", Category: model.CatApt, Status: model.StatusError, CurrentVer: "error"},

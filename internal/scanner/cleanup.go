@@ -36,8 +36,7 @@ func (s *BrewCleanSource) Scan(ctx context.Context, plat model.PlatformInfo) ([]
 	}
 
 	// Get size
-	sizeCmd := exec.CommandContext(ctx, "du", "-sh", cacheDir)
-	sizeOut, _ := sizeCmd.Output()
+	sizeOut, _ := execCommand(ctx, "du", "-sh", cacheDir)
 	size := strings.TrimSpace(strings.Fields(string(sizeOut))[0])
 
 	return []*model.Item{
@@ -60,8 +59,7 @@ func (s *AptCleanSource) Label() string            { return "apt Cache" }
 func (s *AptCleanSource) Icon() string             { return "🧹" }
 
 func (s *AptCleanSource) Scan(ctx context.Context, plat model.PlatformInfo) ([]*model.Item, error) {
-	cmd := exec.CommandContext(ctx, "du", "-sh", "/var/cache/apt")
-	out, err := cmd.Output()
+	out, err := execCommand(ctx, "du", "-sh", "/var/cache/apt")
 	if err != nil {
 		return []*model.Item{
 			{Name: "apt-cache", Category: model.CatCache, Status: model.StatusOK, CurrentVer: "no cache"},
@@ -88,8 +86,7 @@ func (s *DockerCleanSource) Label() string            { return "Docker Cleanup" 
 func (s *DockerCleanSource) Icon() string             { return "🧹" }
 
 func (s *DockerCleanSource) Scan(ctx context.Context, plat model.PlatformInfo) ([]*model.Item, error) {
-	cmd := exec.CommandContext(ctx, "docker", "system", "df", "--format", "{{.Type}}\t{{.Size}}\t{{.Reclaimable}}")
-	out, err := cmd.Output()
+	out, err := execCommand(ctx, "docker", "system", "df", "--format", "{{.Type}}\t{{.Size}}\t{{.Reclaimable}}")
 	if err != nil {
 		return []*model.Item{
 			{Name: "docker", Category: model.CatDockerClean, Status: model.StatusOK, CurrentVer: "daemon not running"},
@@ -134,8 +131,7 @@ func (s *GoCleanSource) Label() string            { return "Go Cache" }
 func (s *GoCleanSource) Icon() string             { return "🧹" }
 
 func (s *GoCleanSource) Scan(ctx context.Context, plat model.PlatformInfo) ([]*model.Item, error) {
-	cmd := exec.CommandContext(ctx, "go", "env", "GOCACHE")
-	out, err := cmd.Output()
+	out, err := execCommand(ctx, "go", "env", "GOCACHE")
 	if err != nil {
 		return []*model.Item{
 			{Name: "go-cache", Category: model.CatCache, Status: model.StatusOK, CurrentVer: "error"},
@@ -143,8 +139,7 @@ func (s *GoCleanSource) Scan(ctx context.Context, plat model.PlatformInfo) ([]*m
 	}
 	cacheDir := strings.TrimSpace(string(out))
 
-	sizeCmd := exec.CommandContext(ctx, "du", "-sh", cacheDir)
-	sizeOut, err := sizeCmd.Output()
+	sizeOut, err := execCommand(ctx, "du", "-sh", cacheDir)
 	if err != nil {
 		return []*model.Item{
 			{Name: "go-cache", Category: model.CatCache, Status: model.StatusOK, CurrentVer: "no cache"},
@@ -181,8 +176,7 @@ func (s *NpmCleanSource) Scan(ctx context.Context, plat model.PlatformInfo) ([]*
 		}, nil
 	}
 
-	sizeCmd := exec.CommandContext(ctx, "du", "-sh", cacheDir)
-	out, err := sizeCmd.Output()
+	out, err := execCommand(ctx, "du", "-sh", cacheDir)
 	if err != nil {
 		return []*model.Item{
 			{Name: "npm-cache", Category: model.CatCache, Status: model.StatusOK, CurrentVer: "no cache"},
@@ -317,8 +311,7 @@ func (s *WindowsTempSource) Label() string            { return "Windows TEMP" }
 func (s *WindowsTempSource) Icon() string             { return "🧹" }
 
 func (s *WindowsTempSource) Scan(ctx context.Context, plat model.PlatformInfo) ([]*model.Item, error) {
-	cmd := exec.CommandContext(ctx, "cmd", "/c", "dir %TEMP% /s /a:-d /w 2>nul | findstr /b \"Total\"")
-	out, err := cmd.Output()
+	out, err := execCommand(ctx, "cmd", "/c", "dir %TEMP% /s /a:-d /w 2>nul | findstr /b \"Total\"")
 	if err != nil {
 		return []*model.Item{
 			{Name: "win-temp", Category: model.CatCache, Status: model.StatusOK, CurrentVer: "unable to scan"},

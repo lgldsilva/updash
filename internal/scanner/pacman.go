@@ -2,7 +2,6 @@ package scanner
 
 import (
 	"context"
-	"os/exec"
 	"strings"
 
 	"github.com/lgldsilva/updash/internal/model"
@@ -25,8 +24,7 @@ func (s *PacmanSource) Scan(ctx context.Context, plat model.PlatformInfo) ([]*mo
 
 func (s *PacmanSource) scanYay(ctx context.Context) ([]*model.Item, error) {
 	// yay -Qua: list AUR + repo updates
-	cmd := exec.CommandContext(ctx, "yay", "-Qua")
-	out, err := cmd.Output()
+	out, err := execCommand(ctx, "yay", "-Qua")
 	if err != nil {
 		return []*model.Item{
 			{Name: "yay", Category: model.CatPacman, Status: model.StatusError, CurrentVer: "error"},
@@ -86,8 +84,7 @@ func (s *PacmanSource) scanYay(ctx context.Context) ([]*model.Item, error) {
 
 func (s *PacmanSource) scanPacman(ctx context.Context) ([]*model.Item, error) {
 	// pacman -Qu: list repo updates
-	cmd := exec.CommandContext(ctx, "pacman", "-Qu")
-	out, err := cmd.Output()
+	out, err := execCommand(ctx, "pacman", "-Qu")
 	if err != nil {
 		return []*model.Item{
 			{Name: "pacman", Category: model.CatPacman, Status: model.StatusError, CurrentVer: "error"},

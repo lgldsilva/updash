@@ -3,7 +3,6 @@ package scanner
 import (
 	"context"
 	"encoding/json"
-	"os/exec"
 
 	"github.com/lgldsilva/updash/internal/model"
 )
@@ -16,8 +15,7 @@ func (s *NpmSource) Label() string            { return "npm (global)" }
 func (s *NpmSource) Icon() string             { return "⬡" }
 
 func (s *NpmSource) Scan(ctx context.Context, plat model.PlatformInfo) ([]*model.Item, error) {
-	cmd := exec.CommandContext(ctx, "npm", "outdated", "-g", "--json")
-	out, err := cmd.Output()
+	out, err := execCommand(ctx, "npm", "outdated", "-g", "--json")
 	if err != nil {
 		// npm outdated returns exit code 1 when there are outdated packages
 		// but still outputs valid JSON

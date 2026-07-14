@@ -3,7 +3,6 @@ package scanner
 import (
 	"context"
 	"encoding/json"
-	"os/exec"
 	"strings"
 
 	"github.com/lgldsilva/updash/internal/model"
@@ -29,8 +28,7 @@ type wingetPkg struct {
 }
 
 func (s *WingetSource) Scan(ctx context.Context, plat model.PlatformInfo) ([]*model.Item, error) {
-	cmd := exec.CommandContext(ctx, "winget", "upgrade", "--json")
-	out, err := cmd.Output()
+	out, err := execCommand(ctx, "winget", "upgrade", "--json")
 	if err != nil {
 		// winget may exit non-zero when there are upgrades
 		if len(out) == 0 {
@@ -81,8 +79,7 @@ func (s *WingetSource) Scan(ctx context.Context, plat model.PlatformInfo) ([]*mo
 
 // scanWingetText parses `winget upgrade` text output as fallback.
 func scanWingetText(ctx context.Context) ([]*model.Item, error) {
-	cmd := exec.CommandContext(ctx, "winget", "upgrade")
-	out, err := cmd.Output()
+	out, err := execCommand(ctx, "winget", "upgrade")
 	if err != nil {
 		return []*model.Item{
 			{Name: "winget", Category: model.CatWinget, Status: model.StatusOK, CurrentVer: "up to date"},

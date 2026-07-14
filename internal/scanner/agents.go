@@ -84,8 +84,7 @@ func (s *AgentSource) Scan(ctx context.Context, plat model.PlatformInfo) ([]*mod
 		}
 
 		if len(a.verCmd) > 0 {
-			cmd := exec.CommandContext(ctx, a.verCmd[0], a.verCmd[1:]...)
-			out, err := cmd.Output()
+			out, err := execCommand(ctx, a.verCmd[0], a.verCmd[1:]...)
 			if err == nil {
 				it.CurrentVer = parseAgentVersion(string(out))
 			} else {
@@ -143,8 +142,7 @@ func (s *AIInfraSource) Scan(ctx context.Context, plat model.PlatformInfo) ([]*m
 		}
 
 		if len(t.verCmd) > 0 {
-			cmd := exec.CommandContext(ctx, t.verCmd[0], t.verCmd[1:]...)
-			out, err := cmd.Output()
+			out, err := execCommand(ctx, t.verCmd[0], t.verCmd[1:]...)
 			if err == nil {
 				v := strings.TrimSpace(string(out))
 				if len(v) > 60 {

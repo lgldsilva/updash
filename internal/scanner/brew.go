@@ -3,7 +3,6 @@ package scanner
 import (
 	"context"
 	"encoding/json"
-	"os/exec"
 
 	"github.com/lgldsilva/updash/internal/model"
 )
@@ -49,8 +48,7 @@ type brewPkg struct {
 }
 
 func (s *BrewSource) Scan(ctx context.Context, plat model.PlatformInfo) ([]*model.Item, error) {
-	cmd := exec.CommandContext(ctx, "brew", "outdated", "--greedy", "--json=v2")
-	out, err := cmd.Output()
+	out, err := execCommand(ctx, "brew", "outdated", "--greedy", "--json=v2")
 	if err != nil {
 		return []*model.Item{
 			{Name: "brew", Category: model.CatBrew, Status: model.StatusError, CurrentVer: "error checking"},

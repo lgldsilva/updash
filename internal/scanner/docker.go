@@ -2,7 +2,6 @@ package scanner
 
 import (
 	"context"
-	"os/exec"
 	"strings"
 
 	"github.com/lgldsilva/updash/internal/model"
@@ -17,8 +16,7 @@ func (s *DockerSource) Icon() string             { return "🐳" }
 
 func (s *DockerSource) Scan(ctx context.Context, plat model.PlatformInfo) ([]*model.Item, error) {
 	// Check if docker daemon is running
-	infoCmd := exec.CommandContext(ctx, "docker", "info", "--format", "{{.ServerVersion}}")
-	_, err := infoCmd.Output()
+	_, err := execCommand(ctx, "docker", "info", "--format", "{{.ServerVersion}}")
 	if err != nil {
 		return []*model.Item{
 			{Name: "docker", Category: model.CatDocker, Status: model.StatusOK, CurrentVer: "daemon not running"},
@@ -26,8 +24,7 @@ func (s *DockerSource) Scan(ctx context.Context, plat model.PlatformInfo) ([]*mo
 	}
 
 	// Check disk usage
-	dfCmd := exec.CommandContext(ctx, "docker", "system", "df")
-	dfOut, err := dfCmd.Output()
+	dfOut, err := execCommand(ctx, "docker", "system", "df")
 	if err != nil {
 		return []*model.Item{
 			{Name: "docker", Category: model.CatDocker, Status: model.StatusOK, CurrentVer: "up to date"},

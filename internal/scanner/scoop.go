@@ -2,7 +2,6 @@ package scanner
 
 import (
 	"context"
-	"os/exec"
 	"strings"
 
 	"github.com/lgldsilva/updash/internal/model"
@@ -17,8 +16,7 @@ func (s *ScoopSource) Icon() string             { return "🪣" }
 
 func (s *ScoopSource) Scan(ctx context.Context, plat model.PlatformInfo) ([]*model.Item, error) {
 	// scoop status shows outdated packages
-	cmd := exec.CommandContext(ctx, "scoop", "status")
-	out, err := cmd.Output()
+	out, err := execCommand(ctx, "scoop", "status")
 	if err != nil {
 		return []*model.Item{
 			{Name: "scoop", Category: model.CatScoop, Status: model.StatusError, CurrentVer: "error"},

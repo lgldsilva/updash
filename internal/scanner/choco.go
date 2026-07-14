@@ -2,7 +2,6 @@ package scanner
 
 import (
 	"context"
-	"os/exec"
 	"strings"
 
 	"github.com/lgldsilva/updash/internal/model"
@@ -17,8 +16,7 @@ func (s *ChocoSource) Icon() string             { return "🍫" }
 
 func (s *ChocoSource) Scan(ctx context.Context, plat model.PlatformInfo) ([]*model.Item, error) {
 	// choco outdated returns a list of outdated packages
-	cmd := exec.CommandContext(ctx, "choco", "outdated", "--no-color", "--limit-output")
-	out, err := cmd.Output()
+	out, err := execCommand(ctx, "choco", "outdated", "--no-color", "--limit-output")
 	if err != nil {
 		return []*model.Item{
 			{Name: "choco", Category: model.CatChoco, Status: model.StatusError, CurrentVer: "error"},
