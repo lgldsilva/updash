@@ -11,6 +11,12 @@ const (
 	CatPacman      Category = "pacman"
 	CatFlatpak     Category = "flatpak"
 	CatSnap        Category = "snap"
+
+	// Windows package managers
+	CatWinget      Category = "winget"
+	CatChoco       Category = "choco"
+	CatScoop       Category = "scoop"
+
 	CatNpm         Category = "npm"
 	CatPipx        Category = "pipx"
 	CatGo          Category = "go"
@@ -128,11 +134,19 @@ type PlatformInfo struct {
 	Distro      string // "ubuntu", "manjaro", "macos"
 	HasBrew     bool
 	HasMAS      bool
+
+	// Linux package managers
 	HasApt      bool
 	HasPacman   bool
 	HasYay      bool
 	HasFlatpak  bool
 	HasSnap     bool
+
+	// Windows package managers
+	HasWinget   bool
+	HasChoco    bool
+	HasScoop    bool
+
 	HasNpm      bool
 	HasPipx     bool
 	HasGo       bool

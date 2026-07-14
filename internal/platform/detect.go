@@ -16,54 +16,26 @@ func Detect() model.PlatformInfo {
 		OS: runtime.GOOS,
 	}
 
-	// Distro detection
 	switch p.OS {
 	case "darwin":
 		p.Distro = "macos"
-		if has("sw_vers") {
-			if b, err := exec.Command("sw_vers", "-productName").Output(); err == nil {
-				v := strings.TrimSpace(string(b))
-				if strings.Contains(v, "macOS") || strings.Contains(v, "Mac OS") {
-					p.Distro = "macos"
-				}
-			}
-		}
-	case "linux":
-		if b, err := os.ReadFile("/etc/os-release"); err == nil {
-			content := string(b)
-			switch {
-			case strings.Contains(content, "ID=ubuntu"), strings.Contains(content, "ID_LIKE=ubuntu"):
-				p.Distro = "ubuntu"
-			case strings.Contains(content, "ID=manjaro"):
-				p.Distro = "manjaro"
-			case strings.Contains(content, "ID=arch"), strings.Contains(content, "ID_LIKE=arch"):
-				p.Distro = "arch"
-			case strings.Contains(content, "ID=debian"), strings.Contains(content, "ID_LIKE=debian"):
-				p.Distro = "debian"
-			case strings.Contains(content, "ID=fedora"):
-				p.Distro = "fedora"
-			default:
-				p.Distro = "linux"
-			}
-		} else if b, err := os.ReadFile("/etc/lsb-release"); err == nil {
-			if strings.Contains(string(b), "Ubuntu") {
-				p.Distro = "ubuntu"
-			}
-		}
-	}
-
-	// Package manager probes (order: platform-specific first)
-	if p.OS == "darwin" {
 		p.HasBrew = has("brew")
 		p.HasMAS = has("mas")
-	}
-	if p.OS == "linux" {
+
+	case "linux":
+		detectLinuxDistro(&p)
 		p.HasApt = has("apt-get")
 		p.HasPacman = has("pacman")
 		p.HasYay = has("yay")
 		p.HasFlatpak = has("flatpak")
 		p.HasSnap = has("snap")
-		p.HasBrew = has("brew") // brew can be on Linux too
+		p.HasBrew = has("brew")
+
+	case "windows":
+		p.Distro = "windows"
+		p.HasWinget = has("winget")
+		p.HasChoco = has("choco")
+		p.HasScoop = has("scoop")
 	}
 
 	// Cross-platform tools
@@ -74,16 +46,54 @@ func Detect() model.PlatformInfo {
 	p.HasRustup = has("rustup")
 	p.HasCargo = has("cargo")
 
-	// SDKMAN
+	// SDKMAN (Linux/macOS)
 	if _, err := os.Stat(os.ExpandEnv("$HOME/.sdkman/bin/sdkman-init.sh")); err == nil {
 		p.HasSDKMAN = true
 	}
 
+	// If HOME is not set, try USERPROFILE (Windows)
+	if p.OS == "windows" {
+		home := os.Getenv("USERPROFILE")
+		if _, err := os.Stat(home + "\\.sdkman\\bin\\sdkman-init.sh"); err == nil {
+			p.HasSDKMAN = true
+		}
+	}
+
 	p.HasDocker = has("docker")
-	p.HasNvm = has("nvm") || dirExists(os.ExpandEnv("$HOME/.nvm"))
+	p.HasNvm = dirExists(os.ExpandEnv("$HOME/.nvm"))
 	p.HasOmz = dirExists(os.ExpandEnv("$HOME/.oh-my-zsh"))
 
+	// Windows: also check USERPROFILE for nvm-windows
+	if p.OS == "windows" && !p.HasNvm {
+		home := os.Getenv("USERPROFILE")
+		p.HasNvm = dirExists(home + "\\AppData\\Roaming\\nvm")
+	}
+
 	return p
+}
+
+func detectLinuxDistro(p *model.PlatformInfo) {
+	if b, err := os.ReadFile("/etc/os-release"); err == nil {
+		content := string(b)
+		switch {
+		case strings.Contains(content, "ID=ubuntu"), strings.Contains(content, "ID_LIKE=ubuntu"):
+			p.Distro = "ubuntu"
+		case strings.Contains(content, "ID=manjaro"):
+			p.Distro = "manjaro"
+		case strings.Contains(content, "ID=arch"), strings.Contains(content, "ID_LIKE=arch"):
+			p.Distro = "arch"
+		case strings.Contains(content, "ID=debian"), strings.Contains(content, "ID_LIKE=debian"):
+			p.Distro = "debian"
+		case strings.Contains(content, "ID=fedora"):
+			p.Distro = "fedora"
+		default:
+			p.Distro = "linux"
+		}
+	} else if b, err := os.ReadFile("/etc/lsb-release"); err == nil {
+		if strings.Contains(string(b), "Ubuntu") {
+			p.Distro = "ubuntu"
+		}
+	}
 }
 
 // has checks if a command exists in PATH.

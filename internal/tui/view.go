@@ -35,9 +35,14 @@ func (s *State) Render() string {
 }
 
 func (s *State) renderTitle() string {
-	plat := strings.ToUpper(s.Platform.Distro)
-	if s.Platform.OS == "darwin" {
+	plat := ""
+	switch s.Platform.OS {
+	case "darwin":
 		plat = "macOS"
+	case "windows":
+		plat = "Windows"
+	default:
+		plat = strings.ToUpper(s.Platform.Distro)
 	}
 	return TitleStyle.Render(fmt.Sprintf(" updash — %s", plat))
 }

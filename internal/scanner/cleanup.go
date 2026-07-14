@@ -308,3 +308,35 @@ func (s *VSCodeCleanSource) Scan(ctx context.Context, plat model.PlatformInfo) (
 
 	return items, nil
 }
+
+// WindowsTempSource scans Windows temporary files for cleanup.
+type WindowsTempSource struct{}
+
+func (s *WindowsTempSource) Category() model.Category { return model.CatCache }
+func (s *WindowsTempSource) Label() string            { return "Windows TEMP" }
+func (s *WindowsTempSource) Icon() string             { return "🧹" }
+
+func (s *WindowsTempSource) Scan(ctx context.Context, plat model.PlatformInfo) ([]*model.Item, error) {
+	cmd := exec.CommandContext(ctx, "cmd", "/c", "dir %TEMP% /s /a:-d /w 2>nul | findstr /b \"Total\"")
+	out, err := cmd.Output()
+	if err != nil {
+		return []*model.Item{
+			{Name: "win-temp", Category: model.CatCache, Status: model.StatusOK, CurrentVer: "unable to scan"},
+		}, nil
+	}
+
+	size := strings.TrimSpace(string(out))
+	if size == "" {
+		size = "?"
+	}
+
+	return []*model.Item{
+		{
+			Name:        "win-temp",
+			Category:    model.CatCache,
+			CurrentVer:  size + " (TEMP)",
+			Status:      model.StatusCleanCandidate,
+			Reclaimable: size,
+		},
+	}, nil
+}
