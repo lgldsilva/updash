@@ -154,9 +154,9 @@ func fetchLatestFromList(ctx context.Context, hc *http.Client, url, token string
 		return "", err
 	}
 	var releases []struct {
-		TagName string `json:"tag_name"`
-		Draft   bool   `json:"draft"`
-		Prerelease bool `json:"prerelease"`
+		TagName    string `json:"tag_name"`
+		Draft      bool   `json:"draft"`
+		Prerelease bool   `json:"prerelease"`
 	}
 	if err := json.Unmarshal(body, &releases); err != nil {
 		return "", fmt.Errorf("parse release list: %w", err)
@@ -368,7 +368,8 @@ func sameVersion(current, tag string) bool {
 	if current == "" || tag == "" {
 		return false
 	}
-	// Strip leading 'v' from tag for comparison
+	// Strip leading 'v' from both for comparison
+	current = strings.TrimPrefix(current, "v")
 	tag = strings.TrimPrefix(tag, "v")
 	return current == tag
 }
