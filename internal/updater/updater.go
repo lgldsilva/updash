@@ -4,6 +4,7 @@ package updater
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"os/exec"
 	"sort"
@@ -100,35 +101,23 @@ func batchSequential(ctx context.Context, items []*model.Item, opts Options) []*
 	return results
 }
 
-// batchBrewUpgrade upgrades only the selected brew packages (never the whole cellar).
-// A bare "brew upgrade --greedy" would also touch excluded casks still on the system
-// (e.g. microsoft-office) and hang waiting for an admin password without a TTY.
+// batchBrewUpgrade upgrades each selected brew package individually and diagnoses failures.
+// Never runs a bare "brew upgrade --greedy" (that would touch unrelated outdated casks).
 func batchBrewUpgrade(ctx context.Context, items []*model.Item, opts Options) []*Result {
 	results := make([]*Result, len(items))
-	var upgradeNames []string
-	var upgradeIdx []int
-
 	for i, it := range items {
-		if scanner.BrewIsManagedExternally(it.Name) {
-			results[i] = &Result{
-				Item:    it,
-				Success: false,
-				Error:   "skipped — managed outside brew (Toolbox, App Store, or Microsoft installer needs admin password)",
-			}
-			it.Status = model.StatusOutdated
-			continue
-		}
-		it.Status = model.StatusUpdating
-		upgradeNames = append(upgradeNames, it.Name)
-		upgradeIdx = append(upgradeIdx, i)
+		results[i] = upgradeOneBrew(ctx, it, opts)
 	}
+	return results
+}
 
-	if len(upgradeNames) == 0 {
-		return results
-	}
+func upgradeOneBrew(ctx context.Context, item *model.Item, opts Options) *Result {
+	item.Status = model.StatusUpdating
 
-	args := append([]string{"upgrade", "--greedy"}, upgradeNames...)
-	cmd := exec.CommandContext(ctx, "brew", args...)
+	itemCtx, cancel := context.WithTimeout(ctx, BrewItemTimeout(item.Name))
+	defer cancel()
+
+	cmd := exec.CommandContext(itemCtx, "brew", "upgrade", "--greedy", item.Name)
 	var stdout, stderr bytes.Buffer
 	if opts.Output != nil {
 		opts.ConfigureCmd(cmd)
@@ -138,38 +127,43 @@ func batchBrewUpgrade(ctx context.Context, items []*model.Item, opts Options) []
 		cmd.Stdout = &stdout
 		cmd.Stderr = &stderr
 	}
-	_ = cmd.Run() // ignore exit code — we verify results below
 
+	runErr := cmd.Run()
 	output := stdout.String() + stderr.String()
+	timedOut := errors.Is(itemCtx.Err(), context.DeadlineExceeded)
 
 	stillOutdated, verifyErr := brewVerifyAfterUpgrade(ctx)
-
 	if verifyErr != nil {
 		msg := fmt.Sprintf("could not verify brew upgrade: %v", verifyErr)
-		for _, i := range upgradeIdx {
-			it := items[i]
-			results[i] = &Result{Item: it, Success: false, Error: msg, Output: output}
-			it.Status = model.StatusError
-		}
-		return results
+		item.Status = model.StatusError
+		item.Log = output
+		return &Result{Item: item, Success: false, Error: msg, Output: output}
 	}
 
-	for _, i := range upgradeIdx {
-		it := items[i]
-		_, still := stillOutdated[it.Name]
-		results[i] = &Result{Item: it, Output: output}
-		if !still {
-			results[i].Success = true
-			it.Status = model.StatusOK
-			it.AvailableVer = ""
-		} else {
-			results[i].Success = false
-			results[i].Error = "still outdated after brew upgrade (may need manual fix, Toolbox, or App Store)"
-			it.Status = model.StatusOutdated
-		}
+	_, still := stillOutdated[item.Name]
+	result := &Result{Item: item, Output: output}
+
+	if !still && runErr == nil {
+		result.Success = true
+		item.Status = model.StatusOK
+		item.AvailableVer = ""
+		item.Log = output
+		return result
 	}
 
-	return results
+	result.Success = false
+	result.Error = explainBrewUpgradeFailure(item.Name, output, runErr, timedOut)
+	item.Status = model.StatusError
+	item.CurrentVer = truncatePlainDiagnosis(result.Error)
+	item.Log = output
+	return result
+}
+
+func truncatePlainDiagnosis(msg string) string {
+	if len(msg) <= 72 {
+		return msg
+	}
+	return msg[:72] + "…"
 }
 
 // batchMASUpgrade updates each MAS app individually and verifies via mas outdated.
