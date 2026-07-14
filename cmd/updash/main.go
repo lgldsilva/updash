@@ -241,7 +241,8 @@ func (m *bubbleModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			msg.Success, msg.Failed, msg.Total)
 		m.state.AddLog(fmt.Sprintf("Update complete: %d ok, %d failed of %d",
 			msg.Success, msg.Failed, msg.Total), msg.Failed == 0)
-		return m, nil
+		m.state.ClampCursor()
+		return m, tui.TickCmd()
 
 	case tui.CleanBatchDoneMsg:
 		m.state.CleanDone = msg.Done

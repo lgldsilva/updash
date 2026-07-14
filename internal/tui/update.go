@@ -337,6 +337,9 @@ func (s *State) startUpdateAll(items []*model.Item, program *tea.Program) tea.Cm
 				Done:    done,
 				Total:   total,
 			})
+
+			// Refresh this category from the system so the list matches reality.
+			s.rescanCategory(cmdCtx, program, group.category, false)
 		}
 	}()
 
@@ -497,6 +500,8 @@ func (s *State) startCleanSelected(items []*model.Item, program *tea.Program) te
 				Done:    i + 1,
 				Total:   total,
 			})
+
+			s.rescanCategory(cmdCtx, program, it.Category, true)
 		}
 
 	}()

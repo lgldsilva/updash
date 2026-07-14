@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	"sort"
 	"sync"
 	"time"
@@ -85,4 +86,24 @@ func (s *State) startScan() tea.Cmd {
 	}()
 
 	return TickCmd()
+}
+
+// rescanCategory re-probes one package manager and pushes fresh summary to the TUI.
+func (s *State) rescanCategory(ctx context.Context, program *tea.Program, cat model.Category, cleanup bool) {
+	if program == nil {
+		return
+	}
+	for _, src := range scanner.EnabledSources(s.Platform, cleanup || scanner.IsCleanupCategory(cat)) {
+		if src.Category() != cat {
+			continue
+		}
+		if cleanup != scanner.IsCleanupCategory(src.Category()) {
+			continue
+		}
+		summary := scanner.ScanSource(ctx, src, s.Platform)
+		program.Send(ScanSourceDoneMsg{
+			Summary:   summary,
+			IsCleanup: scanner.IsCleanupCategory(summary.Category),
+		})
+	}
 }
