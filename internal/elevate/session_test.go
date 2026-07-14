@@ -7,6 +7,9 @@ import (
 
 func TestEnsureSudoReady_NoSession(t *testing.T) {
 	ctx := context.Background()
+	if CanElevateWithoutPassword(ctx) {
+		t.Skip("passwordless sudo available on this host")
+	}
 	if err := EnsureSudoReady(ctx); err == nil {
 		t.Fatal("expected error without session")
 	}
