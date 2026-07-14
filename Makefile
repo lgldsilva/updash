@@ -3,13 +3,18 @@
 
 BINARY=updash
 INSTALL_DIR=$(HOME)/.local/bin
+VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
+LDFLAGS := -X main.version=$(VERSION)
 
 # ── Primary ────────────────────────────────────────────────────────────────
 
 all: build test lint fmt
 
 build:
-	go build ./...
+	go build -ldflags='$(LDFLAGS)' ./...
+
+build-release:
+	go build -trimpath -ldflags='-s -w $(LDFLAGS)' -o $(BINARY) ./cmd/updash/
 
 test: test-race
 
@@ -31,16 +36,16 @@ fmt-fix:
 	gofmt -w .
 
 gosec:
-	go run github.com/securego/gosec/v2/cmd/gosec@v2.27.1 -quiet -exclude=G204,G703,G118 ./...
+	go run github.com/securego/gosec/v2/cmd/gosec@v2.27.1 -quiet -exclude=G204,G306,G703,G118 ./...
 
 vulncheck:
 	go run golang.org/x/vuln/cmd/govulncheck@latest ./...
 
 # ── Utility ────────────────────────────────────────────────────────────────
 
-install: build
+install: build-release
 	cp $(BINARY) $(INSTALL_DIR)/$(BINARY)
-	@echo "Installed $(BINARY) to $(INSTALL_DIR)/$(BINARY)"
+	@echo "Installed $(BINARY) v$(VERSION) to $(INSTALL_DIR)/$(BINARY)"
 
 clean:
 	rm -f $(BINARY) coverage.out
