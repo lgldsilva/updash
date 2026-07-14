@@ -2,7 +2,6 @@ package scanner
 
 import (
 	"context"
-	"os/exec"
 	"strings"
 
 	"github.com/lgldsilva/updash/internal/model"
@@ -17,8 +16,7 @@ func (s *SnapSource) Icon() string             { return "📦" }
 
 func (s *SnapSource) Scan(ctx context.Context, plat model.PlatformInfo) ([]*model.Item, error) {
 	// snap refresh --list shows available updates
-	cmd := exec.CommandContext(ctx, "snap", "refresh", "--list")
-	out, err := cmd.Output()
+	out, err := execCommand(ctx, "snap", "refresh", "--list")
 	if err != nil {
 		return []*model.Item{
 			{Name: "snap", Category: model.CatSnap, Status: model.StatusError, CurrentVer: "error"},

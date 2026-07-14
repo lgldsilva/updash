@@ -3,7 +3,6 @@ package scanner
 import (
 	"context"
 	"encoding/json"
-	"os/exec"
 	"strings"
 
 	"github.com/lgldsilva/updash/internal/model"
@@ -18,8 +17,7 @@ func (s *PipxSource) Icon() string             { return "🐍" }
 
 func (s *PipxSource) Scan(ctx context.Context, plat model.PlatformInfo) ([]*model.Item, error) {
 	// pipx list --json gives installed packages with versions
-	cmd := exec.CommandContext(ctx, "pipx", "list", "--json")
-	out, err := cmd.Output()
+	out, err := execCommand(ctx, "pipx", "list", "--json")
 	if err != nil {
 		return []*model.Item{
 			{Name: "pipx", Category: model.CatPipx, Status: model.StatusError, CurrentVer: "error"},

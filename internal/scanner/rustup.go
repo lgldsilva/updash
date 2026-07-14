@@ -16,8 +16,7 @@ func (s *RustupSource) Label() string            { return "rustup" }
 func (s *RustupSource) Icon() string             { return "🦀" }
 
 func (s *RustupSource) Scan(ctx context.Context, plat model.PlatformInfo) ([]*model.Item, error) {
-	cmd := exec.CommandContext(ctx, "rustup", "check")
-	out, err := cmd.Output()
+	out, err := execCommand(ctx, "rustup", "check")
 	if err != nil {
 		return []*model.Item{
 			{Name: "rustup", Category: model.CatRustup, Status: model.StatusError, CurrentVer: "error"},

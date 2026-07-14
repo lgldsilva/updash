@@ -2,7 +2,6 @@ package scanner
 
 import (
 	"context"
-	"os/exec"
 	"strings"
 
 	"github.com/lgldsilva/updash/internal/model"
@@ -18,8 +17,7 @@ func (s *MASource) Icon() string             { return "📱" }
 func (s *MASource) Scan(ctx context.Context, plat model.PlatformInfo) ([]*model.Item, error) {
 	// mas list shows installed apps
 	// mas outdated shows available updates
-	cmd := exec.CommandContext(ctx, "mas", "outdated")
-	out, err := cmd.Output()
+	out, err := execCommand(ctx, "mas", "outdated")
 	if err != nil {
 		return []*model.Item{
 			{Name: "mas", Category: model.CatMAS, Status: model.StatusError, CurrentVer: "error"},

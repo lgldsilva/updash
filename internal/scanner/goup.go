@@ -2,7 +2,6 @@ package scanner
 
 import (
 	"context"
-	"os/exec"
 	"strings"
 
 	"github.com/lgldsilva/updash/internal/model"
@@ -22,8 +21,7 @@ func (s *GoSource) Scan(ctx context.Context, plat model.PlatformInfo) ([]*model.
 	}
 
 	// Otherwise, just list installed tools in GOPATH/bin
-	cmd := exec.CommandContext(ctx, "go", "env", "GOPATH")
-	gopathBytes, err := cmd.Output()
+	gopathBytes, err := execCommand(ctx, "go", "env", "GOPATH")
 	if err != nil {
 		return []*model.Item{
 			{Name: "go", Category: model.CatGo, Status: model.StatusError, CurrentVer: "error"},
@@ -32,8 +30,7 @@ func (s *GoSource) Scan(ctx context.Context, plat model.PlatformInfo) ([]*model.
 	gopath := strings.TrimSpace(string(gopathBytes))
 
 	// List Go binaries
-	lsCmd := exec.CommandContext(ctx, "ls", gopath+"/bin")
-	out, err := lsCmd.Output()
+	out, err := execCommand(ctx, "ls", gopath+"/bin")
 	if err != nil {
 		return []*model.Item{
 			{Name: "go", Category: model.CatGo, Status: model.StatusOK, CurrentVer: "up to date"},
@@ -60,8 +57,7 @@ func (s *GoSource) Scan(ctx context.Context, plat model.PlatformInfo) ([]*model.
 }
 
 func (s *GoSource) scanGup(ctx context.Context) ([]*model.Item, error) {
-	cmd := exec.CommandContext(ctx, "gup", "update", "--dry-run")
-	out, err := cmd.Output()
+	out, err := execCommand(ctx, "gup", "update", "--dry-run")
 	if err != nil {
 		return []*model.Item{
 			{Name: "go", Category: model.CatGo, Status: model.StatusOK, CurrentVer: "up to date"},

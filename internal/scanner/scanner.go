@@ -55,13 +55,13 @@ func RunAll(ctx context.Context, plat model.PlatformInfo, includeCleanup bool) [
 				case model.StatusError:
 					summary.ErrorCount++
 				}
-			if it.Reclaimable != "" && it.Reclaimable != "0 versions" {
-				if summary.Reclaimable != "" {
-					summary.Reclaimable += " + " + it.Reclaimable
-				} else {
-					summary.Reclaimable = it.Reclaimable
+				if it.Reclaimable != "" && it.Reclaimable != "0 versions" {
+					if summary.Reclaimable != "" {
+						summary.Reclaimable += " + " + it.Reclaimable
+					} else {
+						summary.Reclaimable = it.Reclaimable
+					}
 				}
-			}
 			}
 			mu.Lock()
 			results = append(results, summary)

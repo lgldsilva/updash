@@ -21,8 +21,8 @@ type State struct {
 	CleanItems []*model.SourceSummary
 
 	// Selection
-	Cursor      int // current cursor position across all items
-	TotalItems  int // total items across all sources
+	Cursor     int // current cursor position across all items
+	TotalItems int // total items across all sources
 
 	// Status
 	Scanning    bool

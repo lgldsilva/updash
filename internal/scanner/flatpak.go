@@ -2,7 +2,6 @@ package scanner
 
 import (
 	"context"
-	"os/exec"
 	"strings"
 
 	"github.com/lgldsilva/updash/internal/model"
@@ -16,8 +15,7 @@ func (s *FlatpakSource) Label() string            { return "Flatpak" }
 func (s *FlatpakSource) Icon() string             { return "📦" }
 
 func (s *FlatpakSource) Scan(ctx context.Context, plat model.PlatformInfo) ([]*model.Item, error) {
-	cmd := exec.CommandContext(ctx, "flatpak", "update", "--dry-run")
-	out, err := cmd.Output()
+	out, err := execCommand(ctx, "flatpak", "update", "--dry-run")
 	if err != nil {
 		return []*model.Item{
 			{Name: "flatpak", Category: model.CatFlatpak, Status: model.StatusError, CurrentVer: "error"},

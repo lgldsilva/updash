@@ -3,7 +3,6 @@ package scanner
 import (
 	"context"
 	"encoding/json"
-	"os/exec"
 
 	"github.com/lgldsilva/updash/internal/model"
 )
@@ -26,7 +25,7 @@ var externalCasks = map[string]bool{
 	// MAS apps that also have brew casks (prefer MAS)
 	"whatsapp": true,
 	// Microsoft apps needing sudo TTY
-	"microsoft-office": true,
+	"microsoft-office":      true,
 	"microsoft-auto-update": true,
 }
 
@@ -42,15 +41,14 @@ type brewOutdatedJSON struct {
 }
 
 type brewPkg struct {
-	Name             string   `json:"name"`
+	Name              string   `json:"name"`
 	InstalledVersions []string `json:"installed_versions"`
-	CurrentVersion   string   `json:"current_version"`
-	Pinned           bool     `json:"pinned"`
+	CurrentVersion    string   `json:"current_version"`
+	Pinned            bool     `json:"pinned"`
 }
 
 func (s *BrewSource) Scan(ctx context.Context, plat model.PlatformInfo) ([]*model.Item, error) {
-	cmd := exec.CommandContext(ctx, "brew", "outdated", "--greedy", "--json=v2")
-	out, err := cmd.Output()
+	out, err := execCommand(ctx, "brew", "outdated", "--greedy", "--json=v2")
 	if err != nil {
 		return []*model.Item{
 			{Name: "brew", Category: model.CatBrew, Status: model.StatusError, CurrentVer: "error checking"},

@@ -5,17 +5,17 @@ package model
 type Category string
 
 const (
-	CatBrew        Category = "brew"
-	CatMAS         Category = "mas"
-	CatApt         Category = "apt"
-	CatPacman      Category = "pacman"
-	CatFlatpak     Category = "flatpak"
-	CatSnap        Category = "snap"
+	CatBrew    Category = "brew"
+	CatMAS     Category = "mas"
+	CatApt     Category = "apt"
+	CatPacman  Category = "pacman"
+	CatFlatpak Category = "flatpak"
+	CatSnap    Category = "snap"
 
 	// Windows package managers
-	CatWinget      Category = "winget"
-	CatChoco       Category = "choco"
-	CatScoop       Category = "scoop"
+	CatWinget Category = "winget"
+	CatChoco  Category = "choco"
+	CatScoop  Category = "scoop"
 
 	CatNpm         Category = "npm"
 	CatPipx        Category = "pipx"
@@ -25,9 +25,9 @@ const (
 	CatSDKMAN      Category = "sdkman"
 	CatDocker      Category = "docker"
 	CatWatchtower  Category = "watchtower"
-	CatCloud       Category = "cloud"   // gcloud, etc.
-	CatAI          Category = "ai"      // ai-memory, semidx, ai-standards
-	CatAgent       Category = "agent"   // claude, opencode, grok, agy...
+	CatCloud       Category = "cloud" // gcloud, etc.
+	CatAI          Category = "ai"    // ai-memory, semidx, ai-standards
+	CatAgent       Category = "agent" // claude, opencode, grok, agy...
 	CatGHExt       Category = "gh-ext"
 	CatNvm         Category = "nvm"
 	CatOmz         Category = "oh-my-zsh"
@@ -41,15 +41,15 @@ const (
 type Status int
 
 const (
-	StatusPending  Status = iota // not yet checked
-	StatusOK                     // up to date
-	StatusOutdated               // update available
-	StatusError                  // check failed
-	StatusUpdating               // update in progress
-	StatusDone                   // updated successfully
-	StatusCleanCandidate         // remove candidate (cleanup)
-	StatusCleaning               // cleanup in progress
-	StatusCleaned                // cleaned successfully
+	StatusPending        Status = iota // not yet checked
+	StatusOK                           // up to date
+	StatusOutdated                     // update available
+	StatusError                        // check failed
+	StatusUpdating                     // update in progress
+	StatusDone                         // updated successfully
+	StatusCleanCandidate               // remove candidate (cleanup)
+	StatusCleaning                     // cleanup in progress
+	StatusCleaned                      // cleaned successfully
 )
 
 func (s Status) String() string {
@@ -79,24 +79,24 @@ func (s Status) String() string {
 
 // Item represents a single updatable/cleanable entity.
 type Item struct {
-	Name          string   // display name (e.g., "btop", "OpenCode")
-	Category      Category // group
-	CurrentVer    string   // installed version ("" if N/A)
-	AvailableVer  string   // version available ("" if up to date)
-	Status        Status
-	Selected      bool   // marked by user for action
-	Log           string // output from update/clean operation
+	Name         string   // display name (e.g., "btop", "OpenCode")
+	Category     Category // group
+	CurrentVer   string   // installed version ("" if N/A)
+	AvailableVer string   // version available ("" if up to date)
+	Status       Status
+	Selected     bool   // marked by user for action
+	Log          string // output from update/clean operation
 
 	// Cleanup-specific fields
-	Reclaimable  string // human-readable reclaimable info ("4 versões" / "13 GB")
-	KeepPolicy   string // retention policy ("keep latest per major")
-	RemoveCount  int    // number of items that would be removed
+	Reclaimable string // human-readable reclaimable info ("4 versões" / "13 GB")
+	KeepPolicy  string // retention policy ("keep latest per major")
+	RemoveCount int    // number of items that would be removed
 }
 
 // SourceSummary is the aggregated state for one category/source.
 type SourceSummary struct {
 	Category    Category
-	Label       string   // display name ("Homebrew", "SDKMAN", etc.)
+	Label       string // display name ("Homebrew", "SDKMAN", etc.)
 	Items       []*Item
 	Total       int
 	Outdated    int
@@ -130,33 +130,33 @@ func (t TabID) String() string {
 
 // PlatformInfo holds detected OS and available package managers.
 type PlatformInfo struct {
-	OS          string // "darwin", "linux"
-	Distro      string // "ubuntu", "manjaro", "macos"
-	HasBrew     bool
-	HasMAS      bool
+	OS      string // "darwin", "linux"
+	Distro  string // "ubuntu", "manjaro", "macos"
+	HasBrew bool
+	HasMAS  bool
 
 	// Linux package managers
-	HasApt      bool
-	HasPacman   bool
-	HasYay      bool
-	HasFlatpak  bool
-	HasSnap     bool
+	HasApt     bool
+	HasPacman  bool
+	HasYay     bool
+	HasFlatpak bool
+	HasSnap    bool
 
 	// Windows package managers
-	HasWinget   bool
-	HasChoco    bool
-	HasScoop    bool
+	HasWinget bool
+	HasChoco  bool
+	HasScoop  bool
 
-	HasNpm      bool
-	HasPipx     bool
-	HasGo       bool
-	HasGup      bool
-	HasRustup   bool
-	HasCargo    bool
-	HasSDKMAN   bool
-	HasDocker   bool
-	HasNvm      bool
-	HasOmz      bool
+	HasNpm    bool
+	HasPipx   bool
+	HasGo     bool
+	HasGup    bool
+	HasRustup bool
+	HasCargo  bool
+	HasSDKMAN bool
+	HasDocker bool
+	HasNvm    bool
+	HasOmz    bool
 }
 
 // GlobalLogEntry stores one line of the session log.
