@@ -11,6 +11,7 @@ import (
 
 	"github.com/lgldsilva/updash/internal/elevate"
 	"github.com/lgldsilva/updash/internal/model"
+	"github.com/lgldsilva/updash/internal/scanner"
 )
 
 // Result holds the outcome of an update operation.
@@ -122,48 +123,33 @@ func batchBrewUpgrade(ctx context.Context, items []*model.Item, opts Options) []
 
 	output := stdout.String() + stderr.String()
 
-	// Check what's still outdated after the upgrade
-	stillOutdated := brewOutdatedNames(ctx)
+	stillOutdated, verifyErr := scanner.BrewOutdatedSet(ctx)
 
 	results := make([]*Result, len(items))
-	for i, it := range items {
-		wasUpgraded := true
-		for _, name := range stillOutdated {
-			if name == it.Name {
-				wasUpgraded = false
-				break
-			}
+	if verifyErr != nil {
+		msg := fmt.Sprintf("could not verify brew upgrade: %v", verifyErr)
+		for i, it := range items {
+			results[i] = &Result{Item: it, Success: false, Error: msg, Output: output}
+			it.Status = model.StatusError
 		}
+		return results
+	}
 
+	for i, it := range items {
+		_, still := stillOutdated[it.Name]
 		results[i] = &Result{Item: it, Output: output}
-		if wasUpgraded {
+		if !still {
 			results[i].Success = true
-			it.Status = model.StatusDone
+			it.Status = model.StatusOK
+			it.AvailableVer = ""
 		} else {
 			results[i].Success = false
-			results[i].Error = "still outdated after brew upgrade (needs manual fix or Toolbox)"
-			it.Status = model.StatusError
+			results[i].Error = "still outdated after brew upgrade (may need manual fix, Toolbox, or App Store)"
+			it.Status = model.StatusOutdated
 		}
 	}
 
 	return results
-}
-
-// brewOutdatedNames returns the set of outdated brew packages after an upgrade.
-func brewOutdatedNames(ctx context.Context) []string {
-	out, err := exec.CommandContext(ctx, "brew", "outdated", "--greedy").Output()
-	if err != nil {
-		return nil
-	}
-	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
-	var names []string
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if line != "" {
-			names = append(names, line)
-		}
-	}
-	return names
 }
 
 // batchMASUpgrade updates each MAS app individually and verifies via mas outdated.
@@ -214,11 +200,16 @@ func upgradeMASApp(ctx context.Context, item *model.Item, opts Options) *Result 
 	result := &Result{Item: item, Output: output}
 	if err == nil && !stillOutdated {
 		result.Success = true
-		item.Status = model.StatusDone
+		item.Status = model.StatusOK
+		item.AvailableVer = ""
 		return result
 	}
 
-	item.Status = model.StatusError
+	if err == nil {
+		item.Status = model.StatusOutdated
+	} else {
+		item.Status = model.StatusError
+	}
 	result.Success = false
 	if err != nil {
 		stderrStr := strings.TrimSpace(stderr.String())
@@ -267,15 +258,28 @@ func masOutdatedEntries(ctx context.Context) []masOutdatedEntry {
 }
 
 func masStillOutdated(ctx context.Context, item *model.Item) bool {
+	wantName := normalizeMASName(item.Name)
 	for _, entry := range masOutdatedEntries(ctx) {
 		if item.PackageID != "" && entry.id == item.PackageID {
 			return true
 		}
-		if entry.name == item.Name {
+		if normalizeMASName(entry.name) == wantName {
 			return true
 		}
 	}
 	return false
+}
+
+// normalizeMASName strips invisible Unicode marks (e.g. RTL) from mas app names.
+func normalizeMASName(s string) string {
+	var b strings.Builder
+	for _, r := range strings.TrimSpace(s) {
+		if r == '\u200e' || r == '\u200f' || r == '\ufeff' {
+			continue
+		}
+		b.WriteRune(r)
+	}
+	return b.String()
 }
 
 // batchAptUpgrade runs apt-get dist-upgrade.

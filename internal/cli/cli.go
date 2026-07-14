@@ -147,6 +147,17 @@ func RunUpdate(ctx context.Context, cfg Config) (int, int, error) {
 	start := time.Now()
 	ok, fail := runUpdateBatches(ctx, plat, updates, items, opts)
 	fmt.Printf("\n⏱ update %s — %d ok, %d failed\n", time.Since(start).Round(time.Second), ok, fail)
+
+	fmt.Println("\n🔍 Verifying...")
+	updates2, _, _, _ := Scan(ctx)
+	remaining := countOutdated(updates2)
+	if remaining > 0 {
+		fmt.Printf("\n⚠ %d item(s) still outdated after update:\n", remaining)
+		PrintCheck(updates2, nil)
+	} else {
+		fmt.Println("✓ All updated items verified — nothing outdated remains")
+	}
+
 	if fail > 0 {
 		return ok, fail, fmt.Errorf("%d update(s) failed", fail)
 	}
@@ -295,6 +306,18 @@ func runUpdateBatches(ctx context.Context, plat model.PlatformInfo, summaries []
 		}
 	}
 	return ok, fail
+}
+
+func countOutdated(summaries []*model.SourceSummary) int {
+	n := 0
+	for _, s := range summaries {
+		for _, it := range s.Items {
+			if it.Status == model.StatusOutdated {
+				n++
+			}
+		}
+	}
+	return n
 }
 
 func collectOutdated(summaries []*model.SourceSummary, only string) []*model.Item {

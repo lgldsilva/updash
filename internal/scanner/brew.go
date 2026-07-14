@@ -102,3 +102,26 @@ func (s *BrewSource) Scan(ctx context.Context, plat model.PlatformInfo) ([]*mode
 
 	return items, nil
 }
+
+// BrewOutdatedSet returns outdated brew formula/cask names (same source as BrewSource scan).
+func BrewOutdatedSet(ctx context.Context) (map[string]struct{}, error) {
+	out, err := execCommand(ctx, "brew", "outdated", "--greedy", "--json=v2")
+	if err != nil {
+		return nil, err
+	}
+	var data brewOutdatedJSON
+	if err := json.Unmarshal(out, &data); err != nil {
+		return nil, err
+	}
+	set := make(map[string]struct{}, len(data.Formulae)+len(data.Casks))
+	for _, p := range data.Formulae {
+		set[p.Name] = struct{}{}
+	}
+	for _, p := range data.Casks {
+		if isManagedExternally(p.Name) {
+			continue
+		}
+		set[p.Name] = struct{}{}
+	}
+	return set, nil
+}
