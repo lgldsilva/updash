@@ -52,10 +52,11 @@ func (s *State) renderTabs() string {
 	var parts []string
 	for _, tab := range tabs {
 		label := tab.String()
-		count := 0
-		if tab == model.TabUpdates {
+		var count int
+		switch tab {
+		case model.TabUpdates:
 			count = s.TotalOutdated()
-		} else if tab == model.TabCleanup {
+		case model.TabCleanup:
 			count = s.TotalCleanable()
 		}
 
@@ -111,10 +112,9 @@ func (s *State) renderUpdatesTab() string {
 		// Items
 		for _, item := range summary.Items {
 			prefix := "  "
-			sel := " "
+		sel := ""
 
 			if s.ActiveTab == model.TabUpdates {
-				sel = " "
 				if item.Selected {
 					sel = CheckboxStyle.Render("◉")
 				} else if item.Status == model.StatusOutdated {
@@ -184,7 +184,7 @@ func (s *State) renderCleanupTab() string {
 
 		// Items
 		for _, item := range summary.Items {
-			sel := " "
+			var sel string
 			if item.Selected {
 				sel = CheckboxStyle.Render("◉")
 			} else if item.Status == model.StatusCleanCandidate {
