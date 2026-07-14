@@ -31,6 +31,8 @@ func main() {
 
 	ctx := context.Background()
 
+	startupRes := runStartup(ctx, mode, cfg)
+
 	switch mode {
 	case "check":
 		if err := cli.RunCheck(ctx); err != nil {
@@ -64,7 +66,7 @@ func main() {
 		printHelp()
 		return
 	case "version":
-		fmt.Println("updash", version)
+		fmt.Println("updash", upgrade.FormatBuild(version))
 		return
 	case "upgrade":
 		c := upgrade.EffectiveConfig()
@@ -85,8 +87,26 @@ func main() {
 		updateSelf()
 		return
 	case "tui":
-		runTUI()
+		runTUI(startupRes)
 	}
+}
+
+func runStartup(ctx context.Context, mode string, cfg cli.Config) upgrade.StartupResult {
+	res := upgrade.StartupResult{Current: version}
+	if upgrade.ModeSkipsStartupUpgrade(mode) {
+		return res
+	}
+	uCfg := upgrade.EffectiveConfig()
+	auto := upgrade.ShouldAutoUpgrade(version, cfg.SkipAutoUpgrade)
+	out, err := upgrade.Startup(ctx, uCfg, version, auto)
+	if err == nil {
+		return out
+	}
+	// Startup prints banner on check/install errors; continue with current binary.
+	if out.Current != "" {
+		return out
+	}
+	return res
 }
 
 func parseArgs(args []string) (mode string, cfg cli.Config, err error) {
@@ -128,6 +148,8 @@ func parseArgs(args []string) (mode string, cfg cli.Config, err error) {
 			cfg.Verbose = true
 		case "--skip-password":
 			cfg.SkipPassword = true
+		case "--skip-auto-upgrade":
+			cfg.SkipAutoUpgrade = true
 		case "--strict":
 			cfg.Strict = true
 		default:
@@ -137,8 +159,8 @@ func parseArgs(args []string) (mode string, cfg cli.Config, err error) {
 	return mode, cfg, nil
 }
 
-func runTUI() {
-	state := tui.New()
+func runTUI(startupRes upgrade.StartupResult) {
+	state := tui.NewWithVersion(startupRes.Current, startupRes.Latest)
 	m := &bubbleModel{state: state}
 
 	p := tea.NewProgram(m, tea.WithAltScreen())
@@ -351,7 +373,12 @@ Options (CLI modes):
   --quiet, -q                 Hide command output (errors still shown)
   --verbose                   Force live command output (default on TTY)
   --skip-password             Skip updates that need sudo (no macOS dialog)
+  --skip-auto-upgrade         Skip release self-update on startup
   --strict                    Exit non-zero if anything stays outdated
+
+On startup (TUI and --check/--update/--clean/--all), updash prints its build
+version and checks the Gitea release API. When a newer release exists, it
+downloads, verifies, and reinstalls itself before scanning.
 
 Examples:
   updash --check
