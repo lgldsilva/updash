@@ -63,7 +63,15 @@ func (s *State) renderTitle() string {
 	default:
 		plat = strings.ToUpper(s.Platform.Distro)
 	}
-	return TitleStyle.Render(fmt.Sprintf(" updash — %s", plat))
+	ver := s.Version
+	if ver == "" {
+		ver = "dev"
+	}
+	title := fmt.Sprintf(" updash %s — %s", ver, plat)
+	if s.LatestTag != "" {
+		title += fmt.Sprintf(" · latest %s", s.LatestTag)
+	}
+	return TitleStyle.Render(title)
 }
 
 func (s *State) renderTabs() string {

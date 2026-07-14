@@ -83,10 +83,19 @@ type State struct {
 
 	// Error state
 	Error string
+
+	// Build info (shown in title bar)
+	Version   string
+	LatestTag string
 }
 
 // New creates a new TUI state.
 func New() *State {
+	return NewWithVersion("", "")
+}
+
+// NewWithVersion creates TUI state with build/release tags for the title bar.
+func NewWithVersion(version, latest string) *State {
 	ctx, cancel := context.WithCancel(context.Background())
 	plat := platform.Detect()
 
@@ -98,6 +107,8 @@ func New() *State {
 		Ready:     true,
 		Width:     80,
 		Height:    24,
+		Version:   version,
+		LatestTag: latest,
 	}
 }
 
