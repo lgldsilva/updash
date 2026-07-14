@@ -131,8 +131,11 @@ func cleanSDKMAN(ctx context.Context, item *model.Item) *Result {
 	// Remove each old version via sdk uninstall
 	var allOutput strings.Builder
 	for _, ver := range removals {
+		// Sanitize inputs to prevent command injection
+		safeCandidate := sanitizeIdent(candidate)
+		safeVer := sanitizeIdent(ver)
 		cmd := exec.CommandContext(ctx, "bash", "-c",
-			fmt.Sprintf("source $HOME/.sdkman/bin/sdkman-init.sh && sdk uninstall %s %s", candidate, ver))
+			fmt.Sprintf("source $HOME/.sdkman/bin/sdkman-init.sh && sdk uninstall %s %s", safeCandidate, safeVer))
 		out, err := cmd.CombinedOutput()
 		allOutput.WriteString(fmt.Sprintf("removed %s %s\n", candidate, ver))
 		allOutput.Write(out)
@@ -342,7 +345,9 @@ func parseVersionParts(ver string) []int {
 	var nums []int
 	for _, p := range parts {
 		var n int
-		fmt.Sscanf(p, "%d", &n)
+		if _, err := fmt.Sscanf(p, "%d", &n); err != nil {
+			n = 0
+		}
 		nums = append(nums, n)
 	}
 	return nums
@@ -358,4 +363,17 @@ func cleanWindowsCache(ctx context.Context, item *model.Item) *Result {
 	default:
 		return runCmd(ctx, item, "cmd", "/c", "echo No Windows cleaner defined")
 	}
+}
+
+
+// sanitizeIdent strips characters that could be used for command injection.
+// Allows: alphanumeric, dots, hyphens, underscores.
+func sanitizeIdent(s string) string {
+	var safe strings.Builder
+	for _, r := range s {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '.' || r == '-' || r == '_' {
+			safe.WriteRune(r)
+		}
+	}
+	return safe.String()
 }
