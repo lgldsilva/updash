@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/lgldsilva/updash/internal/model"
@@ -26,11 +27,16 @@ func mockKey(name string, args []string) string {
 
 // setMock registers a canned response for a command.
 
-var mockData = struct {
-	data map[string]mockResult
-}{data: make(map[string]mockResult)}
+var (
+	mockMu   sync.Mutex
+	mockData = struct {
+		data map[string]mockResult
+	}{data: make(map[string]mockResult)}
+)
 
 func setMock(name string, args []string, stdout string, err error) {
+	mockMu.Lock()
+	defer mockMu.Unlock()
 	mockData.data[mockKey(name, args)] = mockResult{[]byte(stdout), err}
 }
 
@@ -38,8 +44,10 @@ func setMock(name string, args []string, stdout string, err error) {
 
 // mockExecCommand is the test replacement for execCommand.
 func mockExecCommand(ctx context.Context, name string, args ...string) ([]byte, error) {
-	key := mockKey(name, args)
-	if res, ok := mockData.data[key]; ok {
+	mockMu.Lock()
+	res, ok := mockData.data[mockKey(name, args)]
+	mockMu.Unlock()
+	if ok {
 		return res.stdout, res.err
 	}
 	// Fall back to real execution for LookPath etc.
@@ -196,8 +204,20 @@ func TestNpmScan_Outdated(t *testing.T) {
 	if len(items) != 2 {
 		t.Fatalf("expected 2 items, got %d", len(items))
 	}
-	if items[0].Name != "@charmland/crush" || items[0].AvailableVer != "0.84.1" {
-		t.Errorf("item[0] = %+v", items[0])
+	// Map iteration order is random — look up by name
+	for _, it := range items {
+		switch it.Name {
+		case "@charmland/crush":
+			if it.AvailableVer != "0.84.1" {
+				t.Errorf("@charmland/crush version = %q, want %q", it.AvailableVer, "0.84.1")
+			}
+		case "npm":
+			if it.AvailableVer != "12.0.1" {
+				t.Errorf("npm version = %q, want %q", it.AvailableVer, "12.0.1")
+			}
+		default:
+			t.Errorf("unexpected item: %s", it.Name)
+		}
 	}
 }
 
