@@ -29,9 +29,9 @@ func (s *NpmSource) Scan(ctx context.Context, plat model.PlatformInfo) ([]*model
 	}
 
 	var data map[string]struct {
-		Current  string `json:"current"`
-		Wanted   string `json:"wanted"`
-		Latest   string `json:"latest"`
+		Current string `json:"current"`
+		Wanted  string `json:"wanted"`
+		Latest  string `json:"latest"`
 	}
 	if err := json.Unmarshal(out, &data); err != nil || len(data) == 0 {
 		return []*model.Item{

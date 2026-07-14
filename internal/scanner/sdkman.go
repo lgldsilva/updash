@@ -79,13 +79,13 @@ func (s *SDKMANSource) Scan(ctx context.Context, plat model.PlatformInfo) ([]*mo
 
 			name := fmt.Sprintf("%s %s", candidate, majorVer)
 			items = append(items, &model.Item{
-				Name:         name,
-				Category:     model.CatSDKMAN,
-				CurrentVer:   latest,
-				Status:       status,
-				Reclaimable:  reclaimable,
-				KeepPolicy:   "keep latest per major",
-				RemoveCount:  removeCount,
+				Name:        name,
+				Category:    model.CatSDKMAN,
+				CurrentVer:  latest,
+				Status:      status,
+				Reclaimable: reclaimable,
+				KeepPolicy:  "keep latest per major",
+				RemoveCount: removeCount,
 			})
 		}
 	}
