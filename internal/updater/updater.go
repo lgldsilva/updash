@@ -100,17 +100,35 @@ func batchSequential(ctx context.Context, items []*model.Item, opts Options) []*
 	return results
 }
 
-// batchBrewUpgrade runs brew upgrade --greedy.
-// Even if brew exits non-zero (warnings, validations), we verify which items
-// were actually upgraded by re-checking brew outdated after the run.
+// batchBrewUpgrade upgrades only the selected brew packages (never the whole cellar).
+// A bare "brew upgrade --greedy" would also touch excluded casks still on the system
+// (e.g. microsoft-office) and hang waiting for an admin password without a TTY.
 func batchBrewUpgrade(ctx context.Context, items []*model.Item, opts Options) []*Result {
-	// Mark all as updating
-	for _, it := range items {
+	results := make([]*Result, len(items))
+	var upgradeNames []string
+	var upgradeIdx []int
+
+	for i, it := range items {
+		if scanner.BrewIsManagedExternally(it.Name) {
+			results[i] = &Result{
+				Item:    it,
+				Success: false,
+				Error:   "skipped — managed outside brew (Toolbox, App Store, or Microsoft installer needs admin password)",
+			}
+			it.Status = model.StatusOutdated
+			continue
+		}
 		it.Status = model.StatusUpdating
+		upgradeNames = append(upgradeNames, it.Name)
+		upgradeIdx = append(upgradeIdx, i)
 	}
 
-	// Run brew upgrade --greedy (detached from TTY — no sudo prompt)
-	cmd := exec.CommandContext(ctx, "brew", "upgrade", "--greedy")
+	if len(upgradeNames) == 0 {
+		return results
+	}
+
+	args := append([]string{"upgrade", "--greedy"}, upgradeNames...)
+	cmd := exec.CommandContext(ctx, "brew", args...)
 	var stdout, stderr bytes.Buffer
 	if opts.Output != nil {
 		opts.ConfigureCmd(cmd)
@@ -126,17 +144,18 @@ func batchBrewUpgrade(ctx context.Context, items []*model.Item, opts Options) []
 
 	stillOutdated, verifyErr := brewVerifyAfterUpgrade(ctx)
 
-	results := make([]*Result, len(items))
 	if verifyErr != nil {
 		msg := fmt.Sprintf("could not verify brew upgrade: %v", verifyErr)
-		for i, it := range items {
+		for _, i := range upgradeIdx {
+			it := items[i]
 			results[i] = &Result{Item: it, Success: false, Error: msg, Output: output}
 			it.Status = model.StatusError
 		}
 		return results
 	}
 
-	for i, it := range items {
+	for _, i := range upgradeIdx {
+		it := items[i]
 		_, still := stillOutdated[it.Name]
 		results[i] = &Result{Item: it, Output: output}
 		if !still {

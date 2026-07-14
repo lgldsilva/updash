@@ -34,6 +34,12 @@ func isManagedExternally(name string) bool {
 	return externalCasks[name]
 }
 
+// BrewIsManagedExternally reports casks that must not be brew-upgraded by updash
+// (Toolbox, MAS, or installers that need an interactive admin password).
+func BrewIsManagedExternally(name string) bool {
+	return isManagedExternally(name)
+}
+
 // brewOutdatedJSON maps the --json=v2 output.
 type brewOutdatedJSON struct {
 	Formulae []brewPkg `json:"formulae"`
