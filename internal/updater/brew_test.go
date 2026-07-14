@@ -4,29 +4,28 @@ import (
 	"context"
 	"strings"
 	"testing"
-
-	"github.com/lgldsilva/updash/internal/model"
 )
 
-func TestBatchBrewUpgrade_skipsManagedExternally(t *testing.T) {
-	items := []*model.Item{
-		{Name: "microsoft-office", Category: model.CatBrew, Status: model.StatusOutdated},
-		{Name: "microsoft-auto-update", Category: model.CatBrew, Status: model.StatusOutdated},
+func TestExplainBrewUpgradeFailure_microsoftTimeout(t *testing.T) {
+	msg := explainBrewUpgradeFailure("microsoft-office", "", context.DeadlineExceeded, true)
+	if !strings.Contains(msg, "microsoft-office") {
+		t.Fatalf("missing package name: %q", msg)
 	}
+	if !strings.Contains(msg, "Terminal") || !strings.Contains(msg, "brew upgrade") {
+		t.Fatalf("missing actionable command: %q", msg)
+	}
+}
 
-	results := batchBrewUpgrade(context.Background(), items, SilentOptions())
-	if len(results) != 2 {
-		t.Fatalf("len(results) = %d, want 2", len(results))
+func TestExplainBrewUpgradeFailure_sudoInOutput(t *testing.T) {
+	msg := explainBrewUpgradeFailure("foo", "Error: Need sudo password", nil, false)
+	if !strings.Contains(msg, "administrador") {
+		t.Fatalf("expected admin hint: %q", msg)
 	}
-	for i, r := range results {
-		if r == nil || r.Success {
-			t.Fatalf("item %d should be skipped: %+v", i, r)
-		}
-		if !strings.Contains(r.Error, "skipped") {
-			t.Fatalf("item %d error = %q, want skip message", i, r.Error)
-		}
-		if items[i].Status != model.StatusOutdated {
-			t.Fatalf("item %d status = %v, want outdated", i, items[i].Status)
-		}
+}
+
+func TestExplainBrewUpgradeFailure_stillOutdatedWithNote(t *testing.T) {
+	msg := explainBrewUpgradeFailure("microsoft-auto-update", "", nil, false)
+	if !strings.Contains(msg, "PKG Microsoft") {
+		t.Fatalf("expected microsoft note: %q", msg)
 	}
 }

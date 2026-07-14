@@ -418,13 +418,20 @@ func (s *State) renderItemStyled(item *model.Item) string {
 		if avail == "" {
 			avail = "newer"
 		}
-		return joinRow(
+		parts := []string{
 			lipgloss.NewStyle().Foreground(ColorYellow).Bold(item.Selected).Render(name),
 			lipgloss.NewStyle().Render("  "),
 			VerCurrentStyle.Render(cur),
 			VerArrowStyle.Render(" → "),
 			VerNewStyle.Render(avail),
-		)
+		}
+		if item.KeepPolicy != "" {
+			parts = append(parts,
+				lipgloss.NewStyle().Render("  "),
+				VerCurrentStyle.Render("("+truncatePlain(item.KeepPolicy, 48)+")"),
+			)
+		}
+		return joinRow(parts...)
 	case model.StatusError:
 		return joinRow(name, lipgloss.NewStyle().Render("  "), ItemErrorStyle.Render("✘ "+truncatePlain(item.CurrentVer, 40)))
 	case model.StatusUpdating:

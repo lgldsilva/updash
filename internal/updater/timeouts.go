@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/lgldsilva/updash/internal/model"
+	"github.com/lgldsilva/updash/internal/scanner"
 )
 
 // BatchTimeout returns the max duration for a category batch.
@@ -25,4 +26,12 @@ func BatchTimeout(cat model.Category) time.Duration {
 
 func withBatchTimeout(ctx context.Context, cat model.Category) (context.Context, context.CancelFunc) {
 	return context.WithTimeout(ctx, BatchTimeout(cat))
+}
+
+// BrewItemTimeout caps a single brew upgrade so PKG installers fail fast with a diagnosis.
+func BrewItemTimeout(name string) time.Duration {
+	if scanner.BrewUpgradeNote(name) != "" {
+		return 6 * time.Minute
+	}
+	return 12 * time.Minute
 }

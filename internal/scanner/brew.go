@@ -34,12 +34,6 @@ func isManagedExternally(name string) bool {
 	return externalCasks[name]
 }
 
-// BrewIsManagedExternally reports casks that must not be brew-upgraded by updash
-// (Toolbox, MAS, or installers that need an interactive admin password).
-func BrewIsManagedExternally(name string) bool {
-	return isManagedExternally(name)
-}
-
 // brewOutdatedJSON maps the --json=v2 output.
 type brewOutdatedJSON struct {
 	Formulae []brewPkg `json:"formulae"`
@@ -90,20 +84,21 @@ func (s *BrewSource) Scan(ctx context.Context, plat model.PlatformInfo) ([]*mode
 		})
 	}
 	for _, p := range data.Casks {
-		if isManagedExternally(p.Name) {
-			continue // skip casks managed by JetBrains Toolbox etc.
-		}
 		cur := ""
 		if len(p.InstalledVersions) > 0 {
 			cur = p.InstalledVersions[0]
 		}
-		items = append(items, &model.Item{
+		it := &model.Item{
 			Name:         p.Name,
 			Category:     model.CatBrew,
 			CurrentVer:   cur,
 			AvailableVer: p.CurrentVersion,
 			Status:       model.StatusOutdated,
-		})
+		}
+		if note := BrewUpgradeNote(p.Name); note != "" {
+			it.KeepPolicy = note
+		}
+		items = append(items, it)
 	}
 
 	return items, nil
@@ -124,9 +119,6 @@ func BrewOutdatedSet(ctx context.Context) (map[string]struct{}, error) {
 		set[p.Name] = struct{}{}
 	}
 	for _, p := range data.Casks {
-		if isManagedExternally(p.Name) {
-			continue
-		}
 		set[p.Name] = struct{}{}
 	}
 	return set, nil
