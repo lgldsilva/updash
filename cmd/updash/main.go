@@ -125,6 +125,10 @@ func parseArgs(args []string) (mode string, cfg cli.Config, err error) {
 			cfg.Verbose = false
 		case "--verbose":
 			cfg.Verbose = true
+		case "--skip-password":
+			cfg.SkipPassword = true
+		case "--strict":
+			cfg.Strict = true
 		default:
 			return "", cfg, fmt.Errorf("unknown argument: %s (try --help)", arg)
 		}
@@ -326,9 +330,12 @@ Options (CLI modes):
   --dry-run                   Show what would run without executing
   --quiet, -q                 Hide command output (errors still shown)
   --verbose                   Force live command output (default on TTY)
+  --skip-password             Skip updates that need sudo (no macOS dialog)
+  --strict                    Exit non-zero if anything stays outdated
 
 Examples:
   updash --check
+  updash --all                Scan + update + clean (macOS password dialog when needed)
   updash --update --only brew
   updash --clean --dry-run
   updash --clean --only brew
