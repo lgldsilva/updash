@@ -201,16 +201,26 @@ func (m *bubbleModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tui.ScanFinishedMsg:
 		m.state.Scanning = false
 		m.state.OperationLabel = ""
-		m.state.LastSummary = ""
 		m.state.ClampCursor()
 		elapsed := ""
 		if msg.Elapsed > 0 {
 			elapsed = fmt.Sprintf(" (%s)", msg.Elapsed)
 		}
-		m.state.AddLog(
-			fmt.Sprintf("Scan complete: %d outdated, %d cleanable%s",
-				m.state.TotalOutdated(), m.state.TotalCleanable(), elapsed), true,
-		)
+		scanErrs := m.state.TotalScanErrors()
+		if scanErrs > 0 {
+			m.state.LogScanErrors()
+			m.state.LastSummary = fmt.Sprintf("⚠ Scan done — %d error(s), see Logs tab", scanErrs)
+			m.state.AddLog(
+				fmt.Sprintf("Scan complete: %d outdated, %d cleanable, %d error(s)%s",
+					m.state.TotalOutdated(), m.state.TotalCleanable(), scanErrs, elapsed), false,
+			)
+		} else {
+			m.state.LastSummary = ""
+			m.state.AddLog(
+				fmt.Sprintf("Scan complete: %d outdated, %d cleanable%s",
+					m.state.TotalOutdated(), m.state.TotalCleanable(), elapsed), true,
+			)
+		}
 		return m, nil
 
 	case tui.ErrMsg:
