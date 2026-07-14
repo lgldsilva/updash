@@ -112,7 +112,7 @@ func (s *State) renderUpdatesTab() string {
 		// Items
 		for _, item := range summary.Items {
 			prefix := "  "
-		sel := ""
+			sel := ""
 
 			if s.ActiveTab == model.TabUpdates {
 				if item.Selected {
