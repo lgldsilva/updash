@@ -465,8 +465,9 @@ func (s *State) startCleanSelected(items []*model.Item, program *tea.Program) te
 
 	go func() {
 		total := len(items)
+		var totalFreed int64
 		defer func() {
-			program.Send(CleanAllDoneMsg{})
+			program.Send(CleanAllDoneMsg{BytesFreed: totalFreed})
 		}()
 
 		for i, it := range items {
@@ -493,6 +494,12 @@ func (s *State) startCleanSelected(items []*model.Item, program *tea.Program) te
 
 			if needsElev && !hasSession {
 				program.Send(tea.EnterAltScreen()) //nolint:staticcheck
+			}
+
+			for _, r := range results {
+				if r.Success {
+					totalFreed += r.BytesFreed
+				}
 			}
 
 			program.Send(CleanBatchDoneMsg{

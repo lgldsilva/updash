@@ -20,3 +20,9 @@ func BrewUpgradeNote(name string) string {
 		return ""
 	}
 }
+
+// BrewNeedsSudoPrime reports casks whose installers call sudo internally (e.g. Microsoft PKG).
+func BrewNeedsSudoPrime(name string) bool {
+	note := strings.ToLower(BrewUpgradeNote(name))
+	return strings.Contains(note, "senha") || strings.Contains(note, "admin")
+}

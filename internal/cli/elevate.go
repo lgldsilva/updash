@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/lgldsilva/updash/internal/elevate"
@@ -12,7 +13,73 @@ import (
 	"github.com/lgldsilva/updash/internal/updater"
 )
 
-// ensureCategoryElevation prepares sudo for a category batch.
+// primeElevationSession prompts once per run when any item needs sudo (MAS, Microsoft
+// brew PKG, apt, etc.) and stores the session for all later batches.
+func primeElevationSession(
+	ctx context.Context,
+	plat model.PlatformInfo,
+	items []*model.Item,
+	cfg Config,
+	sess **elevate.Session,
+) context.Context {
+	if !itemsNeedPasswordElevation(items, plat) {
+		return ctx
+	}
+
+	if elevate.CanElevateWithoutPassword(ctx) {
+		if *sess == nil || !(*sess).Ready() {
+			s := elevate.NewSession()
+			s.SetPasswordless()
+			*sess = s
+		}
+		return elevate.WithSession(ctx, *sess)
+	}
+
+	if *sess != nil && (*sess).Ready() {
+		_ = (*sess).Refresh(ctx)
+		return elevate.WithSession(ctx, *sess)
+	}
+
+	if cfg.SkipPassword {
+		return ctx
+	}
+
+	// On macOS, brew/MAS use the system authorization sheet (see runNativeElevatedItems).
+	if plat.OS == "darwin" && elevate.NativeMacAuthAvailable() {
+		return ctx
+	}
+
+	s, err := elevate.PromptMacPasswordSession(ctx,
+		"O updash precisa da sua senha de administrador para concluir as atualizações")
+	if err != nil {
+		switch {
+		case errors.Is(err, elevate.ErrDialogCancelled):
+			fmt.Fprintln(os.Stderr, "⊘ Senha cancelada — pacotes que precisam de admin serão ignorados")
+		case errors.Is(err, elevate.ErrDialogUnavailable):
+			fmt.Fprintln(os.Stderr, "⊘ Diálogo de senha indisponível — pacotes que precisam de admin serão ignorados")
+		default:
+			fmt.Fprintf(os.Stderr, "⊘ Senha inválida: %v — pacotes que precisam de admin serão ignorados\n", err)
+		}
+		return ctx
+	}
+
+	*sess = s
+	return elevate.WithSession(ctx, s)
+}
+
+func itemsNeedPasswordElevation(items []*model.Item, plat model.PlatformInfo) bool {
+	for _, it := range items {
+		if it.Category == model.CatBrew && brewItemNeedsPassword(it) {
+			return true
+		}
+		if elevate.CategoryNeedsElevation(it.Category, plat) {
+			return true
+		}
+	}
+	return false
+}
+
+// ensureCategoryElevation attaches the run-wide session for a category batch.
 // When skipped is true, reason explains why the batch should not run elevated.
 func ensureCategoryElevation(
 	ctx context.Context,
@@ -28,43 +95,17 @@ func ensureCategoryElevation(
 		return ctx, false, ""
 	}
 
-	if elevate.CanElevateWithoutPassword(ctx) {
-		if *sess == nil || !(*sess).Ready() {
-			s := elevate.NewSession()
-			s.SetPasswordless()
-			*sess = s
-		}
-		return elevate.WithSession(ctx, *sess), false, ""
-	}
-
 	if *sess != nil && (*sess).Ready() {
-		if cat == model.CatMAS {
-			_ = (*sess).Refresh(ctx)
+		if err := (*sess).Refresh(ctx); err != nil {
+			return ctx, true, fmt.Sprintf("sudo expirou: %v", err)
 		}
 		return elevate.WithSession(ctx, *sess), false, ""
 	}
 
-	if cfg.SkipPassword {
-		return ctx, true, "precisa de senha de administrador — remova --skip-password para abrir o diálogo do macOS"
-	}
-
-	reason := elevationPrompt(cat)
-	s, err := elevate.PromptMacPasswordSession(ctx, reason)
-	if errors.Is(err, elevate.ErrDialogCancelled) {
-		return ctx, true, "atualização cancelada — senha não informada"
-	}
-	if errors.Is(err, elevate.ErrDialogUnavailable) {
-		return ctx, true, "diálogo de senha indisponível nesta plataforma"
-	}
-	if err != nil {
-		return ctx, true, fmt.Sprintf("senha inválida: %v", err)
-	}
-
-	*sess = s
-	return elevate.WithSession(ctx, s), false, ""
+	return ctx, true, elevationSkipReason(cfg)
 }
 
-// ensureBrewPassword primes sudo for brew PKG casks (Microsoft, etc.) that need admin.
+// ensureBrewPassword attaches the run-wide session for brew PKG casks (Microsoft, etc.).
 func ensureBrewPassword(
 	ctx context.Context,
 	items []*model.Item,
@@ -75,32 +116,19 @@ func ensureBrewPassword(
 		return ctx, false, ""
 	}
 	if *sess != nil && (*sess).Ready() {
-		_ = (*sess).Refresh(ctx)
-		return elevate.WithSession(ctx, *sess), false, ""
-	}
-	if elevate.CanElevateWithoutPassword(ctx) {
-		if *sess == nil || !(*sess).Ready() {
-			s := elevate.NewSession()
-			s.SetPasswordless()
-			*sess = s
+		if err := (*sess).Refresh(ctx); err != nil {
+			return ctx, true, fmt.Sprintf("sudo expirou: %v", err)
 		}
 		return elevate.WithSession(ctx, *sess), false, ""
 	}
+	return ctx, true, elevationSkipReason(cfg)
+}
+
+func elevationSkipReason(cfg Config) string {
 	if cfg.SkipPassword {
-		return ctx, true, "PKG brew precisa de senha de admin — remova --skip-password para o diálogo do macOS"
+		return "precisa de senha de administrador — remova --skip-password para abrir o diálogo do macOS"
 	}
-	s, err := elevate.PromptMacPasswordSession(ctx, "Pacotes brew (ex.: Microsoft Office) precisam da sua senha de administrador")
-	if errors.Is(err, elevate.ErrDialogCancelled) {
-		return ctx, true, "atualização cancelada — senha não informada"
-	}
-	if errors.Is(err, elevate.ErrDialogUnavailable) {
-		return ctx, true, "diálogo de senha indisponível nesta plataforma"
-	}
-	if err != nil {
-		return ctx, true, fmt.Sprintf("senha inválida: %v", err)
-	}
-	*sess = s
-	return elevate.WithSession(ctx, s), false, ""
+	return "atualização cancelada — senha não informada"
 }
 
 func brewItemNeedsPassword(it *model.Item) bool {
@@ -120,19 +148,6 @@ func brewBatchNeedsPassword(items []*model.Item) bool {
 func containsPasswordNote(note string) bool {
 	n := strings.ToLower(note)
 	return strings.Contains(n, "senha") || strings.Contains(n, "admin")
-}
-
-func elevationPrompt(cat model.Category) string {
-	switch cat {
-	case model.CatMAS:
-		return "Apps da Mac App Store (mas) precisam da sua senha de administrador do Mac"
-	case model.CatApt:
-		return "Atualizações apt precisam da sua senha de administrador"
-	case model.CatSnap:
-		return "Atualizações snap precisam da sua senha de administrador"
-	default:
-		return "Esta operação precisa da sua senha de administrador do Mac"
-	}
 }
 
 func runBrewUpdateBatch(

@@ -118,6 +118,19 @@ func upgradeOneBrew(ctx context.Context, item *model.Item, opts Options) *Result
 	defer cancel()
 
 	cmd := exec.CommandContext(itemCtx, "brew", "upgrade", "--greedy", item.Name)
+	if scanner.BrewNeedsSudoPrime(item.Name) && !opts.Interactive {
+		cleanup, err := elevate.AttachSubprocessSudo(itemCtx, cmd)
+		if err != nil {
+			item.Status = model.StatusError
+			return &Result{
+				Item:    item,
+				Success: false,
+				Error:   err.Error() + " — informe a senha de admin no diálogo do updash",
+			}
+		}
+		defer cleanup()
+	}
+
 	var stdout, stderr bytes.Buffer
 	if opts.Output != nil {
 		opts.ConfigureCmd(cmd)
@@ -184,19 +197,19 @@ func upgradeMASApp(ctx context.Context, item *model.Item, opts Options) *Result 
 		args = append(args, item.PackageID)
 	}
 
-	// mas calls /usr/bin/sudo internally; prime the OS sudo timestamp first.
+	cmd := exec.CommandContext(ctx, "mas", args...)
 	if !opts.Interactive {
-		if err := elevate.EnsureSudoReady(ctx); err != nil {
+		cleanup, err := elevate.AttachSubprocessSudo(ctx, cmd)
+		if err != nil {
 			item.Status = model.StatusError
 			return &Result{
 				Item:    item,
 				Success: false,
-				Error:   err.Error() + " — enter your Mac login password in updash before MAS updates",
+				Error:   err.Error() + " — informe a senha de admin no diálogo do updash",
 			}
 		}
+		defer cleanup()
 	}
-
-	cmd := exec.CommandContext(ctx, "mas", args...)
 	var stdout, stderr bytes.Buffer
 	if opts.Output != nil {
 		opts.ConfigureCmd(cmd)
@@ -448,8 +461,28 @@ func batchNpmUpgrade(ctx context.Context, items []*model.Item, opts Options) []*
 	for _, it := range items {
 		it.Status = model.StatusUpdating
 	}
-	cmd := exec.CommandContext(ctx, "npm", "update", "-g")
+	cmd := npmUpdateCmd(ctx)
 	return batchMarkAll(items, runCmdWithBuilder(ctx, items[0], cmd, opts))
+}
+
+// npmUpdateCmd runs global npm update; uses sudo when prefix is system-wide (/usr).
+func npmUpdateCmd(ctx context.Context) *exec.Cmd {
+	if npmGlobalNeedsSudo(ctx) {
+		return elevate.Sudo(ctx, "npm", "update", "-g")
+	}
+	return exec.CommandContext(ctx, "npm", "update", "-g")
+}
+
+func npmGlobalNeedsSudo(ctx context.Context) bool {
+	if elevate.CanElevateWithoutPassword(ctx) || elevate.FromContext(ctx) != nil {
+		out, err := exec.CommandContext(ctx, "npm", "config", "get", "prefix").Output()
+		if err != nil {
+			return elevate.CanElevateWithoutPassword(ctx)
+		}
+		prefix := strings.TrimSpace(string(out))
+		return strings.HasPrefix(prefix, "/usr")
+	}
+	return false
 }
 
 func batchPipxUpgrade(ctx context.Context, items []*model.Item, opts Options) []*Result {
