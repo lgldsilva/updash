@@ -82,12 +82,15 @@ func RunAll(ctx context.Context, plat model.PlatformInfo, includeCleanup bool) [
 func enabledSources(plat model.PlatformInfo, includeCleanup bool) []Source {
 	var src []Source
 
+	// macOS
 	if plat.HasBrew {
 		src = append(src, &BrewSource{})
 	}
 	if plat.HasMAS {
 		src = append(src, &MASource{})
 	}
+
+	// Linux
 	if plat.HasApt {
 		src = append(src, &AptSource{})
 	}
@@ -99,6 +102,17 @@ func enabledSources(plat model.PlatformInfo, includeCleanup bool) []Source {
 	}
 	if plat.HasSnap {
 		src = append(src, &SnapSource{})
+	}
+
+	// Windows
+	if plat.HasWinget {
+		src = append(src, &WingetSource{})
+	}
+	if plat.HasChoco {
+		src = append(src, &ChocoSource{})
+	}
+	if plat.HasScoop {
+		src = append(src, &ScoopSource{})
 	}
 	if plat.HasNpm {
 		src = append(src, &NpmSource{})
@@ -151,6 +165,11 @@ func enabledSources(plat model.PlatformInfo, includeCleanup bool) []Source {
 		}
 		if plat.HasSnap {
 			src = append(src, &SnapCleanSource{})
+		}
+
+		// Windows cache cleanup
+		if plat.OS == "windows" {
+			src = append(src, &WindowsTempSource{})
 		}
 
 		home := os.Getenv("HOME")

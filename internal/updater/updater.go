@@ -259,6 +259,18 @@ func updateOne(ctx context.Context, item *model.Item) *Result {
 	switch item.Category {
 	case model.CatFlatpak:
 		return runCmd(ctx, item, "flatpak", "update", "-y")
+
+	// Windows updaters
+	case model.CatWinget:
+		return runCmd(ctx, item, "winget", "upgrade", "--all", "--accept-package-agreements", "--accept-source-agreements")
+
+	case model.CatChoco:
+		// choco upgrade all -y
+		return runCmd(ctx, item, "choco", "upgrade", "all", "-y")
+
+	case model.CatScoop:
+		// scoop update * updates all apps; scoop update itself first
+		return runCmd(ctx, item, "scoop", "update", "*")
 	case model.CatSnap:
 		return runCmd(ctx, item, "sudo", "snap", "refresh")
 	case model.CatNpm:

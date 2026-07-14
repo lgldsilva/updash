@@ -69,6 +69,8 @@ func cleanCache(ctx context.Context, item *model.Item) *Result {
 		return runCmd(ctx, item, "npm", "cache", "clean", "--force")
 	case strings.HasPrefix(item.Name, "snap"):
 		return runCmd(ctx, item, "sudo", "snap", "set", "system", "refresh.retain=2")
+	case strings.HasPrefix(item.Name, "win"):
+		return cleanWindowsCache(ctx, item)
 	default:
 		return &Result{
 			Item:    item,
@@ -344,4 +346,16 @@ func parseVersionParts(ver string) []int {
 		nums = append(nums, n)
 	}
 	return nums
+}
+
+// cleanWindowsCache handles Windows temp/cache cleanup.
+func cleanWindowsCache(ctx context.Context, item *model.Item) *Result {
+	switch {
+	case strings.Contains(item.Name, "temp") || strings.Contains(item.Name, "TEMP"):
+		return runCmd(ctx, item, "cmd", "/c", "del /q /s %TEMP%\\* >nul 2>&1")
+	case strings.Contains(item.Name, "npm"):
+		return runCmd(ctx, item, "npm", "cache", "clean", "--force")
+	default:
+		return runCmd(ctx, item, "cmd", "/c", "echo No Windows cleaner defined")
+	}
 }
