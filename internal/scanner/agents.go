@@ -2,6 +2,7 @@ package scanner
 
 import (
 	"context"
+	"os"
 	"os/exec"
 	"regexp"
 	"strings"
@@ -72,8 +73,7 @@ func (s *AgentSource) Scan(ctx context.Context, plat model.PlatformInfo) ([]*mod
 
 	for _, a := range agents {
 		// Check if binary exists
-		path, err := exec.LookPath(a.binary)
-		if err != nil {
+		if _, err := exec.LookPath(a.binary); err != nil {
 			continue // skip, not installed
 		}
 
@@ -84,18 +84,24 @@ func (s *AgentSource) Scan(ctx context.Context, plat model.PlatformInfo) ([]*mod
 		}
 
 		if len(a.verCmd) > 0 {
-			out, err := execCommand(ctx, a.verCmd[0], a.verCmd[1:]...)
-			if err == nil {
-				it.CurrentVer = parseAgentVersion(string(out))
+			if agentSkipVersionProbe(plat, a.binary) {
+				it.CurrentVer = "installed"
 			} else {
-				// Some tools output version to stderr
-				if exitErr, ok := err.(*exec.ExitError); ok {
-					it.CurrentVer = parseAgentVersion(string(exitErr.Stderr))
+				out, err := execCommandBudget(ctx, agentProbeTimeout, a.verCmd[0], a.verCmd[1:]...)
+				if err == nil {
+					it.CurrentVer = parseAgentVersion(string(out))
+				} else {
+					// Some tools output version to stderr
+					if exitErr, ok := err.(*exec.ExitError); ok {
+						it.CurrentVer = parseAgentVersion(string(exitErr.Stderr))
+					}
+					if it.CurrentVer == "" {
+						it.CurrentVer = "installed"
+					}
 				}
 			}
 		}
 
-		_ = path // suppress unused warning
 		items = append(items, it)
 	}
 
@@ -106,6 +112,22 @@ func (s *AgentSource) Scan(ctx context.Context, plat model.PlatformInfo) ([]*mod
 	}
 
 	return items, nil
+}
+
+// agentSkipVersionProbe avoids Electron/GUI CLIs that hang without a display (common over SSH).
+func agentSkipVersionProbe(plat model.PlatformInfo, binary string) bool {
+	if plat.OS != "linux" {
+		return false
+	}
+	if os.Getenv("DISPLAY") != "" || os.Getenv("WAYLAND_DISPLAY") != "" {
+		return false
+	}
+	switch binary {
+	case "antigravity", "cursor":
+		return true
+	default:
+		return false
+	}
 }
 
 // AIInfraSource scans AI infrastructure tools.
@@ -142,7 +164,7 @@ func (s *AIInfraSource) Scan(ctx context.Context, plat model.PlatformInfo) ([]*m
 		}
 
 		if len(t.verCmd) > 0 {
-			out, err := execCommand(ctx, t.verCmd[0], t.verCmd[1:]...)
+			out, err := execCommandBudget(ctx, agentProbeTimeout, t.verCmd[0], t.verCmd[1:]...)
 			if err == nil {
 				v := strings.TrimSpace(string(out))
 				if len(v) > 60 {

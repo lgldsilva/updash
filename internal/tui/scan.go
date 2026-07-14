@@ -67,10 +67,6 @@ func (s *State) startScan() tea.Cmd {
 				sem <- struct{}{}
 				defer func() { <-sem }()
 
-				if ctx.Err() != nil {
-					return
-				}
-
 				summary := scanner.ScanSource(ctx, src, plat)
 				isCleanup := scanner.IsCleanupCategory(summary.Category)
 
