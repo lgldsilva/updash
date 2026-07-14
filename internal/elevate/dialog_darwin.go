@@ -27,12 +27,20 @@ func PromptMacPassword(reason string) (string, error) {
 		}
 		return "", fmt.Errorf("password dialog: %w", err)
 	}
-	text := strings.TrimSpace(string(out))
-	const prefix = "text returned:"
-	if !strings.HasPrefix(text, prefix) {
+	return parseDialogPassword(string(out))
+}
+
+func parseDialogPassword(out string) (string, error) {
+	text := strings.TrimSpace(out)
+	if strings.Contains(text, "button returned:Cancel") {
+		return "", ErrDialogCancelled
+	}
+	const marker = "text returned:"
+	idx := strings.Index(text, marker)
+	if idx < 0 {
 		return "", fmt.Errorf("password dialog: unexpected response %q", text)
 	}
-	return strings.TrimSpace(text[len(prefix):]), nil
+	return strings.TrimSpace(text[idx+len(marker):]), nil
 }
 
 // PromptMacPasswordSession prompts, validates via sudo, and returns a ready session.

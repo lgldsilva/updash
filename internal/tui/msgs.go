@@ -59,7 +59,9 @@ type CleanBatchDoneMsg struct {
 }
 
 // CleanAllDoneMsg is sent when all cleanup completes.
-type CleanAllDoneMsg struct{}
+type CleanAllDoneMsg struct {
+	BytesFreed int64
+}
 
 // OutputLineMsg carries a line of subprocess output for the Logs tab.
 type OutputLineMsg struct {

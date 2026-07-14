@@ -8,9 +8,11 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/lgldsilva/updash/internal/model"
+	"github.com/lgldsilva/updash/internal/sizefmt"
 )
 
 // --- Brew Cleanup ---
@@ -35,9 +37,15 @@ func (s *BrewCleanSource) Scan(ctx context.Context, plat model.PlatformInfo) ([]
 		}
 	}
 
-	// Get size
 	sizeOut, _ := execCommand(ctx, "du", "-sh", cacheDir)
 	size := strings.TrimSpace(strings.Fields(string(sizeOut))[0])
+
+	reclaimable := "~0B"
+	if dryOut, err := execCommand(ctx, "brew", "cleanup", "-n", "-s"); err == nil {
+		if n := sizefmt.ParseBrewFreed(string(dryOut)); n > 0 {
+			reclaimable = sizefmt.Format(n)
+		}
+	}
 
 	return []*model.Item{
 		{
@@ -45,7 +53,8 @@ func (s *BrewCleanSource) Scan(ctx context.Context, plat model.PlatformInfo) ([]
 			Category:    model.CatCache,
 			CurrentVer:  size,
 			Status:      model.StatusCleanCandidate,
-			Reclaimable: size,
+			Reclaimable: reclaimable,
+			KeepPolicy:  "old versions; active downloads kept",
 		},
 	}, nil
 }
@@ -154,6 +163,7 @@ func (s *GoCleanSource) Scan(ctx context.Context, plat model.PlatformInfo) ([]*m
 			CurrentVer:  size,
 			Status:      model.StatusCleanCandidate,
 			Reclaimable: size,
+			KeepPolicy:  "build cache only",
 		},
 	}, nil
 }
@@ -176,21 +186,37 @@ func (s *NpmCleanSource) Scan(ctx context.Context, plat model.PlatformInfo) ([]*
 		}, nil
 	}
 
-	out, err := execCommand(ctx, "du", "-sh", cacheDir)
+	totalOut, err := execCommand(ctx, "du", "-sh", cacheDir)
 	if err != nil {
 		return []*model.Item{
 			{Name: "npm-cache", Category: model.CatCache, Status: model.StatusOK, CurrentVer: "no cache"},
 		}, nil
 	}
-	size := strings.TrimSpace(strings.Fields(string(out))[0])
+	total := strings.TrimSpace(strings.Fields(string(totalOut))[0])
+
+	var reclaimBytes int64
+	for _, sub := range []string{"_cacache", "_npx"} {
+		subDir := filepath.Join(cacheDir, sub)
+		if out, err := execCommand(ctx, "du", "-sk", subDir); err == nil {
+			kb, _ := strconv.ParseInt(strings.Fields(string(out))[0], 10, 64)
+			reclaimBytes += kb * 1024
+		}
+	}
+	reclaimable := sizefmt.Format(reclaimBytes)
+	if reclaimBytes == 0 {
+		return []*model.Item{
+			{Name: "npm-cache", Category: model.CatCache, Status: model.StatusOK, CurrentVer: total},
+		}, nil
+	}
 
 	return []*model.Item{
 		{
 			Name:        "npm-cache",
 			Category:    model.CatCache,
-			CurrentVer:  size,
+			CurrentVer:  total,
 			Status:      model.StatusCleanCandidate,
-			Reclaimable: size,
+			Reclaimable: reclaimable,
+			KeepPolicy:  "cache + npx extractions",
 		},
 	}, nil
 }

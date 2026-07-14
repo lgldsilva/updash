@@ -1,5 +1,6 @@
 # Binaries (root only — do not match cmd/updash/)
 /updash
+updash-linux-*
 *.test
 *.out
 

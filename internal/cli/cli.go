@@ -145,8 +145,12 @@ func RunClean(ctx context.Context, cfg Config) (int, int, error) {
 
 	fmt.Printf("\n🧹 Cleaning %d item(s)...\n", len(items))
 	start := time.Now()
-	ok, fail := runCleanBatches(ctx, cleanup, items, opts)
-	fmt.Printf("\n⏱ clean %s — %d ok, %d failed\n", time.Since(start).Round(time.Second), ok, fail)
+	ok, fail, freed := runCleanBatches(ctx, cleanup, items, opts)
+	fmt.Printf("\n⏱ clean %s — %d ok, %d failed", time.Since(start).Round(time.Second), ok, fail)
+	if freed > 0 {
+		fmt.Printf(", %s freed", cleaner.FormatBytes(freed))
+	}
+	fmt.Println()
 	if fail > 0 {
 		return ok, fail, fmt.Errorf("%d clean(s) failed", fail)
 	}
@@ -177,13 +181,13 @@ type cleanGroup struct {
 	items []*model.Item
 }
 
-func runCleanBatches(ctx context.Context, summaries []*model.SourceSummary, items []*model.Item, opts cleaner.Options) (ok, fail int) {
+func runCleanBatches(ctx context.Context, summaries []*model.SourceSummary, items []*model.Item, opts cleaner.Options) (ok, fail int, freed int64) {
 	for _, g := range groupCleanBySummary(summaries, items) {
 		fmt.Printf("\n→ %s (%d item(s))\n", g.label, len(g.items))
 		for _, it := range g.items {
 			detail := it.Name
 			if it.Reclaimable != "" {
-				detail = fmt.Sprintf("%s (%s)", it.Name, it.Reclaimable)
+				detail = fmt.Sprintf("%s (~%s reclaimable)", it.Name, it.Reclaimable)
 			}
 			fmt.Printf("  • %s\n", detail)
 
@@ -192,7 +196,12 @@ func runCleanBatches(ctx context.Context, summaries []*model.SourceSummary, item
 			cancel()
 
 			if r.Success {
-				fmt.Printf("  ✓ %s\n", it.Name)
+				freed += r.BytesFreed
+				if r.BytesFreed > 0 {
+					fmt.Printf("  ✓ %s (freed %s)\n", it.Name, cleaner.FormatBytes(r.BytesFreed))
+				} else {
+					fmt.Printf("  ✓ %s (nothing to remove)\n", it.Name)
+				}
 				ok++
 			} else {
 				errMsg := r.Error
@@ -204,7 +213,7 @@ func runCleanBatches(ctx context.Context, summaries []*model.SourceSummary, item
 			}
 		}
 	}
-	return ok, fail
+	return ok, fail, freed
 }
 
 func groupCleanBySummary(summaries []*model.SourceSummary, items []*model.Item) []cleanGroup {
@@ -239,9 +248,36 @@ func runUpdateBatches(
 	opts updater.Options,
 	cfg Config,
 ) (ok, fail, skipped int, allResults []*updater.Result) {
-	groups := groupByCategory(items)
-	cats := sortedCategories(groups)
+	nativeItems, normalItems := partitionNativeElevated(plat, items, cfg)
 	var elevSession *elevate.Session
+	ctx = primeElevationSession(ctx, plat, normalItems, cfg, &elevSession)
+
+	if len(nativeItems) > 0 {
+		fmt.Printf("\n→ 🔐 Atualizações privilegiadas (%d item(s))\n", len(nativeItems))
+		for _, it := range nativeItems {
+			fmt.Printf("  • %s\n", it.Name)
+		}
+		for _, r := range runNativeElevatedItems(ctx, plat, nativeItems, opts, cfg, &elevSession) {
+			allResults = append(allResults, r)
+			if r.Success {
+				fmt.Printf("  ✓ %s\n", r.Item.Name)
+				ok++
+			} else if isSkippedResult(r) {
+				fmt.Printf("  ⊘ %s: %s\n", r.Item.Name, strings.TrimPrefix(r.Error, "⊘ "))
+				skipped++
+			} else {
+				errMsg := r.Error
+				if errMsg == "" {
+					errMsg = "failed"
+				}
+				fmt.Printf("  ✘ %s: %s\n", r.Item.Name, errMsg)
+				fail++
+			}
+		}
+	}
+
+	groups := groupByCategory(normalItems)
+	cats := sortedCategories(groups)
 
 	for _, cat := range cats {
 		groupItems := groups[cat]

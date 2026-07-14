@@ -26,6 +26,23 @@ func TestShouldFailExit_strict(t *testing.T) {
 	}
 }
 
+func TestItemsNeedPasswordElevation(t *testing.T) {
+	plat := model.PlatformInfo{OS: "darwin"}
+	items := []*model.Item{
+		{Name: "telegram", Category: model.CatBrew},
+		{Name: "microsoft-office", Category: model.CatBrew},
+	}
+	if !itemsNeedPasswordElevation(items, plat) {
+		t.Fatal("microsoft should require elevation")
+	}
+	if itemsNeedPasswordElevation([]*model.Item{{Name: "telegram", Category: model.CatBrew}}, plat) {
+		t.Fatal("telegram alone should not require elevation")
+	}
+	if !itemsNeedPasswordElevation([]*model.Item{{Name: "app", Category: model.CatMAS}}, plat) {
+		t.Fatal("mas should require elevation")
+	}
+}
+
 func TestBrewBatchNeedsPassword(t *testing.T) {
 	items := []*model.Item{{Name: "microsoft-office"}}
 	if !brewBatchNeedsPassword(items) {

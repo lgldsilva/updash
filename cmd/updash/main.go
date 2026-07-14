@@ -7,6 +7,7 @@ import (
 	"os/exec"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/lgldsilva/updash/internal/cleaner"
 	"github.com/lgldsilva/updash/internal/cli"
 	"github.com/lgldsilva/updash/internal/tui"
 	"github.com/lgldsilva/updash/internal/upgrade"
@@ -258,7 +259,11 @@ func (m *bubbleModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		for _, r := range msg.Results {
 			if r.Success {
-				m.state.AddLog(fmt.Sprintf("✓ %s: cleaned", r.Item.Name), true)
+				if r.BytesFreed > 0 {
+					m.state.AddLog(fmt.Sprintf("✓ %s: freed %s", r.Item.Name, cleaner.FormatBytes(r.BytesFreed)), true)
+				} else {
+					m.state.AddLog(fmt.Sprintf("✓ %s: nothing to remove", r.Item.Name), true)
+				}
 			} else {
 				errMsg := r.Error
 				if len(errMsg) > 120 {
@@ -272,8 +277,13 @@ func (m *bubbleModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tui.CleanAllDoneMsg:
 		m.state.Cleaning = false
 		m.state.OperationLabel = ""
-		m.state.LastSummary = "✓ Cleanup complete"
-		m.state.AddLog("Cleanup complete", true)
+		if msg.BytesFreed > 0 {
+			m.state.LastSummary = fmt.Sprintf("✓ Cleanup complete — %s freed", cleaner.FormatBytes(msg.BytesFreed))
+			m.state.AddLog(fmt.Sprintf("Cleanup complete — %s freed", cleaner.FormatBytes(msg.BytesFreed)), true)
+		} else {
+			m.state.LastSummary = "✓ Cleanup complete — nothing to remove"
+			m.state.AddLog("Cleanup complete — nothing to remove", true)
+		}
 		return m, nil
 
 	case tui.OutputLineMsg:
