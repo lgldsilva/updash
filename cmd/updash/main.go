@@ -7,6 +7,7 @@ import (
 	"os/exec"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/lgldsilva/updash/internal/cleaner"
 	"github.com/lgldsilva/updash/internal/cli"
 	"github.com/lgldsilva/updash/internal/tui"
 	"github.com/lgldsilva/updash/internal/upgrade"
@@ -29,6 +30,8 @@ func main() {
 	}
 
 	ctx := context.Background()
+
+	startupRes := runStartup(ctx, mode, cfg)
 
 	switch mode {
 	case "check":
@@ -63,7 +66,7 @@ func main() {
 		printHelp()
 		return
 	case "version":
-		fmt.Println("updash", version)
+		fmt.Println("updash", upgrade.FormatBuild(version))
 		return
 	case "upgrade":
 		c := upgrade.EffectiveConfig()
@@ -84,8 +87,26 @@ func main() {
 		updateSelf()
 		return
 	case "tui":
-		runTUI()
+		runTUI(startupRes)
 	}
+}
+
+func runStartup(ctx context.Context, mode string, cfg cli.Config) upgrade.StartupResult {
+	res := upgrade.StartupResult{Current: version}
+	if upgrade.ModeSkipsStartupUpgrade(mode) {
+		return res
+	}
+	uCfg := upgrade.EffectiveConfig()
+	auto := upgrade.ShouldAutoUpgrade(version, cfg.SkipAutoUpgrade)
+	out, err := upgrade.Startup(ctx, uCfg, version, auto)
+	if err == nil {
+		return out
+	}
+	// Startup prints banner on check/install errors; continue with current binary.
+	if out.Current != "" {
+		return out
+	}
+	return res
 }
 
 func parseArgs(args []string) (mode string, cfg cli.Config, err error) {
@@ -125,6 +146,12 @@ func parseArgs(args []string) (mode string, cfg cli.Config, err error) {
 			cfg.Verbose = false
 		case "--verbose":
 			cfg.Verbose = true
+		case "--skip-password":
+			cfg.SkipPassword = true
+		case "--skip-auto-upgrade":
+			cfg.SkipAutoUpgrade = true
+		case "--strict":
+			cfg.Strict = true
 		default:
 			return "", cfg, fmt.Errorf("unknown argument: %s (try --help)", arg)
 		}
@@ -132,8 +159,8 @@ func parseArgs(args []string) (mode string, cfg cli.Config, err error) {
 	return mode, cfg, nil
 }
 
-func runTUI() {
-	state := tui.New()
+func runTUI(startupRes upgrade.StartupResult) {
+	state := tui.NewWithVersion(startupRes.Current, startupRes.Latest)
 	m := &bubbleModel{state: state}
 
 	p := tea.NewProgram(m, tea.WithAltScreen())
@@ -196,16 +223,26 @@ func (m *bubbleModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tui.ScanFinishedMsg:
 		m.state.Scanning = false
 		m.state.OperationLabel = ""
-		m.state.LastSummary = ""
 		m.state.ClampCursor()
 		elapsed := ""
 		if msg.Elapsed > 0 {
 			elapsed = fmt.Sprintf(" (%s)", msg.Elapsed)
 		}
-		m.state.AddLog(
-			fmt.Sprintf("Scan complete: %d outdated, %d cleanable%s",
-				m.state.TotalOutdated(), m.state.TotalCleanable(), elapsed), true,
-		)
+		scanErrs := m.state.TotalScanErrors()
+		if scanErrs > 0 {
+			m.state.LogScanErrors()
+			m.state.LastSummary = fmt.Sprintf("⚠ Scan done — %d error(s), see Logs tab", scanErrs)
+			m.state.AddLog(
+				fmt.Sprintf("Scan complete: %d outdated, %d cleanable, %d error(s)%s",
+					m.state.TotalOutdated(), m.state.TotalCleanable(), scanErrs, elapsed), false,
+			)
+		} else {
+			m.state.LastSummary = ""
+			m.state.AddLog(
+				fmt.Sprintf("Scan complete: %d outdated, %d cleanable%s",
+					m.state.TotalOutdated(), m.state.TotalCleanable(), elapsed), true,
+			)
+		}
 		return m, nil
 
 	case tui.ErrMsg:
@@ -254,7 +291,11 @@ func (m *bubbleModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		for _, r := range msg.Results {
 			if r.Success {
-				m.state.AddLog(fmt.Sprintf("✓ %s: cleaned", r.Item.Name), true)
+				if r.BytesFreed > 0 {
+					m.state.AddLog(fmt.Sprintf("✓ %s: freed %s", r.Item.Name, cleaner.FormatBytes(r.BytesFreed)), true)
+				} else {
+					m.state.AddLog(fmt.Sprintf("✓ %s: nothing to remove", r.Item.Name), true)
+				}
 			} else {
 				errMsg := r.Error
 				if len(errMsg) > 120 {
@@ -268,8 +309,13 @@ func (m *bubbleModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tui.CleanAllDoneMsg:
 		m.state.Cleaning = false
 		m.state.OperationLabel = ""
-		m.state.LastSummary = "✓ Cleanup complete"
-		m.state.AddLog("Cleanup complete", true)
+		if msg.BytesFreed > 0 {
+			m.state.LastSummary = fmt.Sprintf("✓ Cleanup complete — %s freed", cleaner.FormatBytes(msg.BytesFreed))
+			m.state.AddLog(fmt.Sprintf("Cleanup complete — %s freed", cleaner.FormatBytes(msg.BytesFreed)), true)
+		} else {
+			m.state.LastSummary = "✓ Cleanup complete — nothing to remove"
+			m.state.AddLog("Cleanup complete — nothing to remove", true)
+		}
 		return m, nil
 
 	case tui.OutputLineMsg:
@@ -326,9 +372,17 @@ Options (CLI modes):
   --dry-run                   Show what would run without executing
   --quiet, -q                 Hide command output (errors still shown)
   --verbose                   Force live command output (default on TTY)
+  --skip-password             Skip updates that need sudo (no macOS dialog)
+  --skip-auto-upgrade         Skip release self-update on startup
+  --strict                    Exit non-zero if anything stays outdated
+
+On startup (TUI and --check/--update/--clean/--all), updash prints its build
+version and checks the Gitea release API. When a newer release exists, it
+downloads, verifies, and reinstalls itself before scanning.
 
 Examples:
   updash --check
+  updash --all                Scan + update + clean (macOS password dialog when needed)
   updash --update --only brew
   updash --clean --dry-run
   updash --clean --only brew

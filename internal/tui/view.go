@@ -63,7 +63,15 @@ func (s *State) renderTitle() string {
 	default:
 		plat = strings.ToUpper(s.Platform.Distro)
 	}
-	return TitleStyle.Render(fmt.Sprintf(" updash — %s", plat))
+	ver := s.Version
+	if ver == "" {
+		ver = "dev"
+	}
+	title := fmt.Sprintf(" updash %s — %s", ver, plat)
+	if s.LatestTag != "" {
+		title += fmt.Sprintf(" · latest %s", s.LatestTag)
+	}
+	return TitleStyle.Render(title)
 }
 
 func (s *State) renderTabs() string {
@@ -461,7 +469,13 @@ func (s *State) renderCleanupItemStyled(item *model.Item) string {
 	case model.StatusCleaning:
 		return joinRow(name, lipgloss.NewStyle().Render("  "), SpinnerStyle.Render(s.spinnerGlyph()+" cleaning..."))
 	case model.StatusCleaned:
-		return joinRow(name, lipgloss.NewStyle().Render("  "), ItemOKStyle.Render("✓ cleaned"))
+		msg := "✓ cleaned"
+		if item.Freed != "" && item.Freed != "0B" {
+			msg = "✓ freed " + item.Freed
+		} else if item.Freed == "0B" {
+			msg = "✓ nothing removed"
+		}
+		return joinRow(name, lipgloss.NewStyle().Render("  "), ItemOKStyle.Render(msg))
 	case model.StatusError:
 		return joinRow(name, lipgloss.NewStyle().Render("  "), ItemErrorStyle.Render("✘ failed"))
 	default:

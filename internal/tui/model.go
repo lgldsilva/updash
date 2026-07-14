@@ -83,10 +83,19 @@ type State struct {
 
 	// Error state
 	Error string
+
+	// Build info (shown in title bar)
+	Version   string
+	LatestTag string
 }
 
 // New creates a new TUI state.
 func New() *State {
+	return NewWithVersion("", "")
+}
+
+// NewWithVersion creates TUI state with build/release tags for the title bar.
+func NewWithVersion(version, latest string) *State {
 	ctx, cancel := context.WithCancel(context.Background())
 	plat := platform.Detect()
 
@@ -98,6 +107,8 @@ func New() *State {
 		Ready:     true,
 		Width:     80,
 		Height:    24,
+		Version:   version,
+		LatestTag: latest,
 	}
 }
 
@@ -224,6 +235,48 @@ func (s *State) TotalOutdated() int {
 		count += countLiveOutdated(summary.Items)
 	}
 	return count
+}
+
+// TotalScanErrors counts scan failures across Updates and Cleanup tabs.
+func (s *State) TotalScanErrors() int {
+	var n int
+	for _, summary := range s.Summaries {
+		n += countStatus(summary.Items, model.StatusError)
+	}
+	for _, summary := range s.CleanItems {
+		n += countStatus(summary.Items, model.StatusError)
+	}
+	return n
+}
+
+func countStatus(items []*model.Item, want model.Status) int {
+	n := 0
+	for _, it := range items {
+		if it.Status == want {
+			n++
+		}
+	}
+	return n
+}
+
+// LogScanErrors writes per-source scan failures to the Logs tab.
+func (s *State) LogScanErrors() {
+	logScanErrors := func(summaries []*model.SourceSummary) {
+		for _, sum := range summaries {
+			for _, it := range sum.Items {
+				if it.Status != model.StatusError {
+					continue
+				}
+				detail := it.CurrentVer
+				if detail == "" {
+					detail = "scan failed"
+				}
+				s.AddLog(fmt.Sprintf("✘ %s %s — %s: %s", sum.Icon, sum.Label, it.Name, detail), false)
+			}
+		}
+	}
+	logScanErrors(s.Summaries)
+	logScanErrors(s.CleanItems)
 }
 
 // TotalCleanable returns total cleanable items.

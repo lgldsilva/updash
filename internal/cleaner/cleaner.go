@@ -18,10 +18,11 @@ import (
 
 // Result holds the outcome of a cleanup operation.
 type Result struct {
-	Item    *model.Item
-	Success bool
-	Output  string
-	Error   string
+	Item       *model.Item
+	Success    bool
+	Output     string
+	Error      string
+	BytesFreed int64 // disk space reclaimed when measurable
 }
 
 // CleanAll runs cleanup operations for the given items (silent/buffered — for TUI).
@@ -79,7 +80,7 @@ func cleanCache(ctx context.Context, item *model.Item, opts Options) *Result {
 	case strings.HasPrefix(item.Name, "go"):
 		return runCmd(ctx, item, opts, "go", "clean", "-cache")
 	case strings.HasPrefix(item.Name, "npm"):
-		return runCmd(ctx, item, opts, "npm", "cache", "clean", "--force")
+		return cleanNpm(ctx, item, opts)
 	case strings.HasPrefix(item.Name, "snap"):
 		return runElevatedCmd(ctx, item, opts, "snap", "set", "system", "refresh.retain=2")
 	case strings.HasPrefix(item.Name, "win"):
@@ -310,6 +311,14 @@ func runCmd(ctx context.Context, item *model.Item, opts Options, name string, ar
 }
 
 func runCmdWithBuilder(ctx context.Context, item *model.Item, cmd *exec.Cmd, opts Options) *Result {
+	paths := cacheMeasurePaths(item)
+	before := measurePaths(ctx, paths)
+	result := executeCmd(ctx, item, cmd, opts)
+	attachFreed(ctx, item, result, before)
+	return result
+}
+
+func executeCmd(ctx context.Context, item *model.Item, cmd *exec.Cmd, opts Options) *Result {
 	var stdout, stderr bytes.Buffer
 	if opts.Verbose || opts.Interactive {
 		configureCmd(opts, cmd)
@@ -332,6 +341,45 @@ func runCmdWithBuilder(ctx context.Context, item *model.Item, cmd *exec.Cmd, opt
 		item.Status = model.StatusCleaned
 	}
 
+	return result
+}
+
+func attachFreed(ctx context.Context, item *model.Item, result *Result, before int64) {
+	if !result.Success {
+		return
+	}
+	result.BytesFreed = computeBytesFreed(ctx, item, result.Output, before)
+	if result.BytesFreed > 0 {
+		item.Freed = FormatBytes(result.BytesFreed)
+	} else {
+		item.Freed = "0B"
+	}
+}
+
+// cleanNpm clears the npm content cache and stale npx extraction dirs under ~/.npm.
+func cleanNpm(ctx context.Context, item *model.Item, opts Options) *Result {
+	paths := cacheMeasurePaths(item)
+	before := measurePaths(ctx, paths)
+
+	result := executeCmd(ctx, item, exec.CommandContext(ctx, "npm", "cache", "clean", "--force"), opts)
+	if result.Success {
+		var npxOut strings.Builder
+		npxDir := filepath.Join(os.Getenv("HOME"), ".npm", "_npx")
+		entries, err := os.ReadDir(npxDir)
+		if err == nil {
+			for _, entry := range entries {
+				p := filepath.Join(npxDir, entry.Name())
+				if rmErr := os.RemoveAll(p); rmErr != nil {
+					fmt.Fprintf(&npxOut, "npx remove %s: %v\n", entry.Name(), rmErr)
+				}
+			}
+		}
+		if npxOut.Len() > 0 {
+			result.Output += npxOut.String()
+		}
+	}
+
+	attachFreed(ctx, item, result, before)
 	return result
 }
 
