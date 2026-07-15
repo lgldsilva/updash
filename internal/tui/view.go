@@ -8,6 +8,11 @@ import (
 	"github.com/lgldsilva/updash/internal/model"
 )
 
+const (
+	fmtProgressCount = "  %d/%d"
+	hintRefresh      = "[R] refresh"
+)
+
 // Render renders the complete TUI view.
 func (s *State) Render() string {
 	var b strings.Builder
@@ -146,7 +151,7 @@ func (s *State) renderUpdatesTab() string {
 			SpinnerStyle.Render(s.spinnerGlyph()+" Updating"+label),
 			lipgloss.NewStyle().Render("  "),
 			s.renderProgressBar(s.UpdateTotal, s.UpdateDone),
-			lipgloss.NewStyle().Render(fmt.Sprintf("  %d/%d", s.UpdateDone, s.UpdateTotal)),
+			lipgloss.NewStyle().Render(fmt.Sprintf(fmtProgressCount, s.UpdateDone, s.UpdateTotal)),
 		)
 		b.WriteString(truncateStyled(progLine, s.contentWidth()))
 		b.WriteString("\n\n")
@@ -244,7 +249,7 @@ func (s *State) renderCleanupTab() string {
 			SpinnerStyle.Render(s.spinnerGlyph()+" Cleaning"+label),
 			lipgloss.NewStyle().Render("  "),
 			s.renderProgressBar(s.CleanTotal, s.CleanDone),
-			lipgloss.NewStyle().Render(fmt.Sprintf("  %d/%d", s.CleanDone, s.CleanTotal)),
+			lipgloss.NewStyle().Render(fmt.Sprintf(fmtProgressCount, s.CleanDone, s.CleanTotal)),
 		)
 		b.WriteString(truncateStyled(progLine, s.contentWidth()))
 		b.WriteString("\n\n")
@@ -593,7 +598,7 @@ func (s *State) renderFooter() string {
 			"[Space] toggle",
 			"[U] update selected",
 			"[A] update all",
-			"[R] refresh",
+			hintRefresh,
 		}
 	case model.TabCleanup:
 		hints = []string{
@@ -601,11 +606,11 @@ func (s *State) renderFooter() string {
 			"[Space] toggle",
 			"[C] clean selected",
 			"[A] clean all",
-			"[R] refresh",
+			hintRefresh,
 		}
 	case model.TabLogs:
 		hints = []string{
-			"[R] refresh",
+			hintRefresh,
 		}
 	}
 
@@ -641,7 +646,7 @@ func (s *State) renderStatusLine() string {
 			SpinnerStyle.Render(s.spinnerGlyph()+" Updating "+label),
 			lipgloss.NewStyle().Render("  "),
 			s.renderProgressBar(s.UpdateTotal, s.UpdateDone),
-			lipgloss.NewStyle().Render(fmt.Sprintf("  %d/%d", s.UpdateDone, s.UpdateTotal)),
+			lipgloss.NewStyle().Render(fmt.Sprintf(fmtProgressCount, s.UpdateDone, s.UpdateTotal)),
 		)
 		return truncateStyled(prog, s.contentWidth())
 	case s.Cleaning:
@@ -653,7 +658,7 @@ func (s *State) renderStatusLine() string {
 			SpinnerStyle.Render(s.spinnerGlyph()+" Cleaning "+label),
 			lipgloss.NewStyle().Render("  "),
 			s.renderProgressBar(s.CleanTotal, s.CleanDone),
-			lipgloss.NewStyle().Render(fmt.Sprintf("  %d/%d", s.CleanDone, s.CleanTotal)),
+			lipgloss.NewStyle().Render(fmt.Sprintf(fmtProgressCount, s.CleanDone, s.CleanTotal)),
 		)
 		return truncateStyled(prog, s.contentWidth())
 	case s.LastSummary != "":

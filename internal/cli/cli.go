@@ -49,7 +49,10 @@ func PrintCheck(updates, cleanup []*model.SourceSummary) (outdated, cleanable in
 	return outdated, cleanable
 }
 
-const msgScanning = "🔍 Scanning %s...\n"
+const (
+	msgScanning = "🔍 Scanning %s...\n"
+	msgItemFail = "  ✘ %s: %s\n"
+)
 
 // RunCheck scans and prints results.
 func RunCheck(ctx context.Context) error {
@@ -211,7 +214,7 @@ func runCleanBatches(ctx context.Context, summaries []*model.SourceSummary, item
 				if errMsg == "" {
 					errMsg = "failed"
 				}
-				fmt.Printf("  ✘ %s: %s\n", it.Name, errMsg)
+				fmt.Printf(msgItemFail, it.Name, errMsg)
 				fail++
 			}
 		}
@@ -273,7 +276,7 @@ func runUpdateBatches(
 				if errMsg == "" {
 					errMsg = "failed"
 				}
-				fmt.Printf("  ✘ %s: %s\n", r.Item.Name, errMsg)
+				fmt.Printf(msgItemFail, r.Item.Name, errMsg)
 				fail++
 			}
 		}
@@ -318,7 +321,7 @@ func runUpdateBatches(
 				if errMsg == "" {
 					errMsg = "failed"
 				}
-				fmt.Printf("  ✘ %s: %s\n", r.Item.Name, errMsg)
+				fmt.Printf(msgItemFail, r.Item.Name, errMsg)
 				fail++
 			}
 		}
