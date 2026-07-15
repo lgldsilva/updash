@@ -26,7 +26,7 @@ func primeElevationSession(
 		return ctx
 	}
 
-	if elevate.CanElevateWithoutPassword(ctx) {
+	if canElevateNP(ctx) {
 		if *sess == nil || !(*sess).Ready() {
 			s := elevate.NewSession()
 			s.SetPasswordless()
@@ -45,11 +45,11 @@ func primeElevationSession(
 	}
 
 	// On macOS, brew/MAS use the system authorization sheet (see runNativeElevatedItems).
-	if plat.OS == "darwin" && elevate.NativeMacAuthAvailable() {
+	if plat.OS == "darwin" && nativeMacAvail() {
 		return ctx
 	}
 
-	s, err := elevate.PromptMacPasswordSession(ctx,
+	s, err := promptMacSess(ctx,
 		"O updash precisa da sua senha de administrador para concluir as atualizações")
 	if err != nil {
 		switch {
@@ -168,14 +168,14 @@ func runBrewUpdateBatch(
 
 	var results []*updater.Result
 	if len(plain) > 0 {
-		results = append(results, updater.UpdateCategory(ctx, model.CatBrew, plain, opts)...)
+		results = append(results, updateCategory(ctx, model.CatBrew, plain, opts)...)
 	}
 	if len(password) > 0 {
 		passCtx, skipped, reason := ensureBrewPassword(ctx, password, cfg, sess)
 		if skipped {
 			results = append(results, skipBatchResults(password, reason)...)
 		} else {
-			results = append(results, updater.UpdateCategory(passCtx, model.CatBrew, password, opts)...)
+			results = append(results, updateCategory(passCtx, model.CatBrew, password, opts)...)
 		}
 	}
 	return results
