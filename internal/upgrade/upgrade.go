@@ -217,11 +217,13 @@ func downloadReleaseBinary(ctx context.Context, hc *http.Client, dlURL, tag, goo
 }
 
 func archiveName(tag, goos, goarch string) string {
+	// GoReleaser name_template uses .Version (no "v"); release tags keep the prefix.
+	ver := strings.TrimPrefix(tag, "v")
 	switch goos {
 	case "windows":
-		return fmt.Sprintf("updash_%s_%s_%s.zip", tag, goos, goarch)
+		return fmt.Sprintf("updash_%s_%s_%s.zip", ver, goos, goarch)
 	default:
-		return fmt.Sprintf("updash_%s_%s_%s.tar.gz", tag, goos, goarch)
+		return fmt.Sprintf("updash_%s_%s_%s.tar.gz", ver, goos, goarch)
 	}
 }
 
