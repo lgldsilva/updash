@@ -140,15 +140,18 @@ func (s *AIInfraSource) Icon() string             { return "⚙️" }
 func (s *AIInfraSource) Scan(ctx context.Context, plat model.PlatformInfo) ([]*model.Item, error) {
 	var items []*model.Item
 
+	// Category is per-item so updateOne routes correctly (e.g. CatGHExt →
+	// gh extension upgrade --all). Summary still groups under this source.
 	tools := []struct {
-		name   string
-		binary string
-		verCmd []string
+		name     string
+		binary   string
+		category model.Category
+		verCmd   []string
 	}{
-		{"ai-memory", "ai-memory", []string{"ai-memory", "version"}},
-		{"semidx", "semidx", []string{"semidx", "version"}},
-		{"Gh Extensions", "gh", []string{"gh", "extension", "list"}},
-		{"gcloud", "gcloud", []string{"gcloud", "version", "--format=json"}},
+		{"ai-memory", "ai-memory", model.CatAI, []string{"ai-memory", "version"}},
+		{"semidx", "semidx", model.CatAI, []string{"semidx", "version"}},
+		{"Gh Extensions", "gh", model.CatGHExt, []string{"gh", "extension", "list"}},
+		{"gcloud", "gcloud", model.CatAI, []string{"gcloud", "version", "--format=json"}},
 	}
 
 	for _, t := range tools {
@@ -159,7 +162,7 @@ func (s *AIInfraSource) Scan(ctx context.Context, plat model.PlatformInfo) ([]*m
 
 		it := &model.Item{
 			Name:     t.name,
-			Category: model.CatAI,
+			Category: t.category,
 			Status:   model.StatusOK,
 		}
 

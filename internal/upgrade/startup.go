@@ -135,7 +135,7 @@ func Reexec() error {
 // ModeSkipsStartupUpgrade reports CLI modes that must not auto-upgrade or banner before work.
 func ModeSkipsStartupUpgrade(mode string) bool {
 	switch mode {
-	case "version", "help", "upgrade", "check-upgrade", "update-self":
+	case "version", "help", "upgrade", "check-upgrade", "update-self", "env-defaults":
 		return true
 	default:
 		return false
