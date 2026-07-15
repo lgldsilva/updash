@@ -17,24 +17,26 @@ const (
 	CatChoco  Category = "choco"
 	CatScoop  Category = "scoop"
 
-	CatNpm         Category = "npm"
-	CatPipx        Category = "pipx"
-	CatGo          Category = "go"
-	CatRustup      Category = "rustup"
-	CatCargo       Category = "cargo"
-	CatSDKMAN      Category = "sdkman"
-	CatDocker      Category = "docker"
-	CatWatchtower  Category = "watchtower"
-	CatCloud       Category = "cloud" // gcloud, etc.
-	CatAI          Category = "ai"    // ai-memory, semidx, ai-standards
-	CatAgent       Category = "agent" // claude, opencode, grok, agy...
-	CatGHExt       Category = "gh-ext"
-	CatNvm         Category = "nvm"
-	CatOmz         Category = "oh-my-zsh"
-	CatCache       Category = "cache"
-	CatSDKClean    Category = "sdkman-clean"
-	CatVSCodeClean Category = "vscode-clean"
-	CatDockerClean Category = "docker-clean"
+	CatNpm             Category = "npm"
+	CatPipx            Category = "pipx"
+	CatGo              Category = "go"
+	CatRustup          Category = "rustup"
+	CatCargo           Category = "cargo"
+	CatSDKMAN          Category = "sdkman"
+	CatDocker          Category = "docker"
+	CatWatchtower      Category = "watchtower"
+	CatCloud           Category = "cloud" // gcloud, etc.
+	CatAI              Category = "ai"    // ai-memory, semidx, ai-standards
+	CatAgent           Category = "agent" // claude, opencode, grok, agy...
+	CatGHExt           Category = "gh-ext"
+	CatNvm             Category = "nvm"
+	CatOpenCodePlugins Category = "opencode-plugins"
+	CatOmz             Category = "oh-my-zsh"
+	CatCache           Category = "cache"
+	CatSDKClean        Category = "sdkman-clean"
+	CatVSCodeClean     Category = "vscode-clean"
+	CatDockerClean     Category = "docker-clean"
+	CatHomelabClean    Category = "homelab-clean" // logs, dev caches, AI outputs, disk pressure
 )
 
 // Status represents the current state of an item.
@@ -149,16 +151,17 @@ type PlatformInfo struct {
 	HasChoco  bool
 	HasScoop  bool
 
-	HasNpm    bool
-	HasPipx   bool
-	HasGo     bool
-	HasGup    bool
-	HasRustup bool
-	HasCargo  bool
-	HasSDKMAN bool
-	HasDocker bool
-	HasNvm    bool
-	HasOmz    bool
+	HasNpm      bool
+	HasPipx     bool
+	HasGo       bool
+	HasGup      bool
+	HasRustup   bool
+	HasCargo    bool
+	HasSDKMAN   bool
+	HasDocker   bool
+	HasNvm      bool
+	HasOpenCode bool // ~/.config/opencode present (plugins dir)
+	HasOmz      bool
 }
 
 // GlobalLogEntry stores one line of the session log.

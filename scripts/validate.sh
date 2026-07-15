@@ -44,7 +44,8 @@ step "Tests I/O (race)" go test -race -count=1 \
                          ./internal/cleaner/... 2>&1 | tail -1
 step "Tests gate+cover" go test -race -count=1 -coverprofile=/tmp/updash-cov.out \
                          ./internal/model/... ./internal/config/... \
-                         ./internal/sizefmt/... ./internal/cli/... 2>&1 | tail -1
+                         ./internal/sizefmt/... ./internal/cli/... \
+                         ./internal/retention/... 2>&1 | tail -1
 step "Coverage ≥90%"   bash -c 'pct=$(go tool cover -func=/tmp/updash-cov.out | awk '\''/^total:/ {gsub("%","",$3); print $3}'\''); echo "  coverage=${pct}%"; awk -v p="$pct" -v min=90 "BEGIN{ exit (p+0 < min+0) }"'
 step "Lint (0 issues)" go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.12.2 run ./...
 step "gosec"           go run github.com/securego/gosec/v2/cmd/gosec@v2.27.1 -quiet -exclude=G204,G306,G703,G118 ./...

@@ -11,10 +11,12 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/lgldsilva/updash/internal/config"
 	"github.com/lgldsilva/updash/internal/elevate"
 	"github.com/lgldsilva/updash/internal/model"
+	"github.com/lgldsilva/updash/internal/retention"
 )
 
 // Result holds the outcome of a cleanup operation.
@@ -59,6 +61,8 @@ func cleanOne(ctx context.Context, item *model.Item, opts Options) *Result {
 		return cleanDocker(ctx, item, opts)
 	case model.CatVSCodeClean:
 		return cleanVSCodeExt(ctx, item, opts)
+	case model.CatHomelabClean:
+		return cleanHomelab(ctx, item, opts)
 	default:
 		return &Result{
 			Item:    item,
@@ -181,6 +185,114 @@ func cleanDocker(ctx context.Context, item *model.Item, opts Options) *Result {
 	default:
 		return runCmd(ctx, item, opts, "docker", "system", "prune", "-af", dockerFilter, dockerUntilPref+config.DockerImageMaxAge())
 	}
+}
+
+// cleanHomelab applies retention policies for logs, caches, AI outputs, and disk pressure.
+func cleanHomelab(ctx context.Context, item *model.Item, opts Options) *Result {
+	switch {
+	case strings.HasPrefix(item.Name, "dev-cache:"),
+		strings.HasPrefix(item.Name, "ai-output:"),
+		strings.HasPrefix(item.Name, "host-logs:"):
+		return cleanAgePaths(item, ageDaysForHomelab(item.Name))
+	case item.Name == "container-logs":
+		return cleanContainerLogs(ctx, item, opts)
+	case item.Name == "disk-pressure":
+		// Aggressive prune: ignore long retention, drop unused aggressively.
+		return runCmd(ctx, item, opts, "docker", "system", "prune", "-af")
+	default:
+		return &Result{Item: item, Success: true, Output: item.Name + ": nothing to do"}
+	}
+}
+
+func ageDaysForHomelab(name string) int {
+	switch {
+	case strings.HasPrefix(name, "dev-cache:"):
+		return config.DevCacheMaxDays()
+	case strings.HasPrefix(name, "ai-output:"):
+		return config.AIOutputMaxDays()
+	case strings.HasPrefix(name, "host-logs:"):
+		return config.HostLogMaxDays()
+	default:
+		return 30
+	}
+}
+
+func cleanAgePaths(item *model.Item, maxDays int) *Result {
+	root := item.PackageID
+	if root == "" {
+		item.Status = model.StatusError
+		return &Result{Item: item, Success: false, Error: "missing cleanup path"}
+	}
+	cands, _, err := retention.CollectOldPaths(root, maxDays, 1, time.Now())
+	if err != nil {
+		item.Status = model.StatusError
+		return &Result{Item: item, Success: false, Error: err.Error()}
+	}
+	if len(cands) == 0 {
+		item.Status = model.StatusCleaned
+		return &Result{Item: item, Success: true, Output: "nothing older than retention"}
+	}
+	paths := make([]string, len(cands))
+	for i, c := range cands {
+		paths[i] = c.Path
+	}
+	freed, errs := retention.RemovePaths(paths)
+	var b strings.Builder
+	fmt.Fprintf(&b, "removed %d path(s)\n", len(paths)-len(errs))
+	for _, e := range errs {
+		fmt.Fprintf(&b, "error: %s\n", e)
+	}
+	if len(errs) > 0 && freed == 0 {
+		item.Status = model.StatusError
+		return &Result{Item: item, Success: false, Error: "cleanup errors", Output: b.String()}
+	}
+	item.Status = model.StatusCleaned
+	item.Freed = FormatBytes(freed)
+	return &Result{Item: item, Success: true, Output: b.String(), BytesFreed: freed}
+}
+
+func cleanContainerLogs(ctx context.Context, item *model.Item, opts Options) *Result {
+	maxBytes := int64(config.ContainerLogMaxMB()) * 1024 * 1024
+	// List running+stopped container IDs; truncate oversized json-file logs when discoverable.
+	out, err := exec.CommandContext(ctx, "docker", "ps", "-aq").CombinedOutput()
+	if err != nil {
+		// No docker or daemon down — not a hard failure for optional cleanup.
+		item.Status = model.StatusCleaned
+		return &Result{Item: item, Success: true, Output: "docker unavailable: " + err.Error()}
+	}
+	ids := strings.Fields(string(out))
+	var freed int64
+	var b strings.Builder
+	for _, id := range ids {
+		logPath, err := containerLogPath(ctx, id)
+		if err != nil || logPath == "" {
+			continue
+		}
+		ok, before, err := retention.TruncateFileIfOver(logPath, maxBytes)
+		if err != nil {
+			fmt.Fprintf(&b, "skip %s: %v\n", id, err)
+			continue
+		}
+		if ok {
+			freed += before
+			fmt.Fprintf(&b, "truncated %s (%s)\n", id, FormatBytes(before))
+		}
+	}
+	if opts.Verbose && b.Len() == 0 {
+		b.WriteString("no oversized container logs\n")
+	}
+	item.Status = model.StatusCleaned
+	item.Freed = FormatBytes(freed)
+	return &Result{Item: item, Success: true, Output: b.String(), BytesFreed: freed}
+}
+
+func containerLogPath(ctx context.Context, id string) (string, error) {
+	out, err := exec.CommandContext(ctx, "docker", "inspect",
+		"--format", "{{.LogPath}}", id).CombinedOutput()
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(out)), nil
 }
 
 // cleanVSCodeExt removes old versions of VS Code extensions.

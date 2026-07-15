@@ -265,7 +265,7 @@ func TestEnabledSources_MacOS_Full(t *testing.T) {
 		HasBrew: true, HasMAS: true,
 		HasNpm: true, HasPipx: true, HasGo: true, HasGup: true,
 		HasRustup: true, HasCargo: true, HasSDKMAN: true,
-		HasDocker: true, HasNvm: true, HasOmz: true,
+		HasDocker: true, HasNvm: true, HasOpenCode: true, HasOmz: true,
 	}
 
 	srcs := enabledSources(plat, false)
@@ -278,7 +278,7 @@ func TestEnabledSources_MacOS_Full(t *testing.T) {
 	expected := []model.Category{
 		model.CatBrew, model.CatMAS, model.CatNpm, model.CatPipx,
 		model.CatGo, model.CatRustup, model.CatCargo, model.CatDocker,
-		model.CatNvm, model.CatOmz, model.CatAgent, model.CatAI,
+		model.CatNvm, model.CatOpenCodePlugins, model.CatOmz, model.CatAgent, model.CatAI,
 	}
 
 	for _, c := range expected {
