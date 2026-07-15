@@ -17,6 +17,8 @@ import (
 // HomelabCleanSource scans retention-based cleanup targets (logs, caches, AI outputs).
 type HomelabCleanSource struct{}
 
+const policyMtimeDays = "mtime > %dd"
+
 func (s *HomelabCleanSource) Category() model.Category { return model.CatHomelabClean }
 func (s *HomelabCleanSource) Label() string            { return "Homelab Cleanup" }
 func (s *HomelabCleanSource) Icon() string             { return "🏠" }
@@ -38,38 +40,41 @@ func (s *HomelabCleanSource) Scan(ctx context.Context, plat model.PlatformInfo) 
 	home := HomelabHome()
 	var items []*model.Item
 
+	devDays := config.DevCacheMaxDays()
 	items = append(items, scanAgeDir(
 		"dev-cache:maven",
 		filepath.Join(home, ".m2", "repository"),
-		config.DevCacheMaxDays(),
+		devDays,
 		now,
-		fmt.Sprintf("atime/mtime > %dd", config.DevCacheMaxDays()),
+		fmt.Sprintf("atime/"+policyMtimeDays, devDays),
 	)...)
 	items = append(items, scanAgeDir(
 		"dev-cache:gradle",
 		filepath.Join(home, ".gradle", "caches"),
-		config.DevCacheMaxDays(),
+		devDays,
 		now,
-		fmt.Sprintf("mtime > %dd", config.DevCacheMaxDays()),
+		fmt.Sprintf(policyMtimeDays, devDays),
 	)...)
 
+	aiDays := config.AIOutputMaxDays()
 	for _, pair := range aiOutputTargets(home) {
 		items = append(items, scanAgeDir(
 			"ai-output:"+pair.name,
 			pair.path,
-			config.AIOutputMaxDays(),
+			aiDays,
 			now,
-			fmt.Sprintf("mtime > %dd", config.AIOutputMaxDays()),
+			fmt.Sprintf(policyMtimeDays, aiDays),
 		)...)
 	}
 
+	logDays := config.HostLogMaxDays()
 	for _, pair := range hostLogTargets(home, plat.OS) {
 		items = append(items, scanAgeDir(
 			"host-logs:"+pair.name,
 			pair.path,
-			config.HostLogMaxDays(),
+			logDays,
 			now,
-			fmt.Sprintf("mtime > %dd", config.HostLogMaxDays()),
+			fmt.Sprintf(policyMtimeDays, logDays),
 		)...)
 	}
 
