@@ -22,6 +22,9 @@ func TestModeSkipsStartupUpgrade(t *testing.T) {
 	if !ModeSkipsStartupUpgrade("upgrade") {
 		t.Fatal("upgrade mode should skip")
 	}
+	if !ModeSkipsStartupUpgrade("env-defaults") {
+		t.Fatal("env-defaults mode should skip")
+	}
 	if ModeSkipsStartupUpgrade("check") {
 		t.Fatal("check mode should not skip")
 	}

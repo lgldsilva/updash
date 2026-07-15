@@ -9,6 +9,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/lgldsilva/updash/internal/cleaner"
 	"github.com/lgldsilva/updash/internal/cli"
+	"github.com/lgldsilva/updash/internal/config"
 	"github.com/lgldsilva/updash/internal/tui"
 	"github.com/lgldsilva/updash/internal/upgrade"
 )
@@ -67,6 +68,9 @@ func main() {
 		return
 	case "version":
 		fmt.Println("updash", upgrade.FormatBuild(version))
+		return
+	case "env-defaults":
+		fmt.Print(config.EnvDefaults())
 		return
 	case "upgrade":
 		c := upgrade.EffectiveConfig()
@@ -128,6 +132,8 @@ func parseArgs(args []string) (mode string, cfg cli.Config, err error) {
 			mode = "help"
 		case "--version", "-v":
 			mode = "version"
+		case "--env-defaults":
+			mode = "env-defaults"
 		case "--update-self", "-u":
 			mode = "update-self"
 		case "--upgrade":
@@ -364,17 +370,22 @@ Usage:
   updash --upgrade            Self-update from latest Gitea release
   updash --check-upgrade      Check for self-update without installing
   updash --version, -v        Show version
+  updash --env-defaults       Print UPDASH_* retention vars (effective values)
   updash --update-self, -u    Update updash via git pull + rebuild (dev)
   updash --help, -h           Show this help
 
 Options (CLI modes):
-  --only <category>           Limit to one source (brew, mas, npm, cache, …)
+  --only <category>           Limit to one source (brew, mas, npm, docker, …)
   --dry-run                   Show what would run without executing
   --quiet, -q                 Hide command output (errors still shown)
   --verbose                   Force live command output (default on TTY)
   --skip-password             Skip updates that need sudo (no macOS dialog)
   --skip-auto-upgrade         Skip release self-update on startup
   --strict                    Exit non-zero if anything stays outdated
+
+Docker cleanup age defaults to 336h (14d). Override with UPDASH_DOCKER_IMAGE_MAX_AGE,
+UPDASH_DOCKER_BUILDER_MAX_AGE, UPDASH_DOCKER_CONTAINER_MAX_AGE (e.g. 168h for 7d).
+See --env-defaults for the full list.
 
 On startup (TUI and --check/--update/--clean/--all), updash prints its build
 version and checks the Gitea release API. When a newer release exists, it
