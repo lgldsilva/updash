@@ -49,49 +49,50 @@ func BuildCheckReport(updates, cleanup []*model.SourceSummary) CheckReport {
 		Cleanup: make([]ReportItem, 0),
 		Sources: make([]ReportSource, 0),
 	}
-	for _, s := range updates {
-		if s == nil {
-			continue
-		}
-		srcOut := 0
-		for _, it := range s.Items {
-			if it == nil || it.Status != model.StatusOutdated {
-				continue
-			}
-			srcOut++
-			rep.Updates = append(rep.Updates, itemToReport(it))
-		}
-		rep.Sources = append(rep.Sources, ReportSource{
-			Category: string(s.Category),
-			Label:    s.Label,
-			Outdated: srcOut,
-			Total:    s.Total,
-			Kind:     "update",
-		})
-		rep.Outdated += srcOut
-	}
-	for _, s := range cleanup {
-		if s == nil {
-			continue
-		}
-		srcClean := 0
-		for _, it := range s.Items {
-			if it == nil || it.Status != model.StatusCleanCandidate {
-				continue
-			}
-			srcClean++
-			rep.Cleanup = append(rep.Cleanup, itemToReport(it))
-		}
-		rep.Sources = append(rep.Sources, ReportSource{
-			Category: string(s.Category),
-			Label:    s.Label,
-			Outdated: srcClean,
-			Total:    s.Total,
-			Kind:     "cleanup",
-		})
-		rep.Cleanable += srcClean
-	}
+	rep.Outdated = appendStatusItems(&rep.Updates, &rep.Sources, updates, model.StatusOutdated, "update")
+	rep.Cleanable = appendStatusItems(&rep.Cleanup, &rep.Sources, cleanup, model.StatusCleanCandidate, "cleanup")
 	return rep
+}
+
+// appendStatusItems collects items matching status from summaries into dest and sources.
+func appendStatusItems(
+	dest *[]ReportItem,
+	sources *[]ReportSource,
+	summaries []*model.SourceSummary,
+	status model.Status,
+	kind string,
+) int {
+	total := 0
+	for _, s := range summaries {
+		n := collectMatching(dest, s, status)
+		if s == nil {
+			continue
+		}
+		*sources = append(*sources, ReportSource{
+			Category: string(s.Category),
+			Label:    s.Label,
+			Outdated: n,
+			Total:    s.Total,
+			Kind:     kind,
+		})
+		total += n
+	}
+	return total
+}
+
+func collectMatching(dest *[]ReportItem, s *model.SourceSummary, status model.Status) int {
+	if s == nil {
+		return 0
+	}
+	n := 0
+	for _, it := range s.Items {
+		if it == nil || it.Status != status {
+			continue
+		}
+		n++
+		*dest = append(*dest, itemToReport(it))
+	}
+	return n
 }
 
 func itemToReport(it *model.Item) ReportItem {

@@ -11,6 +11,8 @@ import (
 // OpenCodeSource scans local npm plugins under ~/.config/opencode.
 type OpenCodeSource struct{}
 
+const nameOpenCodePlugins = "opencode-plugins"
+
 func (s *OpenCodeSource) Category() model.Category { return model.CatOpenCodePlugins }
 func (s *OpenCodeSource) Label() string            { return "OpenCode Plugins" }
 func (s *OpenCodeSource) Icon() string             { return "🔌" }
@@ -25,17 +27,17 @@ func (s *OpenCodeSource) Scan(ctx context.Context, plat model.PlatformInfo) ([]*
 	pkgJSON := filepath.Join(dir, "package.json")
 	if _, err := os.Stat(pkgJSON); err != nil {
 		return []*model.Item{
-			{Name: "opencode-plugins", Category: model.CatOpenCodePlugins, Status: model.StatusOK, CurrentVer: "no package.json"},
+			{Name: nameOpenCodePlugins, Category: model.CatOpenCodePlugins, Status: model.StatusOK, CurrentVer: "no package.json"},
 		}, nil
 	}
 
 	out, err := execCombined(ctx, "npm", "outdated", "--prefix", dir, "--json")
 	if err != nil && len(out) == 0 {
 		return []*model.Item{
-			{Name: "opencode-plugins", Category: model.CatOpenCodePlugins, Status: model.StatusError, CurrentVer: "npm outdated failed"},
+			{Name: nameOpenCodePlugins, Category: model.CatOpenCodePlugins, Status: model.StatusError, CurrentVer: "npm outdated failed"},
 		}, nil
 	}
 
 	items := ParseNpmOutdatedJSON(out, model.CatOpenCodePlugins)
-	return okOrOutdated("opencode-plugins", model.CatOpenCodePlugins, items), nil
+	return okOrOutdated(nameOpenCodePlugins, model.CatOpenCodePlugins, items), nil
 }

@@ -18,9 +18,10 @@ func (s *AgentSource) Label() string            { return "AI Agents" }
 func (s *AgentSource) Icon() string             { return "🤖" }
 
 const (
-	flagVersion  = "--version"
-	toolAIMemory = "ai-memory"
-	policyManual = "manual reinstall / app update"
+	flagVersion      = "--version"
+	toolAIMemory     = "ai-memory"
+	policyManual     = "manual reinstall / app update"
+	verNoneInstalled = "none installed"
 )
 
 var semverRE = regexp.MustCompile(`\d+\.\d+\.\d+[a-zA-Z0-9.-]*`)
@@ -90,7 +91,7 @@ func (s *AgentSource) Scan(ctx context.Context, plat model.PlatformInfo) ([]*mod
 	}
 	if len(items) == 0 {
 		return []*model.Item{
-			{Name: "agents", Category: model.CatAgent, Status: model.StatusOK, CurrentVer: "none installed"},
+			{Name: "agents", Category: model.CatAgent, Status: model.StatusOK, CurrentVer: verNoneInstalled},
 		}, nil
 	}
 	if plat.HasNpm {
@@ -159,7 +160,7 @@ func ApplyAgentOutdated(it *model.Item, latest string) {
 	}
 	cur := normalizeAgentVer(it.CurrentVer)
 	lat := normalizeAgentVer(latest)
-	if cur == "" || cur == "installed" || cur == "none installed" {
+	if cur == "" || cur == "installed" || cur == verNoneInstalled {
 		it.AvailableVer = lat
 		it.Status = model.StatusOutdated
 		return
@@ -243,7 +244,7 @@ func (s *AIInfraSource) Scan(ctx context.Context, plat model.PlatformInfo) ([]*m
 	}
 	if len(items) == 0 {
 		items = append(items, &model.Item{
-			Name: "ai-infra", Category: model.CatAI, Status: model.StatusOK, CurrentVer: "none installed",
+			Name: "ai-infra", Category: model.CatAI, Status: model.StatusOK, CurrentVer: verNoneInstalled,
 		})
 	}
 	return items, nil
