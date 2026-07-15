@@ -247,103 +247,94 @@ func (s *State) runUpdateAll() {
 // startUpdateAll returns a tea.Cmd that runs updates async.
 // Processes each category as a batch and sends progress messages.
 func (s *State) startUpdateAll(items []*model.Item, program *tea.Program) tea.Cmd {
-	// Prevent double-tap
 	if s.Updating {
 		return nil
 	}
-
 	s.Updating = true
 	s.OperationLabel = ""
 	s.LastSummary = ""
 	s.AddLog(fmt.Sprintf("Starting update of %d items...", len(items)), true)
-
-	// Pre-compute category groups (safe from main thread, not from goroutine)
 	groups := groupOutdatedByCategory(s.Summaries, items)
 
 	go func() {
 		total := len(items)
-		done := 0
-		success, failed := 0, 0
+		done, success, failed := 0, 0, 0
 		defer func() {
-			program.Send(UpdateAllDoneMsg{
-				Success: success,
-				Failed:  failed,
-				Total:   total,
-			})
+			program.Send(UpdateAllDoneMsg{Success: success, Failed: failed, Total: total})
 		}()
-
 		for _, group := range groups {
 			if len(group.items) == 0 {
 				continue
 			}
-
-			for _, it := range group.items {
-				it.Status = model.StatusUpdating
-			}
-			catLabel := categoryLabel(s.Summaries, group.category)
-			program.Send(UpdateBatchDoneMsg{
-				Results:  nil,
-				Done:     done,
-				Total:    total,
-				Category: catLabel,
-			})
-
-			batchTimeout := updater.BatchTimeout(group.category)
-			cmdCtx, cancel := context.WithTimeout(s.Ctx, batchTimeout)
-			needsElev := elevate.CategoryNeedsElevation(group.category, s.Platform)
-
-			if needsElev && group.category == model.CatMAS {
-				if err := s.waitForElevation(cmdCtx, program, "Mac App Store updates need your Mac login password"); err != nil {
-					cancel()
-					done += len(group.items)
-					for _, it := range group.items {
-						it.Status = model.StatusError
-					}
-					program.Send(UpdateBatchDoneMsg{
-						Results: masElevFailResults(group.items, err),
-						Done:    done,
-						Total:   total,
-					})
-					continue
-				}
-			}
-
-			cmdCtx = elevate.WithSession(cmdCtx, s.ElevSession)
-			hasSession := elevate.FromContext(cmdCtx) != nil && elevate.FromContext(cmdCtx).Ready()
-
-			if needsElev && !hasSession && group.category != model.CatMAS {
-				program.Send(tea.ExitAltScreen()) //nolint:staticcheck
-			}
-
-			opts := updater.SilentOptions()
-			opts.Output = newOutputLog(program)
-			results := updater.UpdateAllWithOptions(cmdCtx, group.items, opts)
-			cancel()
-
-			if needsElev && !hasSession && group.category != model.CatMAS {
-				program.Send(tea.EnterAltScreen()) //nolint:staticcheck
-			}
-
-			done += len(results)
-			for _, r := range results {
-				if r.Success {
-					success++
-				} else {
-					failed++
-				}
-			}
-			program.Send(UpdateBatchDoneMsg{
-				Results: results,
-				Done:    done,
-				Total:   total,
-			})
-
-			// Refresh this category from the system so the list matches reality.
+			ok, fail, n := s.runUpdateGroup(group, done, total, program)
+			success += ok
+			failed += fail
+			done += n
 			s.rescanCategory(s.Ctx, program, group.category, false)
 		}
 	}()
-
 	return TickCmd()
+}
+
+func (s *State) runUpdateGroup(group categoryGroup, done, total int, program *tea.Program) (ok, fail, n int) {
+	for _, it := range group.items {
+		it.Status = model.StatusUpdating
+	}
+	program.Send(UpdateBatchDoneMsg{
+		Results: nil, Done: done, Total: total,
+		Category: categoryLabel(s.Summaries, group.category),
+	})
+
+	cmdCtx, cancel := context.WithTimeout(s.Ctx, updater.BatchTimeout(group.category))
+	defer cancel()
+
+	if results, skipped := s.tryMASElevation(group, cmdCtx, program); skipped {
+		done += len(group.items)
+		program.Send(UpdateBatchDoneMsg{Results: results, Done: done, Total: total})
+		return 0, len(group.items), len(group.items)
+	}
+
+	results := s.execUpdateBatch(group, cmdCtx, program)
+	for _, r := range results {
+		if r.Success {
+			ok++
+		} else {
+			fail++
+		}
+	}
+	program.Send(UpdateBatchDoneMsg{Results: results, Done: done + len(results), Total: total})
+	return ok, fail, len(results)
+}
+
+func (s *State) tryMASElevation(group categoryGroup, cmdCtx context.Context, program *tea.Program) (results []*updater.Result, skipped bool) {
+	needsElev := elevate.CategoryNeedsElevation(group.category, s.Platform)
+	if !needsElev || group.category != model.CatMAS {
+		return nil, false
+	}
+	if err := s.waitForElevation(cmdCtx, program, "Mac App Store updates need your Mac login password"); err != nil {
+		for _, it := range group.items {
+			it.Status = model.StatusError
+		}
+		return masElevFailResults(group.items, err), true
+	}
+	return nil, false
+}
+
+func (s *State) execUpdateBatch(group categoryGroup, cmdCtx context.Context, program *tea.Program) []*updater.Result {
+	needsElev := elevate.CategoryNeedsElevation(group.category, s.Platform)
+	cmdCtx = elevate.WithSession(cmdCtx, s.ElevSession)
+	hasSession := elevate.FromContext(cmdCtx) != nil && elevate.FromContext(cmdCtx).Ready()
+	leaveAlt := needsElev && !hasSession && group.category != model.CatMAS
+	if leaveAlt {
+		program.Send(tea.ExitAltScreen()) //nolint:staticcheck
+	}
+	opts := updater.SilentOptions()
+	opts.Output = newOutputLog(program)
+	results := updater.UpdateAllWithOptions(cmdCtx, group.items, opts)
+	if leaveAlt {
+		program.Send(tea.EnterAltScreen()) //nolint:staticcheck
+	}
+	return results
 }
 
 // categoryGroup holds items grouped by category.
@@ -453,11 +444,9 @@ func (s *State) runCleanAll() {
 // startCleanSelected returns a tea.Cmd that runs cleanup async.
 // Items are processed one-by-one with progress messages.
 func (s *State) startCleanSelected(items []*model.Item, program *tea.Program) tea.Cmd {
-	// Prevent double-tap
 	if s.Cleaning {
 		return nil
 	}
-
 	s.Cleaning = true
 	s.OperationLabel = ""
 	s.LastSummary = ""
@@ -469,49 +458,41 @@ func (s *State) startCleanSelected(items []*model.Item, program *tea.Program) te
 		defer func() {
 			program.Send(CleanAllDoneMsg{BytesFreed: totalFreed})
 		}()
-
 		for i, it := range items {
-			it.Status = model.StatusCleaning
-			program.Send(CleanBatchDoneMsg{
-				Results:  nil,
-				Done:     i,
-				Total:    total,
-				Category: it.Name,
-			})
-
-			cmdCtx, cancel := context.WithTimeout(s.ctxWithElev(), cleaner.ItemTimeout(it))
-			needsElev := elevate.ItemNeedsElevation(it)
-			hasSession := elevate.FromContext(cmdCtx) != nil && elevate.FromContext(cmdCtx).Ready()
-
-			if needsElev && !hasSession {
-				program.Send(tea.ExitAltScreen()) //nolint:staticcheck
-			}
-
-			opts := cleaner.SilentOptions()
-			opts.Output = newOutputLog(program)
-			results := cleaner.CleanAllWithOptions(cmdCtx, []*model.Item{it}, opts)
-			cancel()
-
-			if needsElev && !hasSession {
-				program.Send(tea.EnterAltScreen()) //nolint:staticcheck
-			}
-
-			for _, r := range results {
-				if r.Success {
-					totalFreed += r.BytesFreed
-				}
-			}
-
-			program.Send(CleanBatchDoneMsg{
-				Results: results,
-				Done:    i + 1,
-				Total:   total,
-			})
-
+			totalFreed += s.cleanOneItem(it, i, total, program)
 			s.rescanCategory(s.Ctx, program, it.Category, true)
 		}
-
 	}()
-
 	return TickCmd()
+}
+
+func (s *State) cleanOneItem(it *model.Item, i, total int, program *tea.Program) int64 {
+	it.Status = model.StatusCleaning
+	program.Send(CleanBatchDoneMsg{
+		Results: nil, Done: i, Total: total, Category: it.Name,
+	})
+
+	cmdCtx, cancel := context.WithTimeout(s.ctxWithElev(), cleaner.ItemTimeout(it))
+	needsElev := elevate.ItemNeedsElevation(it)
+	hasSession := elevate.FromContext(cmdCtx) != nil && elevate.FromContext(cmdCtx).Ready()
+	leaveAlt := needsElev && !hasSession
+	if leaveAlt {
+		program.Send(tea.ExitAltScreen()) //nolint:staticcheck
+	}
+	opts := cleaner.SilentOptions()
+	opts.Output = newOutputLog(program)
+	results := cleaner.CleanAllWithOptions(cmdCtx, []*model.Item{it}, opts)
+	cancel()
+	if leaveAlt {
+		program.Send(tea.EnterAltScreen()) //nolint:staticcheck
+	}
+
+	var freed int64
+	for _, r := range results {
+		if r.Success {
+			freed += r.BytesFreed
+		}
+	}
+	program.Send(CleanBatchDoneMsg{Results: results, Done: i + 1, Total: total})
+	return freed
 }
