@@ -7,7 +7,8 @@ import (
 	"os/exec"
 )
 
-const errSudoAskpass = "sudo askpass: %w"
+// Format string for sudo helper setup errors (not a credential).
+const errSudoHelper = "sudo helper: %w" // #nosec G101 -- error format, not a secret
 
 // noopCleanup is returned when no temporary askpass files were created.
 // Nested empty body is intentional: caller always defers cleanup safely.
@@ -48,22 +49,22 @@ func AttachSubprocessSudo(ctx context.Context, cmd *exec.Cmd) (func(), error) {
 func writeSudoPasswordFile(password string) (string, error) {
 	pwFile, err := os.CreateTemp("", "updash-sudo-pw-*")
 	if err != nil {
-		return "", fmt.Errorf(errSudoAskpass, err)
+		return "", fmt.Errorf(errSudoHelper, err)
 	}
 	pwPath := pwFile.Name()
 	if _, err := pwFile.WriteString(password + "\n"); err != nil {
 		_ = pwFile.Close()
 		_ = os.Remove(pwPath)
-		return "", fmt.Errorf(errSudoAskpass, err)
+		return "", fmt.Errorf(errSudoHelper, err)
 	}
 	if err := pwFile.Chmod(0600); err != nil {
 		_ = pwFile.Close()
 		_ = os.Remove(pwPath)
-		return "", fmt.Errorf(errSudoAskpass, err)
+		return "", fmt.Errorf(errSudoHelper, err)
 	}
 	if err := pwFile.Close(); err != nil {
 		_ = os.Remove(pwPath)
-		return "", fmt.Errorf(errSudoAskpass, err)
+		return "", fmt.Errorf(errSudoHelper, err)
 	}
 	return pwPath, nil
 }
@@ -71,23 +72,23 @@ func writeSudoPasswordFile(password string) (string, error) {
 func writeSudoAskpassScript(pwPath string) (string, error) {
 	scriptFile, err := os.CreateTemp("", "updash-askpass-*")
 	if err != nil {
-		return "", fmt.Errorf(errSudoAskpass, err)
+		return "", fmt.Errorf(errSudoHelper, err)
 	}
 	scriptPath := scriptFile.Name()
 	script := fmt.Sprintf("#!/bin/sh\nexec cat %q\n", pwPath)
 	if _, err := scriptFile.WriteString(script); err != nil {
 		_ = scriptFile.Close()
 		_ = os.Remove(scriptPath)
-		return "", fmt.Errorf(errSudoAskpass, err)
+		return "", fmt.Errorf(errSudoHelper, err)
 	}
 	if err := scriptFile.Chmod(0700); err != nil {
 		_ = scriptFile.Close()
 		_ = os.Remove(scriptPath)
-		return "", fmt.Errorf(errSudoAskpass, err)
+		return "", fmt.Errorf(errSudoHelper, err)
 	}
 	if err := scriptFile.Close(); err != nil {
 		_ = os.Remove(scriptPath)
-		return "", fmt.Errorf(errSudoAskpass, err)
+		return "", fmt.Errorf(errSudoHelper, err)
 	}
 	return scriptPath, nil
 }
