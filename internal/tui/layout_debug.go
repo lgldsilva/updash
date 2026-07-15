@@ -93,52 +93,69 @@ func (s *State) LogWindowSize(w, h int) {
 	)
 }
 
-// debugFrame logs frame metrics and any line that exceeds the terminal width.
-func (s *State) debugFrame(stage string, term, cw, boxW int, out string) {
-	if !layoutDebugEnabled() && !hasOverflow(out, term) {
-		return
-	}
-	layoutLogN++
-	if layoutDebugEnabled() && layoutLogN > 200 {
-		// avoid multi‑MB logs during spinner ticks
-		if layoutLogN == 201 {
-			layoutLog("suppress further frame logs (cap 200); overflows still recorded")
-		}
-		if !hasOverflow(out, term) {
-			return
-		}
-	}
+// frameLineStats summarizes widths for debug logging.
+type frameLineStats struct {
+	maxW, over int
+	samples    []string
+}
 
-	maxW := 0
-	over := 0
-	var samples []string
+func collectFrameStats(out string, term int) frameLineStats {
+	var st frameLineStats
 	for i, line := range strings.Split(out, "\n") {
 		w := lipgloss.Width(line)
-		if w > maxW {
-			maxW = w
+		if w > st.maxW {
+			st.maxW = w
 		}
-		if w > term {
-			over++
-			if len(samples) < 5 {
-				plain := stripANSIForLog(line)
-				if len(plain) > 100 {
-					plain = plain[:100] + "…"
-				}
-				samples = append(samples, fmt.Sprintf("L%d w=%d %q", i, w, plain))
-			}
+		if w <= term {
+			continue
 		}
+		st.over++
+		if len(st.samples) >= 5 {
+			continue
+		}
+		plain := stripANSIForLog(line)
+		if len(plain) > 100 {
+			plain = plain[:100] + "…"
+		}
+		st.samples = append(st.samples, fmt.Sprintf("L%d w=%d %q", i, w, plain))
 	}
+	return st
+}
 
+func shouldLogFrame(debug bool, over int) bool {
+	if !debug && over == 0 {
+		return false
+	}
+	if !debug {
+		return true // overflow without debug still logs
+	}
+	layoutLogN++
+	if layoutLogN <= 200 {
+		return true
+	}
+	if layoutLogN == 201 {
+		layoutLog("suppress further frame logs (cap 200); overflows still recorded")
+	}
+	return over > 0
+}
+
+// debugFrame logs frame metrics and any line that exceeds the terminal width.
+func (s *State) debugFrame(stage string, term, cw, boxW int, out string) {
+	debug := layoutDebugEnabled()
+	st := collectFrameStats(out, term)
+	if !shouldLogFrame(debug, st.over) {
+		return
+	}
 	msg := fmt.Sprintf("%s term=%d cw=%d boxW=%d maxLine=%d overLines=%d state.Width=%d state.Height=%d",
-		stage, term, cw, boxW, maxW, over, s.Width, s.Height)
-	if layoutDebugEnabled() {
+		stage, term, cw, boxW, st.maxW, st.over, s.Width, s.Height)
+	if debug {
 		layoutLog("%s", msg)
-		for _, s := range samples {
-			layoutLog("  %s", s)
+		for _, sample := range st.samples {
+			layoutLog("  %s", sample)
 		}
 	}
-	if over > 0 {
-		layoutLogAlways("%s samples=%v", msg, samples)
+	if st.over > 0 {
+		layoutLogAlways("%s samples=%v", msg, st.samples)
 	}
 }
 
