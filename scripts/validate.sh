@@ -52,36 +52,21 @@ echo ""
 # ── Sonar preview (opcional — requer SONAR_TOKEN) ─────────────────────────
 
 if [ -n "${SONAR_TOKEN:-}" ]; then
-  echo "  SonarQube preview..."
-  SONAR_URL="${SONAR_URL:-https://example.com}"
-  PROJECT_KEY="updash-preview-$(date +%s)"
-
-  sonar-scanner \
-    -Dsonar.host.url="$SONAR_URL" \
-    -Dsonar.token="$SONAR_TOKEN" \
-    -Dsonar.projectKey="$PROJECT_KEY" \
-    -Dsonar.projectName="updash-preview" \
-    -Dsonar.sources=. \
-    -Dsonar.exclusions='**/*_test.go,**/vendor/**' \
-    -Dsonar.go.coverage.reportPaths=/tmp/updash-cov.out \
-    -Dsonar.tests=. \
-    -Dsonar.test.inclusions='**/*_test.go' \
-    -Dsonar.coverage.exclusions='cmd/**,internal/platform/**,internal/updater/**' \
-    -Dsonar.scm.disabled=true \
-    -Dsonar.qualitygate.wait=true &>/tmp/updash-sonar.log
-
-  if grep -q "QUALITY GATE STATUS: PASSED" /tmp/updash-sonar.log; then
+  echo "  SonarQube preview (ephemeral project)..."
+  # Same CE workaround as CI: temp project → report → delete.
+  if PROJECT_KEY="updash-preview-$(date +%s)" \
+     PROJECT_NAME="updash-preview" \
+     EPHEMERAL=1 \
+     COVERAGE_FILE=/tmp/updash-cov.out \
+     REPORT_FILE=/tmp/updash-sonar-report.txt \
+     ./scripts/sonar-ephemeral.sh &>/tmp/updash-sonar.log; then
     echo -e "  SonarQube gate              ${GREEN}✓ PASSED${NC}"
   else
     echo -e "  SonarQube gate              ${RED}✘ FAILED${NC}"
-    grep "QUALITY GATE" /tmp/updash-sonar.log || tail -3 /tmp/updash-sonar.log
+    grep -E 'quality_gate|status:|✘|✓' /tmp/updash-sonar.log | tail -20 \
+      || tail -15 /tmp/updash-sonar.log
     FAIL=1
   fi
-
-  # Clean up temp project
-  curl -sk -X POST "$SONAR_URL/api/projects/delete" \
-    -u "admin:${SONAR_TOKEN}" \
-    -d "project=$PROJECT_KEY" &>/dev/null || true
 else
   echo "  SonarQube gate              ${GRAY}SKIPPED (set SONAR_TOKEN)${NC}"
 fi
