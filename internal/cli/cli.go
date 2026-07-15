@@ -19,13 +19,13 @@ import (
 
 // Config controls headless CLI behaviour.
 type Config struct {
-	Verbose      bool
-	DryRun       bool
-	Only         string // category filter, e.g. "brew", "mas"
-	Clean        bool   // include cleanup in RunAll
-	SkipPassword      bool // skip batches that need sudo instead of macOS dialog
-	Strict            bool // exit non-zero if any item remains outdated
-	SkipAutoUpgrade   bool // skip release self-update on startup
+	Verbose         bool
+	DryRun          bool
+	Only            string // category filter, e.g. "brew", "mas"
+	Clean           bool   // include cleanup in RunAll
+	SkipPassword    bool   // skip batches that need sudo instead of macOS dialog
+	Strict          bool   // exit non-zero if any item remains outdated
+	SkipAutoUpgrade bool   // skip release self-update on startup
 }
 
 // Scan runs a single full scan and splits update vs cleanup summaries.

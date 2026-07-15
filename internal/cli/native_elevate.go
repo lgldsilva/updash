@@ -5,8 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"strings"
-	"unicode"
 
 	"github.com/lgldsilva/updash/internal/elevate"
 	"github.com/lgldsilva/updash/internal/model"
@@ -90,15 +88,6 @@ func runNativeElevatedItems(
 		}
 	}
 	return results
-}
-
-func normalizeItemKey(name string) string {
-	return strings.TrimSpace(strings.Map(func(r rune) rune {
-		if unicode.Is(unicode.Cf, r) || unicode.Is(unicode.Cc, r) {
-			return -1
-		}
-		return r
-	}, name))
 }
 
 func stdinIsTTY() bool {

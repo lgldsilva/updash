@@ -58,7 +58,7 @@ func Parse(s string) (int64, error) {
 	} else {
 		unit = strings.TrimSuffix(unit, "B")
 	}
-	mult := int64(1)
+	var mult int64
 	switch unit {
 	case "K":
 		mult = 1024

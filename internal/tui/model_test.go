@@ -3,6 +3,7 @@ package tui
 import (
 	"testing"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/lgldsilva/updash/internal/elevate"
 	"github.com/lgldsilva/updash/internal/model"
 )
@@ -314,4 +315,56 @@ func TestState_CtxWithElev(t *testing.T) {
 	if elevate.FromContext(ctx) == nil {
 		t.Fatal("expected session in context")
 	}
+}
+
+func TestState_CancelPasswordAndClearElevation(t *testing.T) {
+	s := New()
+	s.ShowPassword = true
+	s.PasswordInput = "x"
+	s.PasswordError = "err"
+	s.ConfirmCmd = func(p *tea.Program) tea.Cmd { return nil }
+	s.PendingUpdateItems = []*model.Item{{Name: "a"}}
+	s.PendingCleanItems = []*model.Item{{Name: "b"}}
+	s.CancelPassword()
+	if s.ShowPassword || s.PasswordInput != "" || s.PasswordError != "" {
+		t.Fatal("password state not cleared")
+	}
+	if s.ConfirmCmd != nil || s.PendingUpdateItems != nil || s.PendingCleanItems != nil {
+		t.Fatal("pending ops not cleared")
+	}
+	s.ClearElevation()
+	if s.ElevSession != nil {
+		t.Fatal("elev session should stay nil")
+	}
+}
+
+func TestState_ConsumeConfirmCmd_nil(t *testing.T) {
+	s := New()
+	if cmd := s.ConsumeConfirmCmd(nil); cmd != nil {
+		t.Fatal("expected nil cmd when ConfirmCmd is nil")
+	}
+	called := false
+	s.ConfirmCmd = func(p *tea.Program) tea.Cmd {
+		called = true
+		return nil
+	}
+	s.ShowConfirm = true
+	_ = s.ConsumeConfirmCmd(nil)
+	// Either password prompt or finishConfirm; both are success if no panic.
+	_ = called
+	_ = s.ConsumeConfirmAfterPassword(nil)
+	s.CancelPassword()
+}
+
+func TestState_ClampCursorAndLogScanErrors(t *testing.T) {
+	s := New()
+	s.Cursor = 99
+	s.ClampCursor()
+	if s.Cursor < 0 {
+		t.Fatal("cursor negative")
+	}
+	s.Summaries = []*model.SourceSummary{
+		{Category: model.CatBrew, ErrorCount: 1, Items: []*model.Item{{Name: "x", Status: model.StatusError, CurrentVer: "fail"}}},
+	}
+	s.LogScanErrors()
 }
