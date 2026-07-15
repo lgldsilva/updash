@@ -20,73 +20,94 @@ type verifyStats struct {
 func printCheckEnhanced(updates, cleanup []*model.SourceSummary) (outdated, cleanable, needsPassword, manualOnly int) {
 	fmt.Println("\n📦 Updates:")
 	for _, s := range updates {
-		if s.Category == model.CatAgent {
-			fmt.Printf("  %s %s:", s.Icon, s.Label)
-			agentsOut := 0
-			for _, it := range s.Items {
-				if it.Status == model.StatusOutdated {
-					agentsOut++
-				}
-			}
-			fmt.Printf(" %d installed (%d outdated)\n", len(s.Items), agentsOut)
-			for _, it := range s.Items {
-				if it.Status == model.StatusOutdated {
-					printOutdatedLine(it)
-					outdated++
-					countScanHints(it, &needsPassword, &manualOnly)
-				} else if it.CurrentVer != "" {
-					fmt.Printf("    ✓ %s  %s\n", it.Name, it.CurrentVer)
-				}
-			}
-			continue
-		}
-
-		if s.Outdated > 0 {
-			fmt.Printf("  %s %s: %d outdated\n", s.Icon, s.Label, s.Outdated)
-			for _, it := range s.Items {
-				if it.Status == model.StatusOutdated {
-					printOutdatedLine(it)
-					outdated++
-					countScanHints(it, &needsPassword, &manualOnly)
-				}
-			}
-		}
+		o, np, mo := printUpdateSummary(s)
+		outdated += o
+		needsPassword += np
+		manualOnly += mo
 	}
 
 	fmt.Println("\n🧹 Cleanup:")
 	for _, s := range cleanup {
-		count := 0
-		for _, it := range s.Items {
-			if it.Status == model.StatusCleanCandidate {
-				count++
-			}
-		}
-		if count > 0 {
-			reclaim := s.Reclaimable
-			if reclaim == "" {
-				reclaim = fmt.Sprintf("%d item(s)", count)
-			}
-			fmt.Printf("  %s %s: %s\n", s.Icon, s.Label, reclaim)
-			cleanable += count
-		}
+		cleanable += printCleanupSummary(s)
 	}
 
+	printCheckFooter(outdated, cleanable, needsPassword, manualOnly)
+	return outdated, cleanable, needsPassword, manualOnly
+}
+
+func printUpdateSummary(s *model.SourceSummary) (outdated, needsPassword, manualOnly int) {
+	if s.Category == model.CatAgent {
+		return printAgentSummary(s)
+	}
+	if s.Outdated == 0 {
+		return 0, 0, 0
+	}
+	fmt.Printf("  %s %s: %d outdated\n", s.Icon, s.Label, s.Outdated)
+	for _, it := range s.Items {
+		if it.Status != model.StatusOutdated {
+			continue
+		}
+		printOutdatedLine(it)
+		outdated++
+		countScanHints(it, &needsPassword, &manualOnly)
+	}
+	return outdated, needsPassword, manualOnly
+}
+
+func printAgentSummary(s *model.SourceSummary) (outdated, needsPassword, manualOnly int) {
+	agentsOut := 0
+	for _, it := range s.Items {
+		if it.Status == model.StatusOutdated {
+			agentsOut++
+		}
+	}
+	fmt.Printf("  %s %s: %d installed (%d outdated)\n", s.Icon, s.Label, len(s.Items), agentsOut)
+	for _, it := range s.Items {
+		if it.Status == model.StatusOutdated {
+			printOutdatedLine(it)
+			outdated++
+			countScanHints(it, &needsPassword, &manualOnly)
+		} else if it.CurrentVer != "" {
+			fmt.Printf("    ✓ %s  %s\n", it.Name, it.CurrentVer)
+		}
+	}
+	return outdated, needsPassword, manualOnly
+}
+
+func printCleanupSummary(s *model.SourceSummary) int {
+	count := 0
+	for _, it := range s.Items {
+		if it.Status == model.StatusCleanCandidate {
+			count++
+		}
+	}
+	if count == 0 {
+		return 0
+	}
+	reclaim := s.Reclaimable
+	if reclaim == "" {
+		reclaim = fmt.Sprintf("%d item(s)", count)
+	}
+	fmt.Printf("  %s %s: %s\n", s.Icon, s.Label, reclaim)
+	return count
+}
+
+func printCheckFooter(outdated, cleanable, needsPassword, manualOnly int) {
 	if outdated == 0 && cleanable == 0 {
 		fmt.Println("\n✓ Everything is up to date!")
-	} else {
-		fmt.Printf("\n%d outdated", outdated)
-		if needsPassword > 0 {
-			fmt.Printf(" · %d precisam senha", needsPassword)
-		}
-		if manualOnly > 0 {
-			fmt.Printf(" · %d só manual", manualOnly)
-		}
-		if cleanable > 0 {
-			fmt.Printf(" · %d cleanable", cleanable)
-		}
-		fmt.Println()
+		return
 	}
-	return outdated, cleanable, needsPassword, manualOnly
+	fmt.Printf("\n%d outdated", outdated)
+	if needsPassword > 0 {
+		fmt.Printf(" · %d precisam senha", needsPassword)
+	}
+	if manualOnly > 0 {
+		fmt.Printf(" · %d só manual", manualOnly)
+	}
+	if cleanable > 0 {
+		fmt.Printf(" · %d cleanable", cleanable)
+	}
+	fmt.Println()
 }
 
 func printOutdatedLine(it *model.Item) {
@@ -121,15 +142,37 @@ func PrintVerifyReport(
 	results []*updater.Result,
 	ok, fail, skipped int,
 ) verifyStats {
-	resultByItem := make(map[*model.Item]*updater.Result, len(results))
-	for _, r := range results {
-		if r != nil && r.Item != nil {
-			resultByItem[r.Item] = r
-		}
-	}
-
+	resultByItem := indexResults(results)
 	stats := verifyStats{updated: ok, skipped: skipped, failed: fail}
 
+	printVerifyHeader(ok, fail, skipped)
+
+	needPass, manual, failed, other := classifyRemaining(updates, resultByItem, &stats)
+	if stats.remaining == 0 {
+		fmt.Println("\n✓ Tudo verificado — nada outdated restante")
+		return stats
+	}
+	stats.manual = len(manual)
+
+	fmt.Printf("\n⚠ %d item(s) ainda outdated:\n", stats.remaining)
+	printVerifyGroup("Precisam senha / Terminal", needPass, resultByItem)
+	printVerifyGroup("Só atualização manual", manual, resultByItem)
+	printVerifyGroup("Falharam", failed, resultByItem)
+	printVerifyGroup("Outros", other, resultByItem)
+	return stats
+}
+
+func indexResults(results []*updater.Result) map[*model.Item]*updater.Result {
+	m := make(map[*model.Item]*updater.Result, len(results))
+	for _, r := range results {
+		if r != nil && r.Item != nil {
+			m[r.Item] = r
+		}
+	}
+	return m
+}
+
+func printVerifyHeader(ok, fail, skipped int) {
 	fmt.Println("\n📋 Relatório:")
 	fmt.Printf("  ✓ %d atualizados", ok)
 	if skipped > 0 {
@@ -139,20 +182,23 @@ func PrintVerifyReport(
 		fmt.Printf(" · ✘ %d falharam", fail)
 	}
 	fmt.Println()
+}
 
-	var needPass, manual, failed, other []*model.Item
+func classifyRemaining(
+	updates []*model.SourceSummary,
+	resultByItem map[*model.Item]*updater.Result,
+	stats *verifyStats,
+) (needPass, manual, failed, other []*model.Item) {
 	for _, s := range updates {
 		for _, it := range s.Items {
 			if it.Status != model.StatusOutdated {
 				continue
 			}
 			stats.remaining++
-			r := resultByItem[it]
-			kind, reason := updater.ClassifyItem(it, r)
+			kind, _ := updater.ClassifyItem(it, resultByItem[it])
 			switch kind {
 			case updater.KindNeedsPassword:
 				needPass = append(needPass, it)
-				_ = reason
 			case updater.KindManualOnly:
 				manual = append(manual, it)
 			case updater.KindFailed:
@@ -162,21 +208,7 @@ func PrintVerifyReport(
 			}
 		}
 	}
-
-	if stats.remaining == 0 {
-		fmt.Println("\n✓ Tudo verificado — nada outdated restante")
-		return stats
-	}
-
-	stats.manual = len(manual)
-
-	fmt.Printf("\n⚠ %d item(s) ainda outdated:\n", stats.remaining)
-	printVerifyGroup("Precisam senha / Terminal", needPass, resultByItem)
-	printVerifyGroup("Só atualização manual", manual, resultByItem)
-	printVerifyGroup("Falharam", failed, resultByItem)
-	printVerifyGroup("Outros", other, resultByItem)
-
-	return stats
+	return needPass, manual, failed, other
 }
 
 func printVerifyGroup(title string, items []*model.Item, results map[*model.Item]*updater.Result) {

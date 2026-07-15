@@ -191,35 +191,42 @@ func runCleanBatches(ctx context.Context, summaries []*model.SourceSummary, item
 	for _, g := range groupCleanBySummary(summaries, items) {
 		fmt.Printf("\n→ %s (%d item(s))\n", g.label, len(g.items))
 		for _, it := range g.items {
-			detail := it.Name
-			if it.Reclaimable != "" {
-				detail = fmt.Sprintf("%s (~%s reclaimable)", it.Name, it.Reclaimable)
-			}
-			fmt.Printf("  • %s\n", detail)
-
-			itemCtx, cancel := context.WithTimeout(ctx, cleaner.ItemTimeout(it))
-			r := cleaner.CleanOne(itemCtx, it, opts)
-			cancel()
-
-			if r.Success {
-				freed += r.BytesFreed
-				if r.BytesFreed > 0 {
-					fmt.Printf("  ✓ %s (freed %s)\n", it.Name, cleaner.FormatBytes(r.BytesFreed))
-				} else {
-					fmt.Printf("  ✓ %s (nothing to remove)\n", it.Name)
-				}
-				ok++
-			} else {
-				errMsg := r.Error
-				if errMsg == "" {
-					errMsg = "failed"
-				}
-				fmt.Printf(msgItemFail, it.Name, errMsg)
-				fail++
-			}
+			printCleanItemDetail(it)
+			o, f, bytes := runOneClean(ctx, it, opts)
+			ok += o
+			fail += f
+			freed += bytes
 		}
 	}
 	return ok, fail, freed
+}
+
+func printCleanItemDetail(it *model.Item) {
+	detail := it.Name
+	if it.Reclaimable != "" {
+		detail = fmt.Sprintf("%s (~%s reclaimable)", it.Name, it.Reclaimable)
+	}
+	fmt.Printf("  • %s\n", detail)
+}
+
+func runOneClean(ctx context.Context, it *model.Item, opts cleaner.Options) (ok, fail int, freed int64) {
+	itemCtx, cancel := context.WithTimeout(ctx, cleaner.ItemTimeout(it))
+	r := cleaner.CleanOne(itemCtx, it, opts)
+	cancel()
+	if !r.Success {
+		errMsg := r.Error
+		if errMsg == "" {
+			errMsg = "failed"
+		}
+		fmt.Printf(msgItemFail, it.Name, errMsg)
+		return 0, 1, 0
+	}
+	if r.BytesFreed > 0 {
+		fmt.Printf("  ✓ %s (freed %s)\n", it.Name, cleaner.FormatBytes(r.BytesFreed))
+	} else {
+		fmt.Printf("  ✓ %s (nothing to remove)\n", it.Name)
+	}
+	return 1, 0, r.BytesFreed
 }
 
 func groupCleanBySummary(summaries []*model.SourceSummary, items []*model.Item) []cleanGroup {
@@ -258,75 +265,90 @@ func runUpdateBatches(
 	var elevSession *elevate.Session
 	ctx = primeElevationSession(ctx, plat, normalItems, cfg, &elevSession)
 
-	if len(nativeItems) > 0 {
-		fmt.Printf("\n→ 🔐 Atualizações privilegiadas (%d item(s))\n", len(nativeItems))
-		for _, it := range nativeItems {
-			fmt.Printf("  • %s\n", it.Name)
-		}
-		for _, r := range runNativeElevatedItems(ctx, plat, nativeItems, opts, cfg, &elevSession) {
-			allResults = append(allResults, r)
-			if r.Success {
-				fmt.Printf("  ✓ %s\n", r.Item.Name)
-				ok++
-			} else if isSkippedResult(r) {
-				fmt.Printf("  ⊘ %s: %s\n", r.Item.Name, strings.TrimPrefix(r.Error, "⊘ "))
-				skipped++
-			} else {
-				errMsg := r.Error
-				if errMsg == "" {
-					errMsg = "failed"
-				}
-				fmt.Printf(msgItemFail, r.Item.Name, errMsg)
-				fail++
-			}
-		}
-	}
+	o, f, sk, res := runNativeUpdateSection(ctx, plat, nativeItems, opts, cfg, &elevSession)
+	ok, fail, skipped = o, f, sk
+	allResults = append(allResults, res...)
 
 	groups := groupByCategory(normalItems)
-	cats := sortedCategories(groups)
-
-	for _, cat := range cats {
-		groupItems := groups[cat]
-		label := categoryLabel(summaries, cat)
-		fmt.Printf("\n→ %s (%d item(s))\n", label, len(groupItems))
-
-		batchCtx, cancel := context.WithTimeout(ctx, updater.BatchTimeout(cat))
-
-		var results []*updater.Result
-		if cat == model.CatBrew {
-			results = runBrewUpdateBatch(batchCtx, groupItems, opts, cfg, &elevSession)
-		} else {
-			elevCtx := batchCtx
-			batchSkipped := false
-			skipReason := ""
-			elevCtx, batchSkipped, skipReason = ensureCategoryElevation(elevCtx, plat, cat, cfg, &elevSession)
-			if batchSkipped {
-				results = skipBatchResults(groupItems, skipReason)
-			} else {
-				results = updater.UpdateCategory(elevCtx, cat, groupItems, opts)
-			}
-		}
-		cancel()
-
-		for _, r := range results {
-			allResults = append(allResults, r)
-			if r.Success {
-				fmt.Printf("  ✓ %s\n", r.Item.Name)
-				ok++
-			} else if isSkippedResult(r) {
-				fmt.Printf("  ⊘ %s: %s\n", r.Item.Name, strings.TrimPrefix(r.Error, "⊘ "))
-				skipped++
-			} else {
-				errMsg := r.Error
-				if errMsg == "" {
-					errMsg = "failed"
-				}
-				fmt.Printf(msgItemFail, r.Item.Name, errMsg)
-				fail++
-			}
-		}
+	for _, cat := range sortedCategories(groups) {
+		o, f, sk, res := runCategoryUpdateSection(ctx, plat, summaries, cat, groups[cat], opts, cfg, &elevSession)
+		ok += o
+		fail += f
+		skipped += sk
+		allResults = append(allResults, res...)
 	}
 	return ok, fail, skipped, allResults
+}
+
+func tallyUpdateResults(results []*updater.Result) (ok, fail, skipped int) {
+	for _, r := range results {
+		switch {
+		case r.Success:
+			fmt.Printf("  ✓ %s\n", r.Item.Name)
+			ok++
+		case isSkippedResult(r):
+			fmt.Printf("  ⊘ %s: %s\n", r.Item.Name, strings.TrimPrefix(r.Error, "⊘ "))
+			skipped++
+		default:
+			errMsg := r.Error
+			if errMsg == "" {
+				errMsg = "failed"
+			}
+			fmt.Printf(msgItemFail, r.Item.Name, errMsg)
+			fail++
+		}
+	}
+	return ok, fail, skipped
+}
+
+func runNativeUpdateSection(
+	ctx context.Context,
+	plat model.PlatformInfo,
+	nativeItems []*model.Item,
+	opts updater.Options,
+	cfg Config,
+	elevSession **elevate.Session,
+) (ok, fail, skipped int, results []*updater.Result) {
+	if len(nativeItems) == 0 {
+		return 0, 0, 0, nil
+	}
+	fmt.Printf("\n→ 🔐 Atualizações privilegiadas (%d item(s))\n", len(nativeItems))
+	for _, it := range nativeItems {
+		fmt.Printf("  • %s\n", it.Name)
+	}
+	results = runNativeElevatedItems(ctx, plat, nativeItems, opts, cfg, elevSession)
+	ok, fail, skipped = tallyUpdateResults(results)
+	return ok, fail, skipped, results
+}
+
+func runCategoryUpdateSection(
+	ctx context.Context,
+	plat model.PlatformInfo,
+	summaries []*model.SourceSummary,
+	cat model.Category,
+	groupItems []*model.Item,
+	opts updater.Options,
+	cfg Config,
+	elevSession **elevate.Session,
+) (ok, fail, skipped int, results []*updater.Result) {
+	label := categoryLabel(summaries, cat)
+	fmt.Printf("\n→ %s (%d item(s))\n", label, len(groupItems))
+
+	batchCtx, cancel := context.WithTimeout(ctx, updater.BatchTimeout(cat))
+	defer cancel()
+
+	if cat == model.CatBrew {
+		results = runBrewUpdateBatch(batchCtx, groupItems, opts, cfg, elevSession)
+	} else {
+		elevCtx, batchSkipped, skipReason := ensureCategoryElevation(batchCtx, plat, cat, cfg, elevSession)
+		if batchSkipped {
+			results = skipBatchResults(groupItems, skipReason)
+		} else {
+			results = updater.UpdateCategory(elevCtx, cat, groupItems, opts)
+		}
+	}
+	ok, fail, skipped = tallyUpdateResults(results)
+	return ok, fail, skipped, results
 }
 
 func collectOutdated(summaries []*model.SourceSummary, only string) []*model.Item {
