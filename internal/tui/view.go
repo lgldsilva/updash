@@ -135,91 +135,26 @@ func (s *State) renderContent() string {
 
 func (s *State) renderUpdatesTab() string {
 	var b strings.Builder
-
-	if s.Scanning && len(s.Summaries) == 0 {
-		b.WriteString(SpinnerStyle.Render(fmt.Sprintf(" %s Waiting for scan results...", s.spinnerGlyph())))
-		b.WriteString("\n\n")
-	}
-
-	// Global progress bar when updating
-	if s.Updating && s.UpdateTotal > 0 {
-		label := ""
-		if s.OperationLabel != "" {
-			label = " " + s.OperationLabel
-		}
-		progLine := joinRow(
-			SpinnerStyle.Render(s.spinnerGlyph()+" Updating"+label),
-			lipgloss.NewStyle().Render("  "),
-			s.renderProgressBar(s.UpdateTotal, s.UpdateDone),
-			lipgloss.NewStyle().Render(fmt.Sprintf(fmtProgressCount, s.UpdateDone, s.UpdateTotal)),
-		)
-		b.WriteString(truncateStyled(progLine, s.contentWidth()))
-		b.WriteString("\n\n")
-	}
+	s.writeScanWait(&b, len(s.Summaries) == 0)
+	s.writeOpProgress(&b, s.Updating && s.UpdateTotal > 0, "Updating", s.UpdateTotal, s.UpdateDone)
 
 	flatIdx := 0
 	firstCat := true
-
 	for _, summary := range s.Summaries {
 		if len(summary.Items) == 0 {
 			continue
 		}
-
-		// Blank line between categories (spacing without style margins)
 		if !firstCat {
 			b.WriteString("\n")
 		}
 		firstCat = false
-
-		// Category header with live progress (reads item statuses, not static counts)
 		b.WriteString(s.renderCategoryHeader(summary))
 		b.WriteString("\n")
-
 		if !hasUpdateItems(summary) {
-			if summary.Category == model.CatAgent && summary.Total > 0 {
-				// Align under name column (cursor + checkbox + gap)
-				indent := strings.Repeat(" ", 4)
-				b.WriteString(joinRow(
-					lipgloss.NewStyle().Render(indent),
-					ItemOKStyle.Render(fmt.Sprintf("✓ %d installed, up to date", summary.Total)),
-				))
-				b.WriteString("\n")
-			}
+			s.writeAgentUpToDate(&b, summary)
 			continue
 		}
-
-		// Items (only actionable — matches CurrentItems() / cursor)
-		for _, item := range summary.Items {
-			if !isUpdateNavigable(item.Status) {
-				continue
-			}
-
-			sel := " "
-			if s.ActiveTab == model.TabUpdates {
-				switch {
-				case item.Selected:
-					sel = CheckboxStyle.Render("◉")
-				case item.Status == model.StatusOutdated:
-					sel = "○"
-				}
-			}
-
-			cursor := " "
-			if flatIdx == s.Cursor && s.ActiveTab == model.TabUpdates {
-				cursor = "▸"
-			}
-
-			// Fixed gutter: "▸ ○ " / "  ○ " so columns share one vertical edge
-			gutter := fmt.Sprintf("%s %s ", cursor, sel)
-			row := joinRow(
-				lipgloss.NewStyle().Render(gutter),
-				s.renderItemStyled(item),
-			)
-			b.WriteString(s.formatRow(row, flatIdx))
-			b.WriteString("\n")
-
-			flatIdx++
-		}
+		flatIdx = s.writeUpdateItems(&b, summary, flatIdx)
 	}
 
 	if s.TotalOutdated() == 0 && !s.Scanning {
@@ -227,98 +162,100 @@ func (s *State) renderUpdatesTab() string {
 		b.WriteString(ItemOKStyle.Render("✓ All packages are up to date"))
 		b.WriteString("\n")
 	}
-
 	return b.String()
+}
+
+func (s *State) writeScanWait(b *strings.Builder, waiting bool) {
+	if !s.Scanning || !waiting {
+		return
+	}
+	b.WriteString(SpinnerStyle.Render(fmt.Sprintf(" %s Waiting for scan results...", s.spinnerGlyph())))
+	b.WriteString("\n\n")
+}
+
+func (s *State) writeOpProgress(b *strings.Builder, active bool, verb string, total, done int) {
+	if !active {
+		return
+	}
+	label := ""
+	if s.OperationLabel != "" {
+		label = " " + s.OperationLabel
+	}
+	progLine := joinRow(
+		SpinnerStyle.Render(s.spinnerGlyph()+" "+verb+label),
+		lipgloss.NewStyle().Render("  "),
+		s.renderProgressBar(total, done),
+		lipgloss.NewStyle().Render(fmt.Sprintf(fmtProgressCount, done, total)),
+	)
+	b.WriteString(truncateStyled(progLine, s.contentWidth()))
+	b.WriteString("\n\n")
+}
+
+func (s *State) writeAgentUpToDate(b *strings.Builder, summary *model.SourceSummary) {
+	if summary.Category != model.CatAgent || summary.Total == 0 {
+		return
+	}
+	indent := strings.Repeat(" ", 4)
+	b.WriteString(joinRow(
+		lipgloss.NewStyle().Render(indent),
+		ItemOKStyle.Render(fmt.Sprintf("✓ %d installed, up to date", summary.Total)),
+	))
+	b.WriteString("\n")
+}
+
+func (s *State) writeUpdateItems(b *strings.Builder, summary *model.SourceSummary, flatIdx int) int {
+	for _, item := range summary.Items {
+		if !isUpdateNavigable(item.Status) {
+			continue
+		}
+		gutter := fmt.Sprintf("%s %s ", s.rowCursor(flatIdx, model.TabUpdates), s.updateCheckbox(item))
+		row := joinRow(lipgloss.NewStyle().Render(gutter), s.renderItemStyled(item))
+		b.WriteString(s.formatRow(row, flatIdx))
+		b.WriteString("\n")
+		flatIdx++
+	}
+	return flatIdx
+}
+
+func (s *State) updateCheckbox(item *model.Item) string {
+	if s.ActiveTab != model.TabUpdates {
+		return " "
+	}
+	switch {
+	case item.Selected:
+		return CheckboxStyle.Render("◉")
+	case item.Status == model.StatusOutdated:
+		return "○"
+	default:
+		return " "
+	}
+}
+
+func (s *State) rowCursor(flatIdx int, tab model.TabID) string {
+	if flatIdx == s.Cursor && s.ActiveTab == tab {
+		return "▸"
+	}
+	return " "
 }
 
 func (s *State) renderCleanupTab() string {
 	var b strings.Builder
-
-	if s.Scanning && len(s.CleanItems) == 0 {
-		b.WriteString(SpinnerStyle.Render(fmt.Sprintf(" %s Waiting for scan results...", s.spinnerGlyph())))
-		b.WriteString("\n\n")
-	}
-
-	// Global progress bar when cleaning
-	if s.Cleaning && s.CleanTotal > 0 {
-		label := ""
-		if s.OperationLabel != "" {
-			label = " " + s.OperationLabel
-		}
-		progLine := joinRow(
-			SpinnerStyle.Render(s.spinnerGlyph()+" Cleaning"+label),
-			lipgloss.NewStyle().Render("  "),
-			s.renderProgressBar(s.CleanTotal, s.CleanDone),
-			lipgloss.NewStyle().Render(fmt.Sprintf(fmtProgressCount, s.CleanDone, s.CleanTotal)),
-		)
-		b.WriteString(truncateStyled(progLine, s.contentWidth()))
-		b.WriteString("\n\n")
-	}
+	s.writeScanWait(&b, len(s.CleanItems) == 0)
+	s.writeOpProgress(&b, s.Cleaning && s.CleanTotal > 0, "Cleaning", s.CleanTotal, s.CleanDone)
 
 	flatIdx := 0
 	firstCat := true
-
 	for _, summary := range s.CleanItems {
-		if len(summary.Items) == 0 {
+		if len(summary.Items) == 0 || !hasCleanupItems(summary) {
 			continue
 		}
-		// Skip summaries that have no cleanup candidates
-		if !hasCleanupItems(summary) {
-			continue
-		}
-
 		if !firstCat {
 			b.WriteString("\n")
 		}
 		firstCat = false
-
-		// Category header — same responsive label width as Updates tab
-		label := padRight(iconCell(summary.Icon)+" "+summary.Label, s.metrics().catLabel)
-		header := CatLabelStyle.Render(label)
-		totalReclaim := ""
-		for _, it := range summary.Items {
-			if it.Reclaimable != "" && it.Reclaimable != "0 versions" {
-				if totalReclaim != "" {
-					totalReclaim += " + "
-				}
-				totalReclaim += it.Reclaimable
-			}
-		}
-		if totalReclaim != "" {
-			header = joinRow(header, lipgloss.NewStyle().Render("  "), ReclaimStyle.Render(totalReclaim))
-		}
-		b.WriteString(truncateStyled(header, s.contentWidth()))
+		b.WriteString(s.renderCleanupCategoryHeader(summary))
 		b.WriteString("\n")
-
-		// Items (only navigable/cleanable — matches CurrentItems() / cursor)
-		for _, item := range summary.Items {
-			if !isCleanupNavigable(item.Status) {
-				continue
-			}
-
-			sel := " "
-			if item.Selected {
-				sel = CheckboxStyle.Render("◉")
-			} else if item.Status == model.StatusCleanCandidate {
-				sel = "○"
-			}
-
-			cursor := " "
-			if flatIdx == s.Cursor && s.ActiveTab == model.TabCleanup {
-				cursor = "▸"
-			}
-
-			body := s.renderCleanupItemStyled(item)
-			gutter := fmt.Sprintf("%s %s ", cursor, sel)
-			row := joinRow(
-				lipgloss.NewStyle().Render(gutter),
-				body,
-			)
-			b.WriteString(s.formatRow(row, flatIdx))
-			b.WriteString("\n")
-
-			flatIdx++
-		}
+		flatIdx = s.writeCleanupItems(&b, summary, flatIdx)
 	}
 
 	if s.TotalCleanable() == 0 && !s.Scanning {
@@ -326,8 +263,51 @@ func (s *State) renderCleanupTab() string {
 		b.WriteString(ItemOKStyle.Render("✓ Nothing to clean"))
 		b.WriteString("\n")
 	}
-
 	return b.String()
+}
+
+func (s *State) renderCleanupCategoryHeader(summary *model.SourceSummary) string {
+	label := padRight(iconCell(summary.Icon)+" "+summary.Label, s.metrics().catLabel)
+	header := CatLabelStyle.Render(label)
+	if totalReclaim := sumReclaimable(summary); totalReclaim != "" {
+		header = joinRow(header, lipgloss.NewStyle().Render("  "), ReclaimStyle.Render(totalReclaim))
+	}
+	return truncateStyled(header, s.contentWidth())
+}
+
+func sumReclaimable(summary *model.SourceSummary) string {
+	var parts []string
+	for _, it := range summary.Items {
+		if it.Reclaimable != "" && it.Reclaimable != "0 versions" {
+			parts = append(parts, it.Reclaimable)
+		}
+	}
+	return strings.Join(parts, " + ")
+}
+
+func (s *State) writeCleanupItems(b *strings.Builder, summary *model.SourceSummary, flatIdx int) int {
+	for _, item := range summary.Items {
+		if !isCleanupNavigable(item.Status) {
+			continue
+		}
+		gutter := fmt.Sprintf("%s %s ", s.rowCursor(flatIdx, model.TabCleanup), s.cleanupCheckbox(item))
+		row := joinRow(lipgloss.NewStyle().Render(gutter), s.renderCleanupItemStyled(item))
+		b.WriteString(s.formatRow(row, flatIdx))
+		b.WriteString("\n")
+		flatIdx++
+	}
+	return flatIdx
+}
+
+func (s *State) cleanupCheckbox(item *model.Item) string {
+	switch {
+	case item.Selected:
+		return CheckboxStyle.Render("◉")
+	case item.Status == model.StatusCleanCandidate:
+		return "○"
+	default:
+		return " "
+	}
 }
 
 func (s *State) renderLogsTab() string {
