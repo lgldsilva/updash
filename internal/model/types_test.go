@@ -68,8 +68,8 @@ func TestCategoryConstants(t *testing.T) {
 		model.CatScoop, model.CatNpm, model.CatPipx, model.CatGo,
 		model.CatRustup, model.CatCargo, model.CatSDKMAN, model.CatDocker,
 		model.CatWatchtower, model.CatCloud, model.CatAI, model.CatAgent,
-		model.CatGHExt, model.CatNvm, model.CatOmz, model.CatCache,
-		model.CatSDKClean, model.CatVSCodeClean, model.CatDockerClean,
+		model.CatGHExt, model.CatNvm, model.CatOpenCodePlugins, model.CatOmz, model.CatCache,
+		model.CatSDKClean, model.CatVSCodeClean, model.CatDockerClean, model.CatHomelabClean,
 	}
 
 	for _, c := range categories {

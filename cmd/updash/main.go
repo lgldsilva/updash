@@ -40,7 +40,7 @@ func main() {
 func runMode(ctx context.Context, mode string, cfg cli.Config, startupRes upgrade.StartupResult) int {
 	switch mode {
 	case "check":
-		return exitOnErr(cli.RunCheck(ctx))
+		return exitOnErr(cli.RunCheck(ctx, cfg))
 	case "update":
 		return exitOnUpdateClean(cli.RunUpdate(ctx, cfg))
 	case "clean":
@@ -156,9 +156,14 @@ func parseArgs(args []string) (mode string, cfg cli.Config, err error) {
 			cfg.SkipAutoUpgrade = true
 		case "--strict":
 			cfg.Strict = true
+		case "--json":
+			cfg.JSON = true
 		default:
 			return "", cfg, fmt.Errorf("unknown argument: %s (try --help)", arg)
 		}
+	}
+	if err := cli.ValidateJSONMode(mode, cfg.JSON); err != nil {
+		return "", cfg, err
 	}
 	return mode, cfg, nil
 }
@@ -414,6 +419,7 @@ Options (CLI modes):
   --skip-password             Skip updates that need sudo (no macOS dialog)
   --skip-auto-upgrade         Skip release self-update on startup
   --strict                    Exit non-zero if anything stays outdated
+  --json                      Machine-readable --check output (JSON)
 
 Docker cleanup age defaults to 336h (14d). Override with UPDASH_DOCKER_IMAGE_MAX_AGE,
 UPDASH_DOCKER_BUILDER_MAX_AGE, UPDASH_DOCKER_CONTAINER_MAX_AGE (e.g. 168h for 7d).
@@ -425,17 +431,20 @@ downloads, verifies, and reinstalls itself before scanning.
 
 Examples:
   updash --check
+  updash --check --json       Cron / monitoring friendly JSON
   updash --all                Scan + update + clean (macOS password dialog when needed)
   updash --update --only brew
   updash --clean --dry-run
   updash --clean --only brew
   updash --clean --only docker
+  updash --clean --only homelab-clean
   updash --all
 
 Package managers by platform:
-  macOS:   brew, mas, npm, pipx, Go, Rust, SDKMAN, Docker, AI agents
+  macOS:   brew, mas, npm, pipx, Go, Rust, SDKMAN, Docker, AI agents,
+           OpenCode plugins
   Linux:   apt, pacman/yay, flatpak, snap, brew, npm, pipx, Go, Rust,
-           SDKMAN, Docker, AI agents
+           SDKMAN, Docker, AI agents, OpenCode plugins
   Windows: winget, choco, scoop, npm, pipx, Go, Rust, Docker, AI agents
 `)
 }

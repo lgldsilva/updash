@@ -21,7 +21,8 @@ func EnabledSources(plat model.PlatformInfo, includeCleanup bool) []Source {
 // IsCleanupCategory reports whether a category belongs on the Cleanup tab.
 func IsCleanupCategory(cat model.Category) bool {
 	switch cat {
-	case model.CatCache, model.CatSDKMAN, model.CatSDKClean, model.CatDockerClean, model.CatVSCodeClean:
+	case model.CatCache, model.CatSDKMAN, model.CatSDKClean,
+		model.CatDockerClean, model.CatVSCodeClean, model.CatHomelabClean:
 		return true
 	default:
 		return false

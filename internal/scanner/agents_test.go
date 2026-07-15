@@ -2,7 +2,41 @@ package scanner
 
 import (
 	"testing"
+
+	"github.com/lgldsilva/updash/internal/model"
 )
+
+func TestApplyAgentOutdated(t *testing.T) {
+	it := &model.Item{Name: "Codex", CurrentVer: "0.1.0", Status: model.StatusOK}
+	ApplyAgentOutdated(it, "0.2.0")
+	if it.Status != model.StatusOutdated || it.AvailableVer != "0.2.0" {
+		t.Fatalf("got status=%v avail=%q", it.Status, it.AvailableVer)
+	}
+
+	same := &model.Item{Name: "x", CurrentVer: "1.0.0", Status: model.StatusOK}
+	ApplyAgentOutdated(same, "1.0.0")
+	if same.Status != model.StatusOK {
+		t.Fatal("same version should stay OK")
+	}
+
+	inst := &model.Item{Name: "y", CurrentVer: "installed", Status: model.StatusOK}
+	ApplyAgentOutdated(inst, "2.0.0")
+	if inst.Status != model.StatusOutdated {
+		t.Fatal("installed + latest should mark outdated")
+	}
+
+	ApplyAgentOutdated(nil, "1")
+	ApplyAgentOutdated(it, "")
+}
+
+func TestNormalizeAgentVer(t *testing.T) {
+	if got := normalizeAgentVer("v1.2.3."); got != "1.2.3" {
+		t.Fatalf("got %q", got)
+	}
+	if got := normalizeAgentVer("  0.1.0  "); got != "0.1.0" {
+		t.Fatalf("got %q", got)
+	}
+}
 
 func TestParseAgentVersion(t *testing.T) {
 	tests := []struct {

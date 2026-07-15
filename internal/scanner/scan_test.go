@@ -40,7 +40,7 @@ func TestSourceTimeout(t *testing.T) {
 
 func TestIsCleanupCategory_All(t *testing.T) {
 	cleanup := []model.Category{
-		model.CatCache, model.CatSDKMAN, model.CatSDKClean, model.CatDockerClean, model.CatVSCodeClean,
+		model.CatCache, model.CatSDKMAN, model.CatSDKClean, model.CatDockerClean, model.CatVSCodeClean, model.CatHomelabClean,
 	}
 	for _, cat := range cleanup {
 		if !IsCleanupCategory(cat) {

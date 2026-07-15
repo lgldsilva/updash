@@ -61,6 +61,7 @@ func Detect() model.PlatformInfo {
 
 	p.HasDocker = has("docker")
 	p.HasNvm = dirExists(os.ExpandEnv("$HOME/.nvm"))
+	p.HasOpenCode = dirExists(os.ExpandEnv("$HOME/.config/opencode"))
 	p.HasOmz = dirExists(os.ExpandEnv("$HOME/.oh-my-zsh"))
 
 	// Windows: also check USERPROFILE for nvm-windows

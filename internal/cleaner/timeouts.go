@@ -15,6 +15,8 @@ func ItemTimeout(item *model.Item) time.Duration {
 		return 15 * time.Minute
 	case model.CatVSCodeClean:
 		return 10 * time.Minute
+	case model.CatHomelabClean:
+		return 20 * time.Minute
 	default:
 		return 10 * time.Minute
 	}

@@ -61,6 +61,25 @@ func TestRenderUpdatesTab_agentsUpToDate(t *testing.T) {
 	}
 }
 
+func TestRenderUpdatesTab_opencodePluginsUpToDate(t *testing.T) {
+	s := New()
+	s.Summaries = []*model.SourceSummary{
+		{
+			Category: model.CatOpenCodePlugins,
+			Icon:     "🔌",
+			Label:    "OpenCode Plugins",
+			Total:    1,
+			Items: []*model.Item{
+				{Name: "opencode-plugins", Category: model.CatOpenCodePlugins, Status: model.StatusOK},
+			},
+		},
+	}
+	out := s.renderUpdatesTab()
+	if !strings.Contains(out, "plugins up to date") {
+		t.Fatalf("expected plugins summary: %s", out)
+	}
+}
+
 func TestRenderCategoryHeader_liveOutdated(t *testing.T) {
 	s := New()
 	s.Updating = false
