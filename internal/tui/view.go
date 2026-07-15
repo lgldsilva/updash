@@ -12,9 +12,9 @@ import (
 func (s *State) Render() string {
 	var b strings.Builder
 
-	// Title bar
+	// Title bar + blank line (explicit spacing; no style margins)
 	b.WriteString(s.renderTitle())
-	b.WriteString("\n")
+	b.WriteString("\n\n")
 
 	// Password prompt overrides normal content
 	if s.ShowPassword {
@@ -32,9 +32,9 @@ func (s *State) Render() string {
 		return s.frame(b.String())
 	}
 
-	// Tabs
+	// Tabs (space-separated without MarginRight)
 	b.WriteString(s.renderTabs())
-	b.WriteString("\n")
+	b.WriteString("\n\n")
 
 	// Content
 	b.WriteString(s.renderContent())
@@ -97,7 +97,22 @@ func (s *State) renderTabs() string {
 			parts = append(parts, InactiveTabStyle.Render(label))
 		}
 	}
-	return lipgloss.JoinHorizontal(lipgloss.Top, parts...)
+	// Explicit single-space gap between tabs (no MarginRight on styles)
+	return lipgloss.JoinHorizontal(lipgloss.Top, interleaveSpaces(parts)...)
+}
+
+func interleaveSpaces(parts []string) []string {
+	if len(parts) <= 1 {
+		return parts
+	}
+	out := make([]string, 0, len(parts)*2-1)
+	for i, p := range parts {
+		if i > 0 {
+			out = append(out, " ")
+		}
+		out = append(out, p)
+	}
+	return out
 }
 
 func (s *State) renderContent() string {
@@ -138,25 +153,30 @@ func (s *State) renderUpdatesTab() string {
 	}
 
 	flatIdx := 0
+	firstCat := true
 
 	for _, summary := range s.Summaries {
 		if len(summary.Items) == 0 {
 			continue
 		}
 
+		// Blank line between categories (spacing without style margins)
+		if !firstCat {
+			b.WriteString("\n")
+		}
+		firstCat = false
+
 		// Category header with live progress (reads item statuses, not static counts)
-		catLine := s.renderCategoryHeader(summary)
-		b.WriteString(catLine)
+		b.WriteString(s.renderCategoryHeader(summary))
 		b.WriteString("\n")
 
 		if !hasUpdateItems(summary) {
 			if summary.Category == model.CatAgent && summary.Total > 0 {
-				b.WriteString(s.formatRow(
-					joinRow(
-						lipgloss.NewStyle().Render("  "),
-						ItemOKStyle.Render(fmt.Sprintf("✓ %d installed, up to date", summary.Total)),
-					),
-					flatIdx,
+				// Align under name column (cursor + checkbox + gap)
+				indent := strings.Repeat(" ", 4)
+				b.WriteString(joinRow(
+					lipgloss.NewStyle().Render(indent),
+					ItemOKStyle.Render(fmt.Sprintf("✓ %d installed, up to date", summary.Total)),
 				))
 				b.WriteString("\n")
 			}
@@ -168,17 +188,14 @@ func (s *State) renderUpdatesTab() string {
 			if !isUpdateNavigable(item.Status) {
 				continue
 			}
-			prefix := "  "
-			sel := ""
 
+			sel := " "
 			if s.ActiveTab == model.TabUpdates {
 				switch {
 				case item.Selected:
 					sel = CheckboxStyle.Render("◉")
 				case item.Status == model.StatusOutdated:
 					sel = "○"
-				default:
-					sel = " "
 				}
 			}
 
@@ -187,10 +204,10 @@ func (s *State) renderUpdatesTab() string {
 				cursor = "▸"
 			}
 
+			// Fixed gutter: "▸ ○ " / "  ○ " so columns share one vertical edge
+			gutter := fmt.Sprintf("%s %s ", cursor, sel)
 			row := joinRow(
-				lipgloss.NewStyle().Render(cursor),
-				sel,
-				lipgloss.NewStyle().Render(prefix),
+				lipgloss.NewStyle().Render(gutter),
 				s.renderItemStyled(item),
 			)
 			b.WriteString(s.formatRow(row, flatIdx))
@@ -234,6 +251,7 @@ func (s *State) renderCleanupTab() string {
 	}
 
 	flatIdx := 0
+	firstCat := true
 
 	for _, summary := range s.CleanItems {
 		if len(summary.Items) == 0 {
@@ -244,8 +262,14 @@ func (s *State) renderCleanupTab() string {
 			continue
 		}
 
-		// Category header
-		catLine := fmt.Sprintf(" %s %s", summary.Icon, summary.Label)
+		if !firstCat {
+			b.WriteString("\n")
+		}
+		firstCat = false
+
+		// Category header — same responsive label width as Updates tab
+		label := padRight(iconCell(summary.Icon)+" "+summary.Label, s.metrics().catLabel)
+		header := CatLabelStyle.Render(label)
 		totalReclaim := ""
 		for _, it := range summary.Items {
 			if it.Reclaimable != "" && it.Reclaimable != "0 versions" {
@@ -255,9 +279,8 @@ func (s *State) renderCleanupTab() string {
 				totalReclaim += it.Reclaimable
 			}
 		}
-		header := CatLabelStyle.Render(catLine)
 		if totalReclaim != "" {
-			header = joinRow(header, lipgloss.NewStyle().Render("  [ "), ReclaimStyle.Render(totalReclaim), lipgloss.NewStyle().Render(" ]"))
+			header = joinRow(header, lipgloss.NewStyle().Render("  "), ReclaimStyle.Render(totalReclaim))
 		}
 		b.WriteString(truncateStyled(header, s.contentWidth()))
 		b.WriteString("\n")
@@ -268,13 +291,11 @@ func (s *State) renderCleanupTab() string {
 				continue
 			}
 
-			var sel string
+			sel := " "
 			if item.Selected {
 				sel = CheckboxStyle.Render("◉")
 			} else if item.Status == model.StatusCleanCandidate {
 				sel = "○"
-			} else {
-				sel = " "
 			}
 
 			cursor := " "
@@ -283,10 +304,9 @@ func (s *State) renderCleanupTab() string {
 			}
 
 			body := s.renderCleanupItemStyled(item)
+			gutter := fmt.Sprintf("%s %s ", cursor, sel)
 			row := joinRow(
-				lipgloss.NewStyle().Render(cursor),
-				sel,
-				lipgloss.NewStyle().Render("  "),
+				lipgloss.NewStyle().Render(gutter),
 				body,
 			)
 			b.WriteString(s.formatRow(row, flatIdx))
@@ -366,7 +386,9 @@ func computeCategoryProgress(items []*model.Item) categoryProgress {
 
 // renderCategoryHeader builds the progress header for a summary category.
 // Always reads live item statuses so counts stay accurate after updates/rescans.
+// Layout scales with terminal width via metrics().
 func (s *State) renderCategoryHeader(summary *model.SourceSummary) string {
+	m := s.metrics()
 	prog := computeCategoryProgress(summary.Items)
 	total := summary.Total
 	if total == 0 {
@@ -377,37 +399,44 @@ func (s *State) renderCategoryHeader(summary *model.SourceSummary) string {
 	updating := prog.updating
 	errors := prog.errors
 
+	// iconCell keeps emoji at exactly 2 cols so the right border doesn't drift
+	label := padRight(iconCell(summary.Icon)+" "+summary.Label, m.catLabel)
+	count := padLeft(fmt.Sprintf("%d/%d", done, total), 5)
+
 	parts := []string{
-		CatLabelStyle.Render(fmt.Sprintf(" %s %s  ", summary.Icon, summary.Label)),
+		CatLabelStyle.Render(label),
+		lipgloss.NewStyle().Render(" "),
 		s.renderProgressBar(total, done),
-		lipgloss.NewStyle().Foreground(ColorGray).Render(fmt.Sprintf(" %d/%d", done, total)),
+		lipgloss.NewStyle().Foreground(ColorGray).Render(" " + count),
 	}
 	if updating > 0 {
-		parts = append(parts, lipgloss.NewStyle().Foreground(ColorGray).Render(" • "), SpinnerStyle.Render(fmt.Sprintf("%d updating", updating)))
+		parts = append(parts, lipgloss.NewStyle().Foreground(ColorGray).Render("  ·  "), SpinnerStyle.Render(fmt.Sprintf("%d updating", updating)))
 	}
 	if outdated > 0 {
-		parts = append(parts, lipgloss.NewStyle().Foreground(ColorGray).Render(" • "), VerNewStyle.Render(fmt.Sprintf("%d outdated", outdated)))
+		parts = append(parts, lipgloss.NewStyle().Foreground(ColorGray).Render("  ·  "), VerNewStyle.Render(fmt.Sprintf("%d outdated", outdated)))
 	}
 	if errors > 0 {
-		parts = append(parts, lipgloss.NewStyle().Foreground(ColorGray).Render(" • "), ItemErrorStyle.Render(fmt.Sprintf("%d errors", errors)))
+		parts = append(parts, lipgloss.NewStyle().Foreground(ColorGray).Render("  ·  "), ItemErrorStyle.Render(fmt.Sprintf("%d errors", errors)))
 	}
-	return truncateStyled(joinRow(parts...), s.contentWidth())
+	return truncateStyled(joinRow(parts...), m.width)
 }
 
-// formatRow applies cursor highlight and width clamp to a pre-styled row.
+// formatRow clamps/pads a row to the full content width and applies cursor highlight.
+// Always returns a string of exactly contentWidth cells so the manual frame stays square.
 func (s *State) formatRow(row string, idx int) string {
 	max := s.contentWidth()
-	if lipgloss.Width(row) > max {
-		row = truncateStyled(row, max)
-	}
+	row = fitLine(row, max)
 	if idx == s.Cursor {
-		return lipgloss.NewStyle().Background(lipgloss.Color("#2a2a2a")).Render(row)
+		// Re-fit after background style — some terminals measure bold/bg differently
+		row = lipgloss.NewStyle().Background(lipgloss.Color("#2a2a2a")).Render(row)
+		row = fitLine(row, max)
 	}
 	return row
 }
 
 func (s *State) renderItemStyled(item *model.Item) string {
-	name := truncatePlain(item.Name, s.contentWidth()/3)
+	m := s.metrics()
+	namePlain := padRight(item.Name, m.name)
 	bold := lipgloss.NewStyle().Bold(item.Selected)
 
 	switch item.Status {
@@ -416,7 +445,11 @@ func (s *State) renderItemStyled(item *model.Item) string {
 		if item.CurrentVer != "" {
 			ver = item.CurrentVer
 		}
-		return joinRow(bold.Render(name), lipgloss.NewStyle().Render("  "), VerCurrentStyle.Render(ver))
+		return joinRow(
+			bold.Render(namePlain),
+			lipgloss.NewStyle().Render("  "),
+			VerCurrentStyle.Render(padRight(ver, m.ver)),
+		)
 	case model.StatusOutdated:
 		cur := item.CurrentVer
 		if cur == "" {
@@ -427,47 +460,62 @@ func (s *State) renderItemStyled(item *model.Item) string {
 			avail = "newer"
 		}
 		parts := []string{
-			lipgloss.NewStyle().Foreground(ColorYellow).Bold(item.Selected).Render(name),
+			lipgloss.NewStyle().Foreground(ColorYellow).Bold(item.Selected).Render(namePlain),
 			lipgloss.NewStyle().Render("  "),
-			VerCurrentStyle.Render(cur),
+			VerCurrentStyle.Render(padRight(cur, m.ver)),
 			VerArrowStyle.Render(" → "),
-			VerNewStyle.Render(avail),
+			VerNewStyle.Render(padRight(avail, m.ver)),
 		}
-		if item.KeepPolicy != "" {
+		if item.KeepPolicy != "" && m.note > 0 {
 			parts = append(parts,
 				lipgloss.NewStyle().Render("  "),
-				VerCurrentStyle.Render("("+truncatePlain(item.KeepPolicy, 48)+")"),
+				VerCurrentStyle.Render(truncatePlain("("+item.KeepPolicy+")", m.note)),
 			)
 		}
 		return joinRow(parts...)
 	case model.StatusError:
-		return joinRow(name, lipgloss.NewStyle().Render("  "), ItemErrorStyle.Render("✘ "+truncatePlain(item.CurrentVer, 40)))
+		return joinRow(
+			bold.Render(namePlain),
+			lipgloss.NewStyle().Render("  "),
+			ItemErrorStyle.Render("✘ "+truncatePlain(item.CurrentVer, m.ver*2)),
+		)
 	case model.StatusUpdating:
-		return joinRow(name, lipgloss.NewStyle().Render("  "), SpinnerStyle.Render(s.spinnerGlyph()+" updating..."))
+		return joinRow(
+			bold.Render(namePlain),
+			lipgloss.NewStyle().Render("  "),
+			SpinnerStyle.Render(s.spinnerGlyph()+" updating..."),
+		)
 	case model.StatusDone:
-		return joinRow(name, lipgloss.NewStyle().Render("  "), ItemOKStyle.Render("✓ updated"))
+		return joinRow(
+			bold.Render(namePlain),
+			lipgloss.NewStyle().Render("  "),
+			ItemOKStyle.Render("✓ updated"),
+		)
 	default:
-		return name
+		return bold.Render(namePlain)
 	}
 }
 
 func (s *State) renderCleanupItemStyled(item *model.Item) string {
-	name := truncatePlain(item.Name, s.contentWidth()/3)
+	m := s.metrics()
+	namePlain := padRight(item.Name, m.name)
+
 	switch item.Status {
 	case model.StatusCleanCandidate:
-		parts := []string{lipgloss.NewStyle().Foreground(ColorOrange).Bold(item.Selected).Render(name)}
+		parts := []string{lipgloss.NewStyle().Foreground(ColorOrange).Bold(item.Selected).Render(namePlain)}
 		if item.CurrentVer != "" {
-			parts = append(parts, lipgloss.NewStyle().Render("  "), VerCurrentStyle.Render(item.CurrentVer))
+			parts = append(parts, lipgloss.NewStyle().Render("  "), VerCurrentStyle.Render(padRight(item.CurrentVer, m.ver)))
 		}
 		if item.Reclaimable != "" {
-			parts = append(parts, lipgloss.NewStyle().Render("  →  "), ReclaimStyle.Render(item.Reclaimable))
+			// reclaim takes part of the note budget
+			parts = append(parts, lipgloss.NewStyle().Render("  →  "), ReclaimStyle.Render(truncatePlain(item.Reclaimable, maxInt(8, m.note/2))))
 		}
-		if item.KeepPolicy != "" {
-			parts = append(parts, lipgloss.NewStyle().Render("  ("), VerCurrentStyle.Render(item.KeepPolicy), lipgloss.NewStyle().Render(")"))
+		if item.KeepPolicy != "" && m.note > 0 {
+			parts = append(parts, lipgloss.NewStyle().Render("  "), VerCurrentStyle.Render(truncatePlain("("+item.KeepPolicy+")", m.note)))
 		}
 		return joinRow(parts...)
 	case model.StatusCleaning:
-		return joinRow(name, lipgloss.NewStyle().Render("  "), SpinnerStyle.Render(s.spinnerGlyph()+" cleaning..."))
+		return joinRow(namePlain, lipgloss.NewStyle().Render("  "), SpinnerStyle.Render(s.spinnerGlyph()+" cleaning..."))
 	case model.StatusCleaned:
 		msg := "✓ cleaned"
 		if item.Freed != "" && item.Freed != "0B" {
@@ -475,28 +523,50 @@ func (s *State) renderCleanupItemStyled(item *model.Item) string {
 		} else if item.Freed == "0B" {
 			msg = "✓ nothing removed"
 		}
-		return joinRow(name, lipgloss.NewStyle().Render("  "), ItemOKStyle.Render(msg))
+		return joinRow(namePlain, lipgloss.NewStyle().Render("  "), ItemOKStyle.Render(msg))
 	case model.StatusError:
-		return joinRow(name, lipgloss.NewStyle().Render("  "), ItemErrorStyle.Render("✘ failed"))
+		return joinRow(namePlain, lipgloss.NewStyle().Render("  "), ItemErrorStyle.Render("✘ failed"))
 	default:
-		return name
+		return namePlain
 	}
 }
 
+func maxInt(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
+}
+
 func (s *State) renderProgressBar(total, done int) string {
-	if total == 0 {
-		return BarFilled.Render(strings.Repeat("█", 10))
+	width := s.metrics().bar
+	if total <= 0 {
+		// Neutral empty bar (unknown total)
+		return lipgloss.NewStyle().Foreground(ColorGray).Render("[" + strings.Repeat("─", width) + "]")
 	}
 
-	width := 10
 	filled := (done * width) / total
 	if filled > width {
 		filled = width
 	}
+	if done > 0 && filled == 0 {
+		filled = 1 // show a sliver when progress has started
+	}
 
-	filledStr := lipgloss.NewStyle().Foreground(ColorGreen).Render(strings.Repeat("█", filled))
-	emptyStr := lipgloss.NewStyle().Foreground(ColorGray).Render(strings.Repeat("░", width-filled))
-	return filledStr + emptyStr
+	// Bracketed bar so empty and full states are equally wide and readable
+	open := lipgloss.NewStyle().Foreground(ColorGray).Render("[")
+	closeB := lipgloss.NewStyle().Foreground(ColorGray).Render("]")
+	var mid string
+	switch filled {
+	case width:
+		mid = lipgloss.NewStyle().Foreground(ColorGreen).Render(strings.Repeat("█", width))
+	case 0:
+		mid = lipgloss.NewStyle().Foreground(ColorGray).Render(strings.Repeat("─", width))
+	default:
+		mid = lipgloss.NewStyle().Foreground(ColorGreen).Render(strings.Repeat("█", filled)) +
+			lipgloss.NewStyle().Foreground(ColorGray).Render(strings.Repeat("─", width-filled))
+	}
+	return open + mid + closeB
 }
 
 func (s *State) renderLoading() string {
