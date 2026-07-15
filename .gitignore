@@ -21,3 +21,5 @@ Thumbs.db
 .env
 .scannerwork/
 .ignore
+sonar-out/
+coverage.out
