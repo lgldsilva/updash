@@ -510,6 +510,11 @@ func TestStdinIsTTY(t *testing.T) {
 }
 
 func TestPrimeElevationSession_paths(t *testing.T) {
+	// Force passwordless=false so CI hosts with NOPASSWD sudo don't take the elev path.
+	prev := canElevateNP
+	canElevateNP = func(context.Context) bool { return false }
+	t.Cleanup(func() { canElevateNP = prev })
+
 	ctx := context.Background()
 	var sess *elevate.Session
 	// No elevation needed.
