@@ -2,7 +2,6 @@ package scanner
 
 import (
 	"context"
-	"encoding/json"
 
 	"github.com/lgldsilva/updash/internal/model"
 )
@@ -30,27 +29,6 @@ func (s *NpmSource) Scan(ctx context.Context, plat model.PlatformInfo) ([]*model
 		}
 	}
 
-	var data map[string]struct {
-		Current string `json:"current"`
-		Wanted  string `json:"wanted"`
-		Latest  string `json:"latest"`
-	}
-	if err := json.Unmarshal(out, &data); err != nil || len(data) == 0 {
-		return []*model.Item{
-			{Name: "npm", Category: model.CatNpm, Status: model.StatusOK, CurrentVer: statusUpToDate},
-		}, nil
-	}
-
-	var items []*model.Item
-	for name, pkg := range data {
-		items = append(items, &model.Item{
-			Name:         name,
-			Category:     model.CatNpm,
-			CurrentVer:   pkg.Current,
-			AvailableVer: pkg.Latest,
-			Status:       model.StatusOutdated,
-		})
-	}
-
-	return items, nil
+	items := ParseNpmOutdatedJSON(out, model.CatNpm)
+	return okOrOutdated("npm", model.CatNpm, items), nil
 }

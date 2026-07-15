@@ -84,6 +84,8 @@ func updateBatch(ctx context.Context, cat model.Category, items []*model.Item, o
 		return batchScoopUpgrade(ctx, items, opts)
 	case model.CatNpm:
 		return batchNpmUpgrade(ctx, items, opts)
+	case model.CatOpenCodePlugins:
+		return batchOpenCodePlugins(ctx, items, opts)
 	case model.CatPipx:
 		return batchPipxUpgrade(ctx, items, opts)
 	case model.CatAgent, model.CatAI:
@@ -595,17 +597,49 @@ func updateAgent(ctx context.Context, item *model.Item, opts Options) *Result {
 	switch {
 	case strings.Contains(item.Name, "Claude"):
 		return runCmd(ctx, item, opts, "claude", "update")
+	case strings.Contains(item.Name, "OpenCode"):
+		return runCmd(ctx, item, opts, "opencode", "upgrade")
 	case strings.Contains(item.Name, "Grok"):
 		return runCmd(ctx, item, opts, "grok", "update")
 	case strings.Contains(item.Name, "Gemini"):
 		return runCmd(ctx, item, opts, "gemini", "update")
+	case strings.Contains(item.Name, "Codex"):
+		return updateAgentViaNpm(ctx, item, opts, "@openai/codex")
+	case strings.Contains(item.Name, "Copilot"):
+		return runCmd(ctx, item, opts, "copilot", "update")
 	default:
+		reason := item.KeepPolicy
+		if reason == "" {
+			reason = "manual reinstall / app update"
+		}
+		item.Status = model.StatusOutdated
 		return &Result{
 			Item:    item,
-			Success: true,
-			Output:  fmt.Sprintf("%s: auto-update or manual reinstall needed", item.Name),
+			Success: false,
+			Error:   "⊘ " + reason,
+			Output:  fmt.Sprintf("%s: %s", item.Name, reason),
 		}
 	}
+}
+
+func updateAgentViaNpm(ctx context.Context, item *model.Item, opts Options, pkg string) *Result {
+	if item.PackageID != "" {
+		pkg = item.PackageID
+	}
+	return runCmd(ctx, item, opts, "npm", "install", "-g", pkg+"@latest")
+}
+
+// batchOpenCodePlugins updates local plugins under ~/.config/opencode.
+func batchOpenCodePlugins(ctx context.Context, items []*model.Item, opts Options) []*Result {
+	if len(items) == 0 {
+		return nil
+	}
+	dir := scanner.OpenCodeConfigDir()
+	for _, it := range items {
+		it.Status = model.StatusUpdating
+	}
+	cmd := exec.CommandContext(ctx, "npm", "update", "--prefix", dir)
+	return batchMarkAll(items, runCmdWithBuilder(ctx, items[0], cmd, opts))
 }
 
 func updateAIInfra(ctx context.Context, item *model.Item, opts Options) *Result {

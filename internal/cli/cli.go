@@ -25,6 +25,7 @@ type Config struct {
 	SkipPassword    bool   // skip batches that need sudo instead of macOS dialog
 	Strict          bool   // exit non-zero if any item remains outdated
 	SkipAutoUpgrade bool   // skip release self-update on startup
+	JSON            bool   // machine-readable --check output
 }
 
 // Scan runs a single full scan and splits update vs cleanup summaries.
@@ -54,18 +55,58 @@ const (
 )
 
 // RunCheck scans and prints results.
-func RunCheck(ctx context.Context) error {
-	plat := platformLabel(detectPlatform())
-	fmt.Printf(msgScanning, plat)
+func RunCheck(ctx context.Context, cfg Config) error {
 	updates, cleanup, elapsed, err := Scan(ctx)
 	if err != nil {
 		return err
 	}
+	if cfg.JSON {
+		rep := BuildCheckReport(updates, cleanup)
+		rep.Platform = platformLabel(detectPlatform())
+		if elapsed > 0 {
+			rep.ElapsedMS = elapsed.Milliseconds()
+		}
+		if err := WriteCheckJSON(os.Stdout, rep); err != nil {
+			return err
+		}
+		if ExitCodeForCheck(cfg, rep.Outdated, rep.Cleanable) != 0 {
+			return fmt.Errorf("%d outdated, %d cleanable", rep.Outdated, rep.Cleanable)
+		}
+		return nil
+	}
+	fmt.Printf(msgScanning, platformLabel(detectPlatform()))
 	PrintCheck(updates, cleanup)
 	if elapsed > 0 {
 		fmt.Printf("⏱ scan %s\n", elapsed)
 	}
+	if ExitCodeForCheck(cfg, countOutdated(updates), countCleanable(cleanup)) != 0 {
+		return fmt.Errorf("strict: remaining outdated/cleanable items")
+	}
 	return nil
+}
+
+func countOutdated(summaries []*model.SourceSummary) int {
+	n := 0
+	for _, s := range summaries {
+		for _, it := range s.Items {
+			if it != nil && it.Status == model.StatusOutdated {
+				n++
+			}
+		}
+	}
+	return n
+}
+
+func countCleanable(summaries []*model.SourceSummary) int {
+	n := 0
+	for _, s := range summaries {
+		for _, it := range s.Items {
+			if it != nil && it.Status == model.StatusCleanCandidate {
+				n++
+			}
+		}
+	}
+	return n
 }
 
 // RunUpdate updates outdated packages.

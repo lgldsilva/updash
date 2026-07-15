@@ -58,12 +58,46 @@ func TestRunCheck(t *testing.T) {
 		{Category: model.CatBrew, Icon: "🍺", Label: "Brew", Outdated: 0, Items: nil},
 	}, nil)
 	out := captureStdout(t, func() {
-		if err := RunCheck(context.Background()); err != nil {
+		if err := RunCheck(context.Background(), Config{}); err != nil {
 			t.Fatal(err)
 		}
 	})
 	if !strings.Contains(out, "Scanning") {
 		t.Fatalf("%q", out)
+	}
+}
+
+func TestRunCheck_JSON(t *testing.T) {
+	restoreHooks(t)
+	fakeScan([]*model.SourceSummary{
+		{
+			Category: model.CatBrew, Label: "Brew", Total: 1,
+			Items: []*model.Item{
+				{Name: "git", Category: model.CatBrew, Status: model.StatusOutdated, CurrentVer: "1", AvailableVer: "2"},
+			},
+		},
+	}, nil)
+	out := captureStdout(t, func() {
+		if err := RunCheck(context.Background(), Config{JSON: true}); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if !strings.Contains(out, `"outdated": 1`) && !strings.Contains(out, `"outdated":1`) {
+		// pretty indent uses space after colon
+		if !strings.Contains(out, "outdated") || !strings.Contains(out, "git") {
+			t.Fatalf("json out=%s", out)
+		}
+	}
+	// strict should fail with remaining
+	fakeScan([]*model.SourceSummary{
+		{
+			Category: model.CatBrew, Label: "Brew",
+			Items: []*model.Item{{Name: "git", Status: model.StatusOutdated, Category: model.CatBrew}},
+		},
+	}, nil)
+	err := RunCheck(context.Background(), Config{JSON: true, Strict: true})
+	if err == nil {
+		t.Fatal("strict JSON should error when outdated")
 	}
 }
 

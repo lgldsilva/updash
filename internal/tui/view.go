@@ -192,13 +192,22 @@ func (s *State) writeOpProgress(b *strings.Builder, active bool, verb string, to
 }
 
 func (s *State) writeAgentUpToDate(b *strings.Builder, summary *model.SourceSummary) {
-	if summary.Category != model.CatAgent || summary.Total == 0 {
+	if summary.Total == 0 {
+		return
+	}
+	var msg string
+	switch summary.Category {
+	case model.CatAgent:
+		msg = fmt.Sprintf("✓ %d installed, up to date", summary.Total)
+	case model.CatOpenCodePlugins:
+		msg = "✓ plugins up to date"
+	default:
 		return
 	}
 	indent := strings.Repeat(" ", 4)
 	b.WriteString(joinRow(
 		lipgloss.NewStyle().Render(indent),
-		ItemOKStyle.Render(fmt.Sprintf("✓ %d installed, up to date", summary.Total)),
+		ItemOKStyle.Render(msg),
 	))
 	b.WriteString("\n")
 }
