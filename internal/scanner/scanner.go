@@ -98,6 +98,7 @@ func appendLanguageSources(src []Source, plat model.PlatformInfo) []Source {
 		{plat.HasCargo, &CargoSource{}},
 		{plat.HasDocker, &DockerSource{}},
 		{plat.HasNvm, &NvmSource{}},
+		{plat.HasOpenCode && plat.HasNpm, &OpenCodeSource{}},
 		{plat.HasOmz, &OmzSource{}},
 	} {
 		if c.ok {
@@ -126,6 +127,8 @@ func appendCleanupSources(src []Source, plat model.PlatformInfo) []Source {
 			src = append(src, c.src)
 		}
 	}
+	// Homelab retention cleanups (logs, maven/gradle, AI outputs, disk pressure).
+	src = append(src, &HomelabCleanSource{})
 	home := os.Getenv("HOME")
 	src = append(src,
 		&VSCodeCleanSource{LabelName: "Antigravity Ext", ExtDir: home + "/.antigravity/extensions"},

@@ -56,6 +56,7 @@ func TestSources_AllHaveCategoryLabelIcon(t *testing.T) {
 		&SDKMANSource{},
 		&DockerSource{},
 		&NvmSource{},
+		&OpenCodeSource{},
 		&OmzSource{},
 		&AgentSource{},
 		&AIInfraSource{},
@@ -65,6 +66,7 @@ func TestSources_AllHaveCategoryLabelIcon(t *testing.T) {
 		&GoCleanSource{},
 		&NpmCleanSource{},
 		&SnapCleanSource{},
+		&HomelabCleanSource{},
 	}
 
 	for _, s := range sources {

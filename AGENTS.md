@@ -6,76 +6,81 @@
 go build -o updash ./cmd/updash/   # single binary
 make check                          # build + --check
 make install                        # copies to $HOME/.local/bin/updash
+./scripts/validate.sh               # full local gates (build/fmt/test/cover/lint/gosec)
 ```
 
-Three entry modes in `cmd/updash/main.go`:
-- `updash` — interactive Bubble Tea TUI
-- `updash --check` — headless scan, prints outdated + cleanable
-- `updash --all` — headless: update everything + cleanup
-- `updash --update-self` — `git pull` + rebuild + reinstall
+Entry modes in `cmd/updash/main.go`:
+
+| Mode | Flag | Notes |
+|------|------|--------|
+| TUI | (default) | Bubble Tea — Updates / Cleanup / Logs |
+| check | `--check` | headless scan; add `--json` for machines |
+| update | `--update` | outdated only |
+| clean | `--clean` | cleanup candidates |
+| all | `--all` | update + clean |
+| upgrade | `--upgrade` | Gitea release self-update |
+| update-self | `--update-self` | git pull + rebuild (dev) |
 
 ## Architecture
 
 ```
-platform/detect.go   → detects OS + available package managers
-scanner/             → each file = one Source (brew, apt, winget, npm, agents...)
-  ├── scanner.go     → Source interface + RunAll() (parallel goroutines)
-  ├── brew.go        → brew outdated --greedy --json=v2
-  ├── sdkman.go      → reads ~/.sdkman/candidates/ dirs
-  ├── agents.go      → exec.LookPath for each AI tool binary
-  ├── winget.go      → winget upgrade --json (Windows)
-  └── cleanup.go     → cache size scanners (brew, go, npm, docker, Windows TEMP)
-updater/             → runs update commands (batched by category)
-cleaner/             → runs cleanup with retention policies
-tui/                 → Bubble Tea model/view/update (3 tabs: Updates, Cleanup, Logs)
-model/types.go       → Item, Category, Status, PlatformInfo, SourceSummary
+platform/detect.go   → OS + available package managers (+ HasOpenCode)
+scanner/             → Source interface + RunAll() (parallel)
+  ├── brew, apt, mas, winget, … package managers
+  ├── opencode.go    → npm outdated --prefix ~/.config/opencode
+  ├── agents.go      → AI CLIs + npm global outdated merge
+  ├── homelab_clean  → retention cleanups (env-driven)
+  └── cleanup.go     → brew/docker/npm/go caches, SDKMAN majors
+updater/             → batch updates (brew/mas/npm/opencode plugins/agents)
+cleaner/             → cleanOne + policy.go (age paths, truncate, disk pressure)
+cli/                 → headless + JSON report (gate package ≥90% coverage)
+tui/                 → Bubble Tea async scan/update/clean
+config/env.go        → UPDASH_* retention (wired in cleaner + scanners)
+upgrade/             → release self-update on startup
+model/types.go       → Item, Category, Status, PlatformInfo
 ```
 
 ## Adding a new package manager source
 
-1. Create `internal/scanner/<name>.go` implementing `Source` interface (Category, Label, Icon, Scan)
-2. Register in `enabledSources()` in `scanner.go`
-3. Add update logic in `internal/updater/updater.go` (`updateOne` or `updateBatch`)
-4. Add cleanup logic in `internal/cleaner/cleaner.go` if needed
+1. Create `internal/scanner/<name>.go` implementing `Source`
+2. Register in `enabledSources()` (`scanner.go`)
+3. Add update logic in `internal/updater/updater.go`
+4. Add cleanup in `internal/cleaner` if needed
+5. Unit-test pure parse helpers; mock `execCombined` / `execCommand` for I/O
+
+## Coverage / CI gates
+
+- **COVER_PKGS (≥90%)**: `./internal/model/... ./internal/config/... ./internal/sizefmt/... ./internal/cli/... ./internal/retention/...`
+- **TEST_IO_PKGS** (race, no floor): scanner, tui, cleaner
+- Sonar excludes the same I/O packages from coverage measurement
+- Keep complexity low (Sonar S3776); prefer small helpers over large switches
+- gosec excludes: `G204,G306,G703,G118`
 
 ## Cross-platform quirks
 
 | OS | PMs | Notes |
 |---|---|---|
-| macOS | brew, mas | brew cask exclusion list in `brew.go` (JetBrains Toolbox apps, Microsoft Office, WhatsApp brew → managed elsewhere) |
-| Linux | apt, pacman/yay, flatpak, snap | `sudo` required for apt/pacman |
-| Windows | winget, choco, scoop | — |
+| macOS | brew, mas | brew cask exclusion list in `brew.go` |
+| Linux | apt, pacman/yay, flatpak, snap | `sudo` for apt/pacman/snap |
+| Windows | winget, choco, scoop | TEMP cleanup |
 
-- Platform detection in `platform/detect.go` — probes `exec.LookPath` + dir checks
-- `runCmd()` ignores brew/mas exit code 1 (warnings), verifies actual upgrade via post-check
-- `mas upgrade` runs via `sudo -S` (needs TTY for password)
-- Agent binary scanning uses `exec.LookPath` + `parseAgentVersion()` (semver regex extraction)
+- Agent version probes skip Electron CLIs without `DISPLAY` on Linux
+- Manual-only agents use `KeepPolicy` containing `manual` → skipped in CLI update
+- OpenCode binary: `opencode upgrade`; plugins: `npm update --prefix ~/.config/opencode`
 
-## SDKMAN retention policy
+## Retention policy (env)
 
-`internal/scanner/sdkman.go` → `groupLatestPerMajor()`:
-- Groups installed versions by major (e.g. "21" from "21.0.7-tem")
-- Keeps only the **latest semver per major line**
-- Reports remaining old versions as cleanup candidates (`StatusCleanCandidate`)
+`updash --env-defaults` prints effective values. Defaults:
 
-## Docker cleanup
+- Docker ages: `336h` (14d)
+- Container log truncate: `50` MB
+- Host logs / AI outputs / dev caches: age in days (30 / 7 / 90)
+- Disk pressure: prune aggressively when used% ≥ 85
 
-- `internal/cleaner/cleaner.go` → `cleanDocker()`
-- Age filters via `internal/config` (`UPDASH_DOCKER_*`, default `336h` / 14 days)
-- Volumes do NOT support `--filter until` — pruned unconditionally (no filter)
-- Volumes use `docker volume prune -f` only
-- `updash --env-defaults` prints effective retention env vars
-
-## Brew exclusion list
-
-`externalCasks` in `brew.go` — casks managed by other tools that brew upgrade would fail on:
-- JetBrains Toolbox apps (clion, datagrip, goland, intellij-idea-ce, phpstorm, pycharm, etc.)
-- Microsoft Office / Auto-Update (needs sudo TTY)
-- WhatsApp brew (prefer MAS version)
+Homelab clean category: `homelab-clean` (`--only homelab-clean`).
 
 ## Repository
 
-- `github.com/lgldsilva/updash` (Go module path)
+- Module: `github.com/lgldsilva/updash`
 - Gitea: `github.com/lgldsilva/updash`
-- **No direct pushes to `main`** — ai-standards hooks require feature branches + PRs
-- Project has **no tests yet** (0% coverage — gates will fail)
+- **No direct pushes to `main`** — feature branches + PRs

@@ -36,3 +36,33 @@ func TestSuggestCommand_mas(t *testing.T) {
 		t.Fatalf("got %q", got)
 	}
 }
+
+func TestClassifyItem_manualPolicy(t *testing.T) {
+	it := &model.Item{
+		Name: "Cursor", Category: model.CatAgent,
+		KeepPolicy: "manual reinstall / app update",
+	}
+	kind, _ := ClassifyItem(it, nil)
+	if kind != KindManualOnly {
+		t.Fatalf("kind=%v", kind)
+	}
+}
+
+func TestSuggestCommand_agentsAndPlugins(t *testing.T) {
+	cases := []struct {
+		it   *model.Item
+		want string
+	}{
+		{&model.Item{Category: model.CatOpenCodePlugins}, "npm update --prefix ~/.config/opencode"},
+		{&model.Item{Category: model.CatAgent, Name: "OpenCode"}, "opencode upgrade"},
+		{&model.Item{Category: model.CatAgent, Name: "Claude Code"}, "claude update"},
+		{&model.Item{Category: model.CatAgent, Name: "Codex"}, "npm install -g @openai/codex@latest"},
+		{&model.Item{Category: model.CatAgent, Name: "Copilot CLI"}, "copilot update"},
+		{&model.Item{Category: model.CatAgent, Name: "Cursor"}, ""},
+	}
+	for _, tc := range cases {
+		if got := SuggestCommand(tc.it); got != tc.want {
+			t.Fatalf("%s: got %q want %q", tc.it.Name, got, tc.want)
+		}
+	}
+}

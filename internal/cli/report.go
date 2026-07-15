@@ -36,7 +36,7 @@ func printCheckEnhanced(updates, cleanup []*model.SourceSummary) (outdated, clea
 }
 
 func printUpdateSummary(s *model.SourceSummary) (outdated, needsPassword, manualOnly int) {
-	if s.Category == model.CatAgent {
+	if s.Category == model.CatAgent || s.Category == model.CatOpenCodePlugins {
 		return printAgentSummary(s)
 	}
 	if s.Outdated == 0 {

@@ -18,8 +18,10 @@ func (s *AgentSource) Label() string            { return "AI Agents" }
 func (s *AgentSource) Icon() string             { return "🤖" }
 
 const (
-	flagVersion  = "--version"
-	toolAIMemory = "ai-memory"
+	flagVersion      = "--version"
+	toolAIMemory     = "ai-memory"
+	policyManual     = "manual reinstall / app update"
+	verNoneInstalled = "none installed"
 )
 
 var semverRE = regexp.MustCompile(`\d+\.\d+\.\d+[a-zA-Z0-9.-]*`)
@@ -46,46 +48,70 @@ func parseAgentVersion(output string) string {
 	return last
 }
 
+// agentUpdateMode describes how an agent can be upgraded.
+type agentUpdateMode int
+
+const (
+	agentUpdateAuto agentUpdateMode = iota
+	agentUpdateManual
+)
+
 type agentDef struct {
-	name   string
-	binary string
-	verCmd []string
+	name       string
+	binary     string
+	verCmd     []string
+	mode       agentUpdateMode
+	npmPackage string // optional: match against `npm outdated -g`
 }
 
 func agentCatalog() []agentDef {
 	return []agentDef{
-		{"Claude Code", "claude", []string{"claude", flagVersion}},
-		{"OpenCode", "opencode", []string{"opencode", flagVersion}},
-		{"Grok", "grok", []string{"grok", flagVersion}},
-		{"Antigravity", "antigravity", []string{"antigravity", flagVersion}},
-		{"Agy", "agy", []string{"agy", flagVersion}},
-		{"MimoCode", "mimo", []string{"mimo", flagVersion}},
-		{"Codex", "codex", []string{"codex", flagVersion}},
-		{"Gemini CLI", "gemini", []string{"gemini", flagVersion}},
-		{"Copilot CLI", "copilot", []string{"copilot", flagVersion}},
-		{"Crush", "crush", []string{"crush", flagVersion}},
-		{"Cursor", "cursor", []string{"cursor", flagVersion}},
+		{"Claude Code", "claude", []string{"claude", flagVersion}, agentUpdateAuto, "@anthropic-ai/claude-code"},
+		{"OpenCode", "opencode", []string{"opencode", flagVersion}, agentUpdateAuto, ""},
+		{"Grok", "grok", []string{"grok", flagVersion}, agentUpdateAuto, ""},
+		{"Antigravity", "antigravity", []string{"antigravity", flagVersion}, agentUpdateManual, ""},
+		{"Agy", "agy", []string{"agy", flagVersion}, agentUpdateManual, ""},
+		{"MimoCode", "mimo", []string{"mimo", flagVersion}, agentUpdateManual, ""},
+		{"Codex", "codex", []string{"codex", flagVersion}, agentUpdateAuto, "@openai/codex"},
+		{"Gemini CLI", "gemini", []string{"gemini", flagVersion}, agentUpdateAuto, "@google/gemini-cli"},
+		{"Copilot CLI", "copilot", []string{"copilot", flagVersion}, agentUpdateAuto, ""},
+		{"Crush", "crush", []string{"crush", flagVersion}, agentUpdateManual, ""},
+		{"Cursor", "cursor", []string{"cursor", flagVersion}, agentUpdateManual, ""},
 	}
 }
 
 func (s *AgentSource) Scan(ctx context.Context, plat model.PlatformInfo) ([]*model.Item, error) {
 	var items []*model.Item
-	for _, a := range agentCatalog() {
+	catalog := agentCatalog()
+	for _, a := range catalog {
 		if _, err := exec.LookPath(a.binary); err != nil {
 			continue
 		}
 		items = append(items, probeAgentItem(ctx, plat, a))
 	}
 	if len(items) == 0 {
-		items = append(items, &model.Item{
-			Name: "agents", Category: model.CatAgent, Status: model.StatusOK, CurrentVer: "none installed",
-		})
+		return []*model.Item{
+			{Name: "agents", Category: model.CatAgent, Status: model.StatusOK, CurrentVer: verNoneInstalled},
+		}, nil
+	}
+	if plat.HasNpm {
+		applyNpmOutdatedToAgents(ctx, items, catalog)
 	}
 	return items, nil
 }
 
 func probeAgentItem(ctx context.Context, plat model.PlatformInfo, a agentDef) *model.Item {
-	it := &model.Item{Name: a.name, Category: model.CatAgent, Status: model.StatusOK}
+	it := &model.Item{
+		Name:     a.name,
+		Category: model.CatAgent,
+		Status:   model.StatusOK,
+	}
+	if a.npmPackage != "" {
+		it.PackageID = a.npmPackage
+	}
+	if a.mode == agentUpdateManual {
+		it.KeepPolicy = policyManual
+	}
 	if len(a.verCmd) == 0 {
 		return it
 	}
@@ -95,6 +121,65 @@ func probeAgentItem(ctx context.Context, plat model.PlatformInfo, a agentDef) *m
 	}
 	it.CurrentVer = probeAgentVersion(ctx, a.verCmd)
 	return it
+}
+
+func applyNpmOutdatedToAgents(ctx context.Context, items []*model.Item, catalog []agentDef) {
+	out, err := execCombined(ctx, "npm", "outdated", "-g", "--json")
+	if err != nil && len(out) == 0 {
+		return
+	}
+	latestByPkg := ParseNpmOutdatedMap(out)
+	if len(latestByPkg) == 0 {
+		return
+	}
+	npmByName := make(map[string]string, len(catalog))
+	for _, a := range catalog {
+		if a.npmPackage != "" {
+			npmByName[a.name] = a.npmPackage
+		}
+	}
+	for _, it := range items {
+		pkg := it.PackageID
+		if pkg == "" {
+			pkg = npmByName[it.Name]
+		}
+		if pkg == "" {
+			continue
+		}
+		if latest, ok := latestByPkg[pkg]; ok {
+			ApplyAgentOutdated(it, latest)
+		}
+	}
+}
+
+// ApplyAgentOutdated marks an agent item outdated when latest differs from current.
+// Pure helper for unit tests and npm-merge paths.
+func ApplyAgentOutdated(it *model.Item, latest string) {
+	if it == nil || latest == "" {
+		return
+	}
+	cur := normalizeAgentVer(it.CurrentVer)
+	lat := normalizeAgentVer(latest)
+	if cur == "" || cur == "installed" || cur == verNoneInstalled {
+		it.AvailableVer = lat
+		it.Status = model.StatusOutdated
+		return
+	}
+	if cur == lat {
+		return
+	}
+	it.AvailableVer = lat
+	it.Status = model.StatusOutdated
+}
+
+func normalizeAgentVer(v string) string {
+	v = strings.TrimSpace(v)
+	v = strings.TrimPrefix(v, "v")
+	v = strings.TrimSuffix(v, ".")
+	if m := semverRE.FindString(v); m != "" {
+		return strings.TrimSuffix(m, ".")
+	}
+	return v
 }
 
 func probeAgentVersion(ctx context.Context, verCmd []string) string {
@@ -159,7 +244,7 @@ func (s *AIInfraSource) Scan(ctx context.Context, plat model.PlatformInfo) ([]*m
 	}
 	if len(items) == 0 {
 		items = append(items, &model.Item{
-			Name: "ai-infra", Category: model.CatAI, Status: model.StatusOK, CurrentVer: "none installed",
+			Name: "ai-infra", Category: model.CatAI, Status: model.StatusOK, CurrentVer: verNoneInstalled,
 		})
 	}
 	return items, nil
