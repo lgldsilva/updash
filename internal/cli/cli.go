@@ -49,7 +49,10 @@ func PrintCheck(updates, cleanup []*model.SourceSummary) (outdated, cleanable in
 	return outdated, cleanable
 }
 
-const msgScanning = "🔍 Scanning %s...\n"
+const (
+	msgScanning = "🔍 Scanning %s...\n"
+	msgItemFail = "  ✘ %s: %s\n"
+)
 
 // RunCheck scans and prints results.
 func RunCheck(ctx context.Context) error {
@@ -183,8 +186,6 @@ type cleanGroup struct {
 	label string
 	items []*model.Item
 }
-
-const msgItemFail = "  ✘ %s: %s\n"
 
 func runCleanBatches(ctx context.Context, summaries []*model.SourceSummary, items []*model.Item, opts cleaner.Options) (ok, fail int, freed int64) {
 	for _, g := range groupCleanBySummary(summaries, items) {
