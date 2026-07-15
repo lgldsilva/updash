@@ -27,7 +27,7 @@ func (s *DockerSource) Scan(ctx context.Context, plat model.PlatformInfo) ([]*mo
 	dfOut, err := execCommand(ctx, "docker", "system", "df")
 	if err != nil {
 		return []*model.Item{
-			{Name: "docker", Category: model.CatDocker, Status: model.StatusOK, CurrentVer: "up to date"},
+			{Name: "docker", Category: model.CatDocker, Status: model.StatusOK, CurrentVer: statusUpToDate},
 		}, nil
 	}
 

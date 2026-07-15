@@ -35,9 +35,7 @@ func (s *FlatpakSource) Scan(ctx context.Context, plat model.PlatformInfo) ([]*m
 func parseFlatpakJSONUpdates(ctx context.Context, out []byte) ([]*model.Item, error) {
 	trimmed := strings.TrimSpace(string(out))
 	if trimmed == "" || trimmed == "[]" {
-		return []*model.Item{
-			{Name: "flatpak", Category: model.CatFlatpak, Status: model.StatusOK, CurrentVer: "up to date"},
-		}, nil
+		return []*model.Item{okItem("flatpak", model.CatFlatpak)}, nil
 	}
 
 	var updates []flatpakRef
@@ -48,9 +46,7 @@ func parseFlatpakJSONUpdates(ctx context.Context, out []byte) ([]*model.Item, er
 	}
 
 	if len(updates) == 0 {
-		return []*model.Item{
-			{Name: "flatpak", Category: model.CatFlatpak, Status: model.StatusOK, CurrentVer: "up to date"},
-		}, nil
+		return []*model.Item{okItem("flatpak", model.CatFlatpak)}, nil
 	}
 
 	installed := flatpakInstalledVersions(ctx)
@@ -78,9 +74,7 @@ func parseFlatpakJSONUpdates(ctx context.Context, out []byte) ([]*model.Item, er
 	}
 
 	if len(items) == 0 {
-		return []*model.Item{
-			{Name: "flatpak", Category: model.CatFlatpak, Status: model.StatusOK, CurrentVer: "up to date"},
-		}, nil
+		return []*model.Item{okItem("flatpak", model.CatFlatpak)}, nil
 	}
 
 	return items, nil
@@ -121,9 +115,7 @@ func scanFlatpakDryRun(ctx context.Context) ([]*model.Item, error) {
 
 	output := string(out)
 	if strings.Contains(output, "Nothing to do") || strings.Contains(output, "Nothing to update") || strings.Contains(output, "No updates") {
-		return []*model.Item{
-			{Name: "flatpak", Category: model.CatFlatpak, Status: model.StatusOK, CurrentVer: "up to date"},
-		}, nil
+		return []*model.Item{okItem("flatpak", model.CatFlatpak)}, nil
 	}
 
 	lines := strings.Split(output, "\n")

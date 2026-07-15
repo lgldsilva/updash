@@ -27,7 +27,7 @@ func (s *MASource) Scan(ctx context.Context, plat model.PlatformInfo) ([]*model.
 	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
 	if len(lines) == 0 || (len(lines) == 1 && lines[0] == "") {
 		return []*model.Item{
-			{Name: "mas", Category: model.CatMAS, Status: model.StatusOK, CurrentVer: "up to date"},
+			{Name: "mas", Category: model.CatMAS, Status: model.StatusOK, CurrentVer: statusUpToDate},
 		}, nil
 	}
 
@@ -72,7 +72,7 @@ func (s *MASource) Scan(ctx context.Context, plat model.PlatformInfo) ([]*model.
 
 	if len(items) == 0 {
 		items = append(items, &model.Item{
-			Name: "mas", Category: model.CatMAS, Status: model.StatusOK, CurrentVer: "up to date",
+			Name: "mas", Category: model.CatMAS, Status: model.StatusOK, CurrentVer: statusUpToDate,
 		})
 	}
 

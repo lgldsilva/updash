@@ -26,7 +26,7 @@ func (s *SnapSource) Scan(ctx context.Context, plat model.PlatformInfo) ([]*mode
 	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
 	if len(lines) <= 1 {
 		return []*model.Item{
-			{Name: "snap", Category: model.CatSnap, Status: model.StatusOK, CurrentVer: "up to date"},
+			{Name: "snap", Category: model.CatSnap, Status: model.StatusOK, CurrentVer: statusUpToDate},
 		}, nil
 	}
 
@@ -56,7 +56,7 @@ func (s *SnapSource) Scan(ctx context.Context, plat model.PlatformInfo) ([]*mode
 
 	if len(items) == 0 {
 		items = append(items, &model.Item{
-			Name: "snap", Category: model.CatSnap, Status: model.StatusOK, CurrentVer: "up to date",
+			Name: "snap", Category: model.CatSnap, Status: model.StatusOK, CurrentVer: statusUpToDate,
 		})
 	}
 

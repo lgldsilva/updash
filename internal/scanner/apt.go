@@ -27,7 +27,7 @@ func (s *AptSource) Scan(ctx context.Context, plat model.PlatformInfo) ([]*model
 	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
 	if len(lines) <= 1 { // first line is "Listing..."
 		return []*model.Item{
-			{Name: "apt", Category: model.CatApt, Status: model.StatusOK, CurrentVer: "up to date"},
+			{Name: "apt", Category: model.CatApt, Status: model.StatusOK, CurrentVer: statusUpToDate},
 		}, nil
 	}
 
@@ -66,7 +66,7 @@ func (s *AptSource) Scan(ctx context.Context, plat model.PlatformInfo) ([]*model
 
 	if len(items) == 0 {
 		items = append(items, &model.Item{
-			Name: "apt", Category: model.CatApt, Status: model.StatusOK, CurrentVer: "up to date",
+			Name: "apt", Category: model.CatApt, Status: model.StatusOK, CurrentVer: statusUpToDate,
 		})
 	}
 

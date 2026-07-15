@@ -145,52 +145,15 @@ Updates are available for the following packages:
     git: 2.42.0.windows.1 (latest: 2.45.0.windows.1)
 Everything is ok!`
 
-	var items []*model.Item
-	lines := strings.Split(sampleOutput, "\n")
-	inUpdates := false
-
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if strings.Contains(line, "Updates are available") {
-			inUpdates = true
-			continue
-		}
-		if !inUpdates || line == "" {
-			continue
-		}
-		if strings.Contains(line, "WARN") || strings.Contains(line, "ERROR") {
-			continue
-		}
-		if strings.HasPrefix(line, "'") || strings.Contains(line, "Everything is ok") {
-			continue
-		}
-
-		if strings.Contains(line, "latest:") {
-			parts := strings.SplitN(line, ":", 2)
-			if len(parts) < 2 {
-				continue
-			}
-			name := strings.TrimSpace(parts[0])
-			rest := parts[1]
-			verParts := strings.SplitN(rest, "(", 2)
-			cur := strings.TrimSpace(verParts[0])
-			avail := ""
-			if len(verParts) >= 2 {
-				avail = strings.TrimPrefix(verParts[1], "latest: ")
-				avail = strings.TrimSuffix(avail, ")")
-				avail = strings.TrimSpace(avail)
-			}
-			items = append(items, &model.Item{
-				Name: name, CurrentVer: cur, AvailableVer: avail, Status: model.StatusOutdated,
-			})
-		}
-	}
-
+	items := parseScoopStatus(sampleOutput)
 	if len(items) != 2 {
 		t.Fatalf("expected 2 items, got %d", len(items))
 	}
 	if items[0].Name != "aria2" {
 		t.Errorf("item[0].Name = %q, want %q", items[0].Name, "aria2")
+	}
+	if items[1].Name != "git" {
+		t.Errorf("item[1].Name = %q, want %q", items[1].Name, "git")
 	}
 }
 
