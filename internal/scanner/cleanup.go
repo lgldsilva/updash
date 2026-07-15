@@ -15,6 +15,12 @@ import (
 	"github.com/lgldsilva/updash/internal/sizefmt"
 )
 
+const (
+	verNoCache   = "no cache"
+	nameGoCache  = "go-cache"
+	nameNpmCache = "npm-cache"
+)
+
 // --- Brew Cleanup ---
 
 type BrewCleanSource struct{}
@@ -32,7 +38,7 @@ func (s *BrewCleanSource) Scan(ctx context.Context, plat model.PlatformInfo) ([]
 		cacheDir = filepath.Join(home, ".cache", "Homebrew")
 		if _, err := os.Stat(cacheDir); err != nil {
 			return []*model.Item{
-				{Name: "brew-cache", Category: model.CatCache, Status: model.StatusOK, CurrentVer: "no cache"},
+				{Name: "brew-cache", Category: model.CatCache, Status: model.StatusOK, CurrentVer: verNoCache},
 			}, nil
 		}
 	}
@@ -73,7 +79,7 @@ func (s *AptCleanSource) Scan(ctx context.Context, plat model.PlatformInfo) ([]*
 	out, err := execCommand(ctx, "du", "-sh", "/var/cache/apt")
 	if err != nil {
 		return []*model.Item{
-			{Name: "apt-cache", Category: model.CatCache, Status: model.StatusOK, CurrentVer: "no cache"},
+			{Name: "apt-cache", Category: model.CatCache, Status: model.StatusOK, CurrentVer: verNoCache},
 		}, nil
 	}
 	size := strings.TrimSpace(strings.Fields(string(out))[0])
@@ -145,7 +151,7 @@ func (s *GoCleanSource) Scan(ctx context.Context, plat model.PlatformInfo) ([]*m
 	out, err := execCommand(ctx, "go", "env", "GOCACHE")
 	if err != nil {
 		return []*model.Item{
-			{Name: "go-cache", Category: model.CatCache, Status: model.StatusOK, CurrentVer: "error"},
+			{Name: nameGoCache, Category: model.CatCache, Status: model.StatusOK, CurrentVer: "error"},
 		}, nil
 	}
 	cacheDir := strings.TrimSpace(string(out))
@@ -153,14 +159,14 @@ func (s *GoCleanSource) Scan(ctx context.Context, plat model.PlatformInfo) ([]*m
 	sizeOut, err := execCommand(ctx, "du", "-sh", cacheDir)
 	if err != nil {
 		return []*model.Item{
-			{Name: "go-cache", Category: model.CatCache, Status: model.StatusOK, CurrentVer: "no cache"},
+			{Name: nameGoCache, Category: model.CatCache, Status: model.StatusOK, CurrentVer: verNoCache},
 		}, nil
 	}
 	size := strings.TrimSpace(strings.Fields(string(sizeOut))[0])
 
 	return []*model.Item{
 		{
-			Name:        "go-cache",
+			Name:        nameGoCache,
 			Category:    model.CatCache,
 			CurrentVer:  size,
 			Status:      model.StatusCleanCandidate,
@@ -184,14 +190,14 @@ func (s *NpmCleanSource) Scan(ctx context.Context, plat model.PlatformInfo) ([]*
 	_, err := os.Stat(cacheDir)
 	if err != nil {
 		return []*model.Item{
-			{Name: "npm-cache", Category: model.CatCache, Status: model.StatusOK, CurrentVer: "no cache"},
+			{Name: nameNpmCache, Category: model.CatCache, Status: model.StatusOK, CurrentVer: verNoCache},
 		}, nil
 	}
 
 	totalOut, err := execCommand(ctx, "du", "-sh", cacheDir)
 	if err != nil {
 		return []*model.Item{
-			{Name: "npm-cache", Category: model.CatCache, Status: model.StatusOK, CurrentVer: "no cache"},
+			{Name: nameNpmCache, Category: model.CatCache, Status: model.StatusOK, CurrentVer: verNoCache},
 		}, nil
 	}
 	total := strings.TrimSpace(strings.Fields(string(totalOut))[0])
@@ -207,13 +213,13 @@ func (s *NpmCleanSource) Scan(ctx context.Context, plat model.PlatformInfo) ([]*
 	reclaimable := sizefmt.Format(reclaimBytes)
 	if reclaimBytes == 0 {
 		return []*model.Item{
-			{Name: "npm-cache", Category: model.CatCache, Status: model.StatusOK, CurrentVer: total},
+			{Name: nameNpmCache, Category: model.CatCache, Status: model.StatusOK, CurrentVer: total},
 		}, nil
 	}
 
 	return []*model.Item{
 		{
-			Name:        "npm-cache",
+			Name:        nameNpmCache,
 			Category:    model.CatCache,
 			CurrentVer:  total,
 			Status:      model.StatusCleanCandidate,
