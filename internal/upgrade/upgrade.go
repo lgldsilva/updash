@@ -39,8 +39,7 @@ type Config struct {
 	API       string // Gitea API base URL for releases
 	Download  string // Download URL prefix for release assets
 	Token     string // Optional token for private repos
-	CAFile    string // Optional custom CA cert path
-	Insecure  bool   // Allow self-signed certs
+	CAFile    string // Optional custom CA cert path (self-signed homelab)
 	CheckOnly bool   // Only check, don't install
 	Version   string // Specific version to install (default: latest)
 }
@@ -393,24 +392,30 @@ func isHTTP404(err error) bool {
 }
 
 func httpClient(cfg Config) *http.Client {
-	tr := &http.Transport{}
-	if cfg.CAFile != "" {
-		if pem, err := os.ReadFile(cfg.CAFile); err == nil {
-			pool, err := x509.SystemCertPool()
-			if err != nil {
-				pool = x509.NewCertPool()
-			}
-			pool.AppendCertsFromPEM(pem)
-			tr.TLSClientConfig = &tls.Config{RootCAs: pool}
-		}
+	return &http.Client{
+		Timeout:   120 * time.Second,
+		Transport: &http.Transport{TLSClientConfig: tlsConfigFor(cfg)},
 	}
-	if cfg.Insecure {
-		if tr.TLSClientConfig == nil {
-			tr.TLSClientConfig = &tls.Config{}
-		}
-		tr.TLSClientConfig.InsecureSkipVerify = true
+}
+
+// tlsConfigFor builds TLS settings (TLS 1.2+). Self-signed hosts use CAFile
+// (UPDASH_TLS_CA_CERT) — verification is never disabled.
+func tlsConfigFor(cfg Config) *tls.Config {
+	tlsCfg := &tls.Config{MinVersion: tls.VersionTLS12}
+	if cfg.CAFile == "" {
+		return tlsCfg
 	}
-	return &http.Client{Timeout: 120 * time.Second, Transport: tr}
+	pem, err := os.ReadFile(cfg.CAFile)
+	if err != nil {
+		return tlsCfg
+	}
+	pool, err := x509.SystemCertPool()
+	if err != nil {
+		pool = x509.NewCertPool()
+	}
+	pool.AppendCertsFromPEM(pem)
+	tlsCfg.RootCAs = pool
+	return tlsCfg
 }
 
 func httpGet(ctx context.Context, hc *http.Client, url, token string) ([]byte, error) {
