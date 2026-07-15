@@ -13,7 +13,7 @@ import (
 
 // shouldUseNativeMacAuth reports whether items should use the macOS system auth sheet.
 func shouldUseNativeMacAuth(plat model.PlatformInfo, items []*model.Item, cfg Config) bool {
-	if plat.OS != "darwin" || cfg.SkipPassword || !elevate.NativeMacAuthAvailable() {
+	if plat.OS != "darwin" || cfg.SkipPassword || !nativeMacAvail() {
 		return false
 	}
 	return itemsNeedPasswordElevation(items, plat)
@@ -50,13 +50,13 @@ func runNativeElevatedItems(
 	cfg Config,
 	sess **elevate.Session,
 ) []*updater.Result {
-	if !stdinIsTTY() {
+	if !stdinIsTTYFn() {
 		fmt.Fprintln(os.Stderr, "⚠ Rode no Terminal.app (não em pipe/CI) para o diálogo nativo do macOS aparecer")
 	}
 	fmt.Println("ℹ O macOS vai pedir autorização no diálogo nativo do sistema (ícone de cadeado)")
 	fmt.Println("ℹ Depois disso, brew/mas rodam como seu usuário com sudo em cache")
 
-	if err := elevate.PrimeMacOSUserSudo(ctx); err != nil {
+	if err := primeMacSudo(ctx); err != nil {
 		if errors.Is(err, elevate.ErrDialogCancelled) {
 			fmt.Fprintln(os.Stderr, "⊘ Autorização cancelada — pacotes privilegiados ignorados")
 			return skipBatchResults(items, "autorização cancelada no diálogo do macOS")
@@ -77,14 +77,14 @@ func runNativeElevatedItems(
 	groups := groupByCategory(items)
 	for _, cat := range sortedCategories(groups) {
 		if cat == model.CatBrew {
-			results = append(results, updater.UpdateCategory(ctx, cat, groups[cat], opts)...)
+			results = append(results, updateCategory(ctx, cat, groups[cat], opts)...)
 			continue
 		}
 		elevCtx, skipped, reason := ensureCategoryElevation(ctx, plat, cat, cfg, sess)
 		if skipped {
 			results = append(results, skipBatchResults(groups[cat], reason)...)
 		} else {
-			results = append(results, updater.UpdateCategory(elevCtx, cat, groups[cat], opts)...)
+			results = append(results, updateCategory(elevCtx, cat, groups[cat], opts)...)
 		}
 	}
 	return results

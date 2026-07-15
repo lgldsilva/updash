@@ -12,7 +12,6 @@ import (
 	"github.com/lgldsilva/updash/internal/cleaner"
 	"github.com/lgldsilva/updash/internal/elevate"
 	"github.com/lgldsilva/updash/internal/model"
-	"github.com/lgldsilva/updash/internal/platform"
 	"github.com/lgldsilva/updash/internal/scanner"
 	"github.com/lgldsilva/updash/internal/updater"
 )
@@ -30,9 +29,9 @@ type Config struct {
 
 // Scan runs a single full scan and splits update vs cleanup summaries.
 func Scan(ctx context.Context) (updates, cleanup []*model.SourceSummary, elapsed time.Duration, err error) {
-	plat := platform.Detect()
+	plat := detectPlatform()
 	start := time.Now()
-	all := scanner.RunAll(ctx, plat, true)
+	all := runScannerAll(ctx, plat, true)
 	for _, s := range all {
 		if scanner.IsCleanupCategory(s.Category) {
 			cleanup = append(cleanup, s)
@@ -56,7 +55,7 @@ const (
 
 // RunCheck scans and prints results.
 func RunCheck(ctx context.Context) error {
-	plat := platformLabel(platform.Detect())
+	plat := platformLabel(detectPlatform())
 	fmt.Printf(msgScanning, plat)
 	updates, cleanup, elapsed, err := Scan(ctx)
 	if err != nil {
@@ -71,7 +70,7 @@ func RunCheck(ctx context.Context) error {
 
 // RunUpdate updates outdated packages.
 func RunUpdate(ctx context.Context, cfg Config) (int, int, error) {
-	plat := platform.Detect()
+	plat := detectPlatform()
 	fmt.Printf(msgScanning, platformLabel(plat))
 	updates, _, _, err := Scan(ctx)
 	if err != nil {
@@ -125,7 +124,7 @@ func RunUpdate(ctx context.Context, cfg Config) (int, int, error) {
 
 // RunClean runs cleanup operations.
 func RunClean(ctx context.Context, cfg Config) (int, int, error) {
-	plat := platform.Detect()
+	plat := detectPlatform()
 	fmt.Printf(msgScanning, platformLabel(plat))
 	_, cleanup, _, err := Scan(ctx)
 	if err != nil {
@@ -211,7 +210,7 @@ func printCleanItemDetail(it *model.Item) {
 
 func runOneClean(ctx context.Context, it *model.Item, opts cleaner.Options) (ok, fail int, freed int64) {
 	itemCtx, cancel := context.WithTimeout(ctx, cleaner.ItemTimeout(it))
-	r := cleaner.CleanOne(itemCtx, it, opts)
+	r := cleanOneFn(itemCtx, it, opts)
 	cancel()
 	if !r.Success {
 		errMsg := r.Error
@@ -222,7 +221,7 @@ func runOneClean(ctx context.Context, it *model.Item, opts cleaner.Options) (ok,
 		return 0, 1, 0
 	}
 	if r.BytesFreed > 0 {
-		fmt.Printf("  ✓ %s (freed %s)\n", it.Name, cleaner.FormatBytes(r.BytesFreed))
+		fmt.Printf("  ✓ %s (freed %s)\n", it.Name, formatBytesFn(r.BytesFreed))
 	} else {
 		fmt.Printf("  ✓ %s (nothing to remove)\n", it.Name)
 	}
@@ -355,7 +354,7 @@ func runCategoryUpdateSection(
 		if batchSkipped {
 			results = skipBatchResults(groupItems, skipReason)
 		} else {
-			results = updater.UpdateCategory(elevCtx, cat, groupItems, env.opts)
+			results = updateCategory(elevCtx, cat, groupItems, env.opts)
 		}
 	}
 	ok, fail, skipped = tallyUpdateResults(results)
@@ -444,7 +443,7 @@ func prepareCleanElevation(ctx context.Context, plat model.PlatformInfo, items [
 	if !elevate.ItemsNeedElevation(items, plat, true) {
 		return ctx
 	}
-	if elevate.CanElevateWithoutPassword(ctx) {
+	if canElevateNP(ctx) {
 		sess := elevate.NewSession()
 		sess.SetPasswordless()
 		return elevate.WithSession(ctx, sess)
