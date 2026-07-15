@@ -187,6 +187,7 @@ func (m *bubbleModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.state.Width = msg.Width
 		m.state.Height = msg.Height
+		m.state.LogWindowSize(msg.Width, msg.Height)
 		return m, nil
 
 	case tea.KeyMsg:

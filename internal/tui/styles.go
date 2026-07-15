@@ -22,35 +22,30 @@ var (
 			Padding(1, 2).
 			BorderForeground(ColorCyan)
 
+	// No MarginBottom — margins inside framed content can inflate measured width/height.
 	TitleStyle = lipgloss.NewStyle().
 			Bold(true).
-			Foreground(ColorCyan).
-			MarginBottom(1)
+			Foreground(ColorCyan)
 
-	// Tab styles
+	// Tab styles — no MarginRight (margins break width math inside the frame)
 	ActiveTabStyle = lipgloss.NewStyle().
 			Bold(true).
 			Foreground(ColorWhite).
 			Background(ColorBlue).
-			Padding(0, 2).
-			MarginRight(1)
+			Padding(0, 2)
 
 	InactiveTabStyle = lipgloss.NewStyle().
 				Foreground(ColorGray).
-				Padding(0, 2).
-				MarginRight(1)
+				Padding(0, 2)
 
-	// Category header
+	// Category header (no MarginTop — margins break JoinHorizontal alignment)
 	CatLabelStyle = lipgloss.NewStyle().
 			Bold(true).
-			Foreground(ColorYellow).
-			MarginTop(1).
-			MarginBottom(0)
+			Foreground(ColorYellow)
 
 	CatSummaryStyle = lipgloss.NewStyle().
 			Foreground(ColorGray).
-			Italic(true).
-			MarginLeft(2)
+			Italic(true)
 
 	// Item states
 	ItemOKStyle = lipgloss.NewStyle().
@@ -92,11 +87,10 @@ var (
 	BarEmpty = lipgloss.NewStyle().
 			Background(ColorGray)
 
-	// Footer / keybindings
+	// Footer / keybindings — no MarginTop (explicit newlines in view)
 	FooterStyle = lipgloss.NewStyle().
 			Foreground(ColorGray).
-			Italic(true).
-			MarginTop(1)
+			Italic(true)
 
 	// Spinner
 	SpinnerStyle = lipgloss.NewStyle().
