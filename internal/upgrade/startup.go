@@ -103,9 +103,10 @@ func PrintBanner(res StartupResult) {
 			line += " — run: updash --upgrade"
 		}
 	}
-	if res.Note == "upgrade check failed" {
+	switch res.Note {
+	case "upgrade check failed":
 		line += " · upgrade check skipped"
-	} else if res.Note == "upgrade failed" {
+	case "upgrade failed":
 		line += " · upgrade failed"
 	}
 	fmt.Println(line)
@@ -121,7 +122,9 @@ func Reexec() error {
 	if err != nil {
 		return err
 	}
-	cmd := exec.Command(self, os.Args[1:]...)
+	// Re-exec the absolute path of this binary with the original argv; args are
+	// not shell-interpolated (execve), so this is not shell injection.
+	cmd := exec.Command(self, os.Args[1:]...) // #nosec G702 -- re-exec self, not user shell
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -135,7 +138,7 @@ func Reexec() error {
 // ModeSkipsStartupUpgrade reports CLI modes that must not auto-upgrade or banner before work.
 func ModeSkipsStartupUpgrade(mode string) bool {
 	switch mode {
-	case "version", "help", "upgrade", "check-upgrade", "update-self":
+	case "version", "help", "upgrade", "check-upgrade", "update-self", "env-defaults":
 		return true
 	default:
 		return false

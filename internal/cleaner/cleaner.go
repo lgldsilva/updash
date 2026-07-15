@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/lgldsilva/updash/internal/config"
 	"github.com/lgldsilva/updash/internal/elevate"
 	"github.com/lgldsilva/updash/internal/model"
 )
@@ -187,19 +188,23 @@ func cleanSDKMAN(ctx context.Context, item *model.Item, opts Options) *Result {
 }
 
 // cleanDocker prunes Docker resources.
-// Uses --filter "until=336h" (14 days) to avoid removing recent images/containers.
+// Age filters come from UPDASH_DOCKER_* (default 336h / 14 days).
 func cleanDocker(ctx context.Context, item *model.Item, opts Options) *Result {
 	switch {
 	case strings.Contains(item.Name, "images"):
-		return runCmd(ctx, item, opts, "docker", "image", "prune", "-a", "--filter", "until=336h", "-f")
+		until := "until=" + config.DockerImageMaxAge()
+		return runCmd(ctx, item, opts, "docker", "image", "prune", "-a", "--filter", until, "-f")
 	case strings.Contains(item.Name, "builder") || strings.Contains(item.Name, "build"):
-		return runCmd(ctx, item, opts, "docker", "builder", "prune", "--filter", "until=336h", "-f")
+		until := "until=" + config.DockerBuilderMaxAge()
+		return runCmd(ctx, item, opts, "docker", "builder", "prune", "--filter", until, "-f")
 	case strings.Contains(item.Name, "container"):
-		return runCmd(ctx, item, opts, "docker", "container", "prune", "-f", "--filter", "until=336h")
+		until := "until=" + config.DockerContainerMaxAge()
+		return runCmd(ctx, item, opts, "docker", "container", "prune", "-f", "--filter", until)
 	case strings.Contains(item.Name, "volume"):
 		return runCmd(ctx, item, opts, "docker", "volume", "prune", "-f")
 	default:
-		return runCmd(ctx, item, opts, "docker", "system", "prune", "-af", "--filter", "until=336h")
+		until := "until=" + config.DockerImageMaxAge()
+		return runCmd(ctx, item, opts, "docker", "system", "prune", "-af", "--filter", until)
 	}
 }
 
