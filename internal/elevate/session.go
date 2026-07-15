@@ -128,8 +128,10 @@ func EnsureSudoReady(ctx context.Context) error {
 }
 
 // CanElevateWithoutPassword checks whether sudo works without a password prompt.
+// Timeout is generous enough for busy CI runners under -race (a short timeout
+// false-negatives as "needs password" and flakes tests that call this twice).
 func CanElevateWithoutPassword(ctx context.Context) bool {
-	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "sudo", "-n", "true")
 	return cmd.Run() == nil
