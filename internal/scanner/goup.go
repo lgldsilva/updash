@@ -32,16 +32,12 @@ func (s *GoSource) Scan(ctx context.Context, plat model.PlatformInfo) ([]*model.
 	// List Go binaries
 	out, err := execCommand(ctx, "ls", gopath+"/bin")
 	if err != nil {
-		return []*model.Item{
-			{Name: "go", Category: model.CatGo, Status: model.StatusOK, CurrentVer: "up to date"},
-		}, nil
+		return []*model.Item{okItem("go", model.CatGo)}, nil
 	}
 
 	names := strings.Fields(string(out))
 	if len(names) == 0 {
-		return []*model.Item{
-			{Name: "go", Category: model.CatGo, Status: model.StatusOK, CurrentVer: "up to date"},
-		}, nil
+		return []*model.Item{okItem("go", model.CatGo)}, nil
 	}
 
 	var items []*model.Item
@@ -59,16 +55,12 @@ func (s *GoSource) Scan(ctx context.Context, plat model.PlatformInfo) ([]*model.
 func (s *GoSource) scanGup(ctx context.Context) ([]*model.Item, error) {
 	out, err := execCommand(ctx, "gup", "update", "--dry-run")
 	if err != nil {
-		return []*model.Item{
-			{Name: "go", Category: model.CatGo, Status: model.StatusOK, CurrentVer: "up to date"},
-		}, nil
+		return []*model.Item{okItem("go", model.CatGo)}, nil
 	}
 
 	output := string(out)
-	if strings.Contains(output, "up to date") || output == "" {
-		return []*model.Item{
-			{Name: "go", Category: model.CatGo, Status: model.StatusOK, CurrentVer: "up to date"},
-		}, nil
+	if strings.Contains(output, statusUpToDate) || output == "" {
+		return []*model.Item{okItem("go", model.CatGo)}, nil
 	}
 
 	lines := strings.Split(strings.TrimSpace(output), "\n")
@@ -92,9 +84,7 @@ func (s *GoSource) scanGup(ctx context.Context) ([]*model.Item, error) {
 	}
 
 	if len(items) == 0 {
-		items = append(items, &model.Item{
-			Name: "go", Category: model.CatGo, Status: model.StatusOK, CurrentVer: "up to date",
-		})
+		items = append(items, okItem("go", model.CatGo))
 	}
 
 	return items, nil

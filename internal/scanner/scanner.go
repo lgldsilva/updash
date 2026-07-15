@@ -53,108 +53,83 @@ func RunAll(ctx context.Context, plat model.PlatformInfo, includeCleanup bool) [
 
 // enabledSources returns scanners for the current platform.
 func enabledSources(plat model.PlatformInfo, includeCleanup bool) []Source {
-	var src []Source
-
-	// macOS
-	if plat.HasBrew {
-		src = append(src, &BrewSource{})
-	}
-	if plat.HasMAS {
-		src = append(src, &MASource{})
-	}
-
-	// Linux
-	if plat.HasApt {
-		src = append(src, &AptSource{})
-	}
-	if plat.HasPacman || plat.HasYay {
-		src = append(src, &PacmanSource{})
-	}
-	if plat.HasFlatpak {
-		src = append(src, &FlatpakSource{})
-	}
-	if plat.HasSnap {
-		src = append(src, &SnapSource{})
-	}
-
-	// Windows
-	if plat.HasWinget {
-		src = append(src, &WingetSource{})
-	}
-	if plat.HasChoco {
-		src = append(src, &ChocoSource{})
-	}
-	if plat.HasScoop {
-		src = append(src, &ScoopSource{})
-	}
-	if plat.HasNpm {
-		src = append(src, &NpmSource{})
-	}
-	if plat.HasPipx {
-		src = append(src, &PipxSource{})
-	}
-	if plat.HasGo {
-		src = append(src, &GoSource{})
-	}
-	if plat.HasRustup {
-		src = append(src, &RustupSource{})
-	}
-	if plat.HasCargo {
-		src = append(src, &CargoSource{})
-	}
-	if plat.HasDocker {
-		src = append(src, &DockerSource{})
-	}
-	if plat.HasNvm {
-		src = append(src, &NvmSource{})
-	}
-	if plat.HasOmz {
-		src = append(src, &OmzSource{})
-	}
-
-	// AI agents — probe always
-	src = append(src, &AgentSource{})
-	src = append(src, &AIInfraSource{})
-
-	// Cleanup sources
+	src := appendPlatformSources(nil, plat)
+	src = appendLanguageSources(src, plat)
+	src = append(src, &AgentSource{}, &AIInfraSource{})
 	if includeCleanup {
-		if plat.HasBrew {
-			src = append(src, &BrewCleanSource{})
-		}
-		if plat.HasApt {
-			src = append(src, &AptCleanSource{})
-		}
-		if plat.HasSDKMAN {
-			src = append(src, &SDKMANSource{})
-		}
-		if plat.HasDocker {
-			src = append(src, &DockerCleanSource{})
-		}
-		if plat.HasGo {
-			src = append(src, &GoCleanSource{})
-		}
-		if plat.HasNpm {
-			src = append(src, &NpmCleanSource{})
-		}
-		if plat.HasSnap {
-			src = append(src, &SnapCleanSource{})
-		}
-
-		// Windows cache cleanup
-		if plat.OS == "windows" {
-			src = append(src, &WindowsTempSource{})
-		}
-
-		home := os.Getenv("HOME")
-		src = append(src, &VSCodeCleanSource{
-			LabelName: "Antigravity Ext",
-			ExtDir:    home + "/.antigravity/extensions",
-		})
-		src = append(src, &VSCodeCleanSource{
-			LabelName: "Antigravity IDE Ext",
-			ExtDir:    home + "/.antigravity-ide/extensions",
-		})
+		src = appendCleanupSources(src, plat)
 	}
+	return src
+}
 
+func appendPlatformSources(src []Source, plat model.PlatformInfo) []Source {
+	type cond struct {
+		ok  bool
+		src Source
+	}
+	for _, c := range []cond{
+		{plat.HasBrew, &BrewSource{}},
+		{plat.HasMAS, &MASource{}},
+		{plat.HasApt, &AptSource{}},
+		{plat.HasPacman || plat.HasYay, &PacmanSource{}},
+		{plat.HasFlatpak, &FlatpakSource{}},
+		{plat.HasSnap, &SnapSource{}},
+		{plat.HasWinget, &WingetSource{}},
+		{plat.HasChoco, &ChocoSource{}},
+		{plat.HasScoop, &ScoopSource{}},
+	} {
+		if c.ok {
+			src = append(src, c.src)
+		}
+	}
+	return src
+}
+
+func appendLanguageSources(src []Source, plat model.PlatformInfo) []Source {
+	type cond struct {
+		ok  bool
+		src Source
+	}
+	for _, c := range []cond{
+		{plat.HasNpm, &NpmSource{}},
+		{plat.HasPipx, &PipxSource{}},
+		{plat.HasGo, &GoSource{}},
+		{plat.HasRustup, &RustupSource{}},
+		{plat.HasCargo, &CargoSource{}},
+		{plat.HasDocker, &DockerSource{}},
+		{plat.HasNvm, &NvmSource{}},
+		{plat.HasOmz, &OmzSource{}},
+	} {
+		if c.ok {
+			src = append(src, c.src)
+		}
+	}
+	return src
+}
+
+func appendCleanupSources(src []Source, plat model.PlatformInfo) []Source {
+	type cond struct {
+		ok  bool
+		src Source
+	}
+	for _, c := range []cond{
+		{plat.HasBrew, &BrewCleanSource{}},
+		{plat.HasApt, &AptCleanSource{}},
+		{plat.HasSDKMAN, &SDKMANSource{}},
+		{plat.HasDocker, &DockerCleanSource{}},
+		{plat.HasGo, &GoCleanSource{}},
+		{plat.HasNpm, &NpmCleanSource{}},
+		{plat.HasSnap, &SnapCleanSource{}},
+		{plat.OS == "windows", &WindowsTempSource{}},
+	} {
+		if c.ok {
+			src = append(src, c.src)
+		}
+	}
+	home := os.Getenv("HOME")
+	src = append(src,
+		&VSCodeCleanSource{LabelName: "Antigravity Ext", ExtDir: home + "/.antigravity/extensions"},
+		&VSCodeCleanSource{LabelName: "Antigravity IDE Ext", ExtDir: home + "/.antigravity-ide/extensions"},
+	)
 	return src
 }

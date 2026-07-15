@@ -15,77 +15,53 @@ func (s *ScoopSource) Label() string            { return "Scoop" }
 func (s *ScoopSource) Icon() string             { return "🪣" }
 
 func (s *ScoopSource) Scan(ctx context.Context, plat model.PlatformInfo) ([]*model.Item, error) {
-	// scoop status shows outdated packages
 	out, err := execCommand(ctx, "scoop", "status")
 	if err != nil {
-		return []*model.Item{
-			{Name: "scoop", Category: model.CatScoop, Status: model.StatusError, CurrentVer: "error"},
-		}, nil
+		return []*model.Item{errItem("scoop", model.CatScoop)}, nil
 	}
-
 	output := string(out)
 	if strings.Contains(output, "Everything is ok") {
-		return []*model.Item{
-			{Name: "scoop", Category: model.CatScoop, Status: model.StatusOK, CurrentVer: "up to date"},
-		}, nil
+		return []*model.Item{okItem("scoop", model.CatScoop)}, nil
 	}
+	return okOrOutdated("scoop", model.CatScoop, parseScoopStatus(output)), nil
+}
 
-	// Parse scoop status output
-	// Format: "  appName: 1.2.3 (latest: 1.3.0)"
-	lines := strings.Split(output, "\n")
+// parseScoopStatus parses "appName: cur (latest: new)" lines after the updates header.
+func parseScoopStatus(output string) []*model.Item {
 	var items []*model.Item
 	inUpdates := false
-
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if strings.Contains(line, "Updates are available") {
+	for _, raw := range strings.Split(output, "\n") {
+		line := strings.TrimSpace(raw)
+		switch {
+		case strings.Contains(line, "Updates are available"):
 			inUpdates = true
 			continue
-		}
-		if !inUpdates || line == "" {
+		case !inUpdates, line == "", strings.Contains(line, "WARN"), strings.Contains(line, "ERROR"):
+			continue
+		case strings.HasPrefix(line, "'"), !strings.Contains(line, "latest:"):
 			continue
 		}
-		if strings.Contains(line, "WARN") || strings.Contains(line, "ERROR") {
-			continue
-		}
-		if strings.HasPrefix(line, "'") {
-			continue
-		}
-
-		// Parse "appName: currentVer (latest: newVer)"
-		if strings.Contains(line, "latest:") {
-			parts := strings.SplitN(line, ":", 2)
-			if len(parts) < 2 {
-				continue
-			}
-			name := strings.TrimSpace(parts[0])
-
-			rest := parts[1]
-			verParts := strings.SplitN(rest, "(", 2)
-			cur := strings.TrimSpace(verParts[0])
-
-			avail := ""
-			if len(verParts) >= 2 {
-				avail = strings.TrimPrefix(verParts[1], "latest: ")
-				avail = strings.TrimSuffix(avail, ")")
-				avail = strings.TrimSpace(avail)
-			}
-
-			items = append(items, &model.Item{
-				Name:         name,
-				Category:     model.CatScoop,
-				CurrentVer:   cur,
-				AvailableVer: avail,
-				Status:       model.StatusOutdated,
-			})
+		if it := parseScoopUpdateLine(line); it != nil {
+			items = append(items, it)
 		}
 	}
+	return items
+}
 
-	if len(items) == 0 {
-		items = append(items, &model.Item{
-			Name: "scoop", Category: model.CatScoop, Status: model.StatusOK, CurrentVer: "up to date",
-		})
+func parseScoopUpdateLine(line string) *model.Item {
+	parts := strings.SplitN(line, ":", 2)
+	if len(parts) < 2 {
+		return nil
 	}
-
-	return items, nil
+	name := strings.TrimSpace(parts[0])
+	verParts := strings.SplitN(parts[1], "(", 2)
+	cur := strings.TrimSpace(verParts[0])
+	avail := ""
+	if len(verParts) >= 2 {
+		avail = strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(verParts[1], "latest: "), ")"))
+	}
+	return &model.Item{
+		Name: name, Category: model.CatScoop,
+		CurrentVer: cur, AvailableVer: avail, Status: model.StatusOutdated,
+	}
 }

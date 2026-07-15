@@ -70,7 +70,7 @@ func (s *WingetSource) Scan(ctx context.Context, plat model.PlatformInfo) ([]*mo
 
 	if len(items) == 0 {
 		items = append(items, &model.Item{
-			Name: "winget", Category: model.CatWinget, Status: model.StatusOK, CurrentVer: "up to date",
+			Name: "winget", Category: model.CatWinget, Status: model.StatusOK, CurrentVer: statusUpToDate,
 		})
 	}
 
@@ -82,7 +82,7 @@ func scanWingetText(ctx context.Context) ([]*model.Item, error) {
 	out, err := execCommand(ctx, "winget", "upgrade")
 	if err != nil {
 		return []*model.Item{
-			{Name: "winget", Category: model.CatWinget, Status: model.StatusOK, CurrentVer: "up to date"},
+			{Name: "winget", Category: model.CatWinget, Status: model.StatusOK, CurrentVer: statusUpToDate},
 		}, nil
 	}
 
@@ -122,7 +122,7 @@ func scanWingetText(ctx context.Context) ([]*model.Item, error) {
 
 	if len(items) == 0 {
 		items = append(items, &model.Item{
-			Name: "winget", Category: model.CatWinget, Status: model.StatusOK, CurrentVer: "up to date",
+			Name: "winget", Category: model.CatWinget, Status: model.StatusOK, CurrentVer: statusUpToDate,
 		})
 	}
 

@@ -65,7 +65,7 @@ func (s *BrewSource) Scan(ctx context.Context, plat model.PlatformInfo) ([]*mode
 	total := len(data.Formulae) + len(data.Casks)
 	if total == 0 {
 		return []*model.Item{
-			{Name: "brew", Category: model.CatBrew, Status: model.StatusOK, CurrentVer: "up to date"},
+			{Name: "brew", Category: model.CatBrew, Status: model.StatusOK, CurrentVer: statusUpToDate},
 		}, nil
 	}
 

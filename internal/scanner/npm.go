@@ -37,7 +37,7 @@ func (s *NpmSource) Scan(ctx context.Context, plat model.PlatformInfo) ([]*model
 	}
 	if err := json.Unmarshal(out, &data); err != nil || len(data) == 0 {
 		return []*model.Item{
-			{Name: "npm", Category: model.CatNpm, Status: model.StatusOK, CurrentVer: "up to date"},
+			{Name: "npm", Category: model.CatNpm, Status: model.StatusOK, CurrentVer: statusUpToDate},
 		}, nil
 	}
 

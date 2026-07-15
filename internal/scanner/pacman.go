@@ -15,7 +15,6 @@ func (s *PacmanSource) Label() string            { return "pacman" }
 func (s *PacmanSource) Icon() string             { return "🐧" }
 
 func (s *PacmanSource) Scan(ctx context.Context, plat model.PlatformInfo) ([]*model.Item, error) {
-	// Check if yay is available (AUR helper)
 	if plat.HasYay {
 		return s.scanYay(ctx)
 	}
@@ -23,115 +22,60 @@ func (s *PacmanSource) Scan(ctx context.Context, plat model.PlatformInfo) ([]*mo
 }
 
 func (s *PacmanSource) scanYay(ctx context.Context) ([]*model.Item, error) {
-	// yay -Qua: list AUR + repo updates
 	out, err := execCommand(ctx, "yay", "-Qua")
 	if err != nil {
-		return []*model.Item{
-			{Name: "yay", Category: model.CatPacman, Status: model.StatusError, CurrentVer: "error"},
-		}, nil
+		return []*model.Item{errItem("yay", model.CatPacman)}, nil
 	}
-
-	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
-	if len(lines) == 0 || (len(lines) == 1 && lines[0] == "") {
-		return []*model.Item{
-			{Name: "yay", Category: model.CatPacman, Status: model.StatusOK, CurrentVer: "up to date"},
-		}, nil
-	}
-
-	var items []*model.Item
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
-		// Format: "repo/pkg_name 1.2.3 -> 1.2.4"
-		// or "aur/pkg_name 1.2.3 -> 1.2.4-1"
-		if strings.Contains(line, "->") {
-			parts := strings.Split(line, " -> ")
-			left := strings.Fields(parts[0])
-			avail := strings.TrimSpace(parts[1])
-			name := ""
-			cur := ""
-			if len(left) >= 1 {
-				fullName := left[0]
-				if idx := strings.Index(fullName, "/"); idx >= 0 {
-					name = fullName[idx+1:]
-				} else {
-					name = fullName
-				}
-			}
-			if len(left) >= 2 {
-				cur = left[1]
-			}
-			items = append(items, &model.Item{
-				Name:         name,
-				Category:     model.CatPacman,
-				CurrentVer:   cur,
-				AvailableVer: avail,
-				Status:       model.StatusOutdated,
-			})
-		}
-	}
-
-	if len(items) == 0 {
-		items = append(items, &model.Item{
-			Name: "yay", Category: model.CatPacman, Status: model.StatusOK, CurrentVer: "up to date",
-		})
-	}
-
-	return items, nil
+	return okOrOutdated("yay", model.CatPacman, parsePacmanArrowLines(string(out), true)), nil
 }
 
 func (s *PacmanSource) scanPacman(ctx context.Context) ([]*model.Item, error) {
-	// pacman -Qu: list repo updates
 	out, err := execCommand(ctx, "pacman", "-Qu")
 	if err != nil {
-		return []*model.Item{
-			{Name: "pacman", Category: model.CatPacman, Status: model.StatusError, CurrentVer: "error"},
-		}, nil
+		return []*model.Item{errItem("pacman", model.CatPacman)}, nil
 	}
+	return okOrOutdated("pacman", model.CatPacman, parsePacmanArrowLines(string(out), false)), nil
+}
 
-	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
-	if len(lines) == 0 || (len(lines) == 1 && lines[0] == "") {
-		return []*model.Item{
-			{Name: "pacman", Category: model.CatPacman, Status: model.StatusOK, CurrentVer: "up to date"},
-		}, nil
-	}
-
+// parsePacmanArrowLines parses "name 1.0 -> 2.0" or "repo/name 1.0 -> 2.0" lines.
+func parsePacmanArrowLines(output string, stripRepo bool) []*model.Item {
 	var items []*model.Item
-	for _, line := range lines {
+	for _, line := range strings.Split(strings.TrimSpace(output), "\n") {
 		line = strings.TrimSpace(line)
-		if line == "" {
+		if line == "" || !strings.Contains(line, "->") {
 			continue
 		}
-		// Format: "pkg_name 1.2.3 -> 1.2.4"
-		if strings.Contains(line, "->") {
-			parts := strings.Split(line, " -> ")
-			left := strings.Fields(parts[0])
-			avail := strings.TrimSpace(parts[1])
-			name := ""
-			cur := ""
-			if len(left) >= 1 {
-				name = left[0]
-			}
-			if len(left) >= 2 {
-				cur = left[1]
-			}
-			items = append(items, &model.Item{
-				Name:         name,
-				Category:     model.CatPacman,
-				CurrentVer:   cur,
-				AvailableVer: avail,
-				Status:       model.StatusOutdated,
-			})
+		if it := parsePacmanArrowLine(line, stripRepo); it != nil {
+			items = append(items, it)
 		}
 	}
+	return items
+}
 
-	if len(items) == 0 {
-		items = append(items, &model.Item{
-			Name: "pacman", Category: model.CatPacman, Status: model.StatusOK, CurrentVer: "up to date",
-		})
+func parsePacmanArrowLine(line string, stripRepo bool) *model.Item {
+	parts := strings.Split(line, " -> ")
+	if len(parts) < 2 {
+		return nil
 	}
-
-	return items, nil
+	left := strings.Fields(parts[0])
+	if len(left) < 1 {
+		return nil
+	}
+	name := left[0]
+	if stripRepo {
+		if idx := strings.Index(name, "/"); idx >= 0 {
+			name = name[idx+1:]
+		}
+	}
+	cur := ""
+	if len(left) >= 2 {
+		cur = left[1]
+	}
+	return &model.Item{
+		Name:         name,
+		Category:     model.CatPacman,
+		CurrentVer:   cur,
+		AvailableVer: strings.TrimSpace(parts[1]),
+		Status:       model.StatusOutdated,
+	}
 }

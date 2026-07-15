@@ -46,7 +46,7 @@ func (s *ChocoSource) Scan(ctx context.Context, plat model.PlatformInfo) ([]*mod
 
 	if len(items) == 0 {
 		items = append(items, &model.Item{
-			Name: "choco", Category: model.CatChoco, Status: model.StatusOK, CurrentVer: "up to date",
+			Name: "choco", Category: model.CatChoco, Status: model.StatusOK, CurrentVer: statusUpToDate,
 		})
 	}
 
