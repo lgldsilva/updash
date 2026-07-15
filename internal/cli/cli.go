@@ -49,10 +49,12 @@ func PrintCheck(updates, cleanup []*model.SourceSummary) (outdated, cleanable in
 	return outdated, cleanable
 }
 
+const msgScanning = "🔍 Scanning %s...\n"
+
 // RunCheck scans and prints results.
 func RunCheck(ctx context.Context) error {
 	plat := platformLabel(platform.Detect())
-	fmt.Printf("🔍 Scanning %s...\n", plat)
+	fmt.Printf(msgScanning, plat)
 	updates, cleanup, elapsed, err := Scan(ctx)
 	if err != nil {
 		return err
@@ -67,7 +69,7 @@ func RunCheck(ctx context.Context) error {
 // RunUpdate updates outdated packages.
 func RunUpdate(ctx context.Context, cfg Config) (int, int, error) {
 	plat := platform.Detect()
-	fmt.Printf("🔍 Scanning %s...\n", platformLabel(plat))
+	fmt.Printf(msgScanning, platformLabel(plat))
 	updates, _, _, err := Scan(ctx)
 	if err != nil {
 		return 0, 0, err
@@ -121,7 +123,7 @@ func RunUpdate(ctx context.Context, cfg Config) (int, int, error) {
 // RunClean runs cleanup operations.
 func RunClean(ctx context.Context, cfg Config) (int, int, error) {
 	plat := platform.Detect()
-	fmt.Printf("🔍 Scanning %s...\n", platformLabel(plat))
+	fmt.Printf(msgScanning, platformLabel(plat))
 	_, cleanup, _, err := Scan(ctx)
 	if err != nil {
 		return 0, 0, err
