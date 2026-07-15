@@ -61,9 +61,10 @@ model/types.go       → Item, Category, Status, PlatformInfo, SourceSummary
 ## Docker cleanup
 
 - `internal/cleaner/cleaner.go` → `cleanDocker()`
-- Uses `--filter until=336h` (14 days) for images, containers, and build cache
+- Age filters via `internal/config` (`UPDASH_DOCKER_*`, default `336h` / 14 days)
 - Volumes do NOT support `--filter until` — pruned unconditionally (no filter)
 - Volumes use `docker volume prune -f` only
+- `updash --env-defaults` prints effective retention env vars
 
 ## Brew exclusion list
 
