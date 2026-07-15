@@ -59,35 +59,50 @@ func cacheMeasurePaths(item *model.Item) []string {
 	home := os.Getenv("HOME")
 	switch {
 	case strings.HasPrefix(item.Name, "brew"):
-		for _, p := range []string{
+		return firstExistingPath(
 			filepath.Join(home, "Library", "Caches", "Homebrew"),
 			filepath.Join(home, ".cache", "Homebrew"),
-		} {
-			if _, err := os.Stat(p); err == nil {
-				return []string{p}
-			}
-		}
+		)
 	case strings.HasPrefix(item.Name, "go"):
-		out, err := exec.Command("go", "env", "GOCACHE").Output()
-		if err == nil {
-			if p := strings.TrimSpace(string(out)); p != "" {
-				return []string{p}
-			}
-		}
+		return goCachePaths()
 	case strings.HasPrefix(item.Name, "npm"):
-		base := filepath.Join(home, ".npm")
-		var paths []string
-		for _, sub := range []string{"_cacache", "_npx"} {
-			p := filepath.Join(base, sub)
-			if _, err := os.Stat(p); err == nil {
-				paths = append(paths, p)
-			}
-		}
-		return paths
+		return npmCachePaths(home)
 	case strings.HasPrefix(item.Name, "apt"):
 		return []string{"/var/cache/apt"}
 	}
 	return nil
+}
+
+func firstExistingPath(paths ...string) []string {
+	for _, p := range paths {
+		if _, err := os.Stat(p); err == nil {
+			return []string{p}
+		}
+	}
+	return nil
+}
+
+func goCachePaths() []string {
+	out, err := exec.Command("go", "env", "GOCACHE").Output()
+	if err != nil {
+		return nil
+	}
+	if p := strings.TrimSpace(string(out)); p != "" {
+		return []string{p}
+	}
+	return nil
+}
+
+func npmCachePaths(home string) []string {
+	base := filepath.Join(home, ".npm")
+	var paths []string
+	for _, sub := range []string{"_cacache", "_npx"} {
+		p := filepath.Join(base, sub)
+		if _, err := os.Stat(p); err == nil {
+			paths = append(paths, p)
+		}
+	}
+	return paths
 }
 
 func computeBytesFreed(ctx context.Context, item *model.Item, output string, before int64) int64 {
