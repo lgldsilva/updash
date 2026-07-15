@@ -29,70 +29,68 @@ func main() {
 		fmt.Fprintf(os.Stderr, "✘ %v\n", err)
 		os.Exit(2)
 	}
-
 	ctx := context.Background()
-
 	startupRes := runStartup(ctx, mode, cfg)
+	if code := runMode(ctx, mode, cfg, startupRes); code != 0 {
+		os.Exit(code)
+	}
+}
 
+// runMode dispatches CLI/TUI modes. Returns process exit code (0 = ok).
+func runMode(ctx context.Context, mode string, cfg cli.Config, startupRes upgrade.StartupResult) int {
 	switch mode {
 	case "check":
-		if err := cli.RunCheck(ctx); err != nil {
-			os.Exit(1)
-		}
-		return
+		return exitOnErr(cli.RunCheck(ctx))
 	case "update":
-		_, fail, err := cli.RunUpdate(ctx, cfg)
-		if err != nil {
-			os.Exit(1)
-		}
-		if fail > 0 {
-			os.Exit(1)
-		}
-		return
+		return exitOnUpdateClean(cli.RunUpdate(ctx, cfg))
 	case "clean":
-		_, fail, err := cli.RunClean(ctx, cfg)
-		if err != nil {
-			os.Exit(1)
-		}
-		if fail > 0 {
-			os.Exit(1)
-		}
-		return
+		return exitOnUpdateClean(cli.RunClean(ctx, cfg))
 	case "all":
-		if err := cli.RunAll(ctx, cfg); err != nil {
-			os.Exit(1)
-		}
-		return
+		return exitOnErr(cli.RunAll(ctx, cfg))
 	case "help":
 		printHelp()
-		return
 	case "version":
 		fmt.Println("updash", upgrade.FormatBuild(version))
-		return
 	case "env-defaults":
 		fmt.Print(config.EnvDefaults())
-		return
 	case "upgrade":
-		c := upgrade.EffectiveConfig()
-		if err := upgrade.Run(ctx, c, version); err != nil {
-			fmt.Fprintf(os.Stderr, "✘ upgrade: %v\n", err)
-			os.Exit(1)
-		}
-		return
+		return exitUpgrade(ctx, false)
 	case "check-upgrade":
-		c := upgrade.EffectiveConfig()
-		c.CheckOnly = true
-		if err := upgrade.Run(ctx, c, version); err != nil {
-			fmt.Fprintf(os.Stderr, "✘ %v\n", err)
-			os.Exit(1)
-		}
-		return
+		return exitUpgrade(ctx, true)
 	case "update-self":
 		updateSelf()
-		return
-	case "tui":
+	default: // tui
 		runTUI(startupRes)
 	}
+	return 0
+}
+
+func exitOnErr(err error) int {
+	if err != nil {
+		return 1
+	}
+	return 0
+}
+
+func exitOnUpdateClean(_ int, fail int, err error) int {
+	if err != nil || fail > 0 {
+		return 1
+	}
+	return 0
+}
+
+func exitUpgrade(ctx context.Context, checkOnly bool) int {
+	c := upgrade.EffectiveConfig()
+	c.CheckOnly = checkOnly
+	if err := upgrade.Run(ctx, c, version); err != nil {
+		if checkOnly {
+			fmt.Fprintf(os.Stderr, "✘ %v\n", err)
+		} else {
+			fmt.Fprintf(os.Stderr, "✘ upgrade: %v\n", err)
+		}
+		return 1
+	}
+	return 0
 }
 
 func runStartup(ctx context.Context, mode string, cfg cli.Config) upgrade.StartupResult {
@@ -185,173 +183,206 @@ func (m *bubbleModel) Init() tea.Cmd {
 func (m *bubbleModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
-		m.state.Width = msg.Width
-		m.state.Height = msg.Height
-		m.state.LogWindowSize(msg.Width, msg.Height)
-		return m, nil
-
+		return m.onWindowSize(msg)
 	case tea.KeyMsg:
-		action := m.state.HandleKey(msg.String())
-		switch action {
-		case tui.KeyQuit:
-			m.state.Cancel()
-			m.state.ClearElevation()
-			return m, tea.Quit
-		case tui.KeyConfirm:
-			cmd := m.state.ConsumeConfirmCmd(m.program)
-			return m, cmd
-		case tui.KeyCancel:
-			return m, nil
-		default:
-			cmd := m.state.HandleAction(action)
-			if cmd == nil && m.state.NeedsSpinner() {
-				return m, tui.TickCmd()
-			}
-			return m, cmd
-		}
-
+		return m.onKey(msg)
 	case tui.TickMsg:
-		if m.state.NeedsSpinner() {
-			m.state.AdvanceSpinner()
-			return m, tui.TickCmd()
-		}
-		return m, nil
-
+		return m.onTick()
 	case tui.ScanSourceDoneMsg:
-		if msg.IsCleanup {
-			m.state.CleanItems = tui.MergeSummary(m.state.CleanItems, msg.Summary)
-		} else {
-			m.state.Summaries = tui.MergeSummary(m.state.Summaries, msg.Summary)
-		}
-		m.state.ScanDone++
-		m.state.OperationLabel = msg.Summary.Label
-		return m, tui.TickCmd()
-
+		return m.onScanSourceDone(msg)
 	case tui.ScanFinishedMsg:
-		m.state.Scanning = false
-		m.state.OperationLabel = ""
-		m.state.ClampCursor()
-		elapsed := ""
-		if msg.Elapsed > 0 {
-			elapsed = fmt.Sprintf(" (%s)", msg.Elapsed)
-		}
-		scanErrs := m.state.TotalScanErrors()
-		if scanErrs > 0 {
-			m.state.LogScanErrors()
-			m.state.LastSummary = fmt.Sprintf("⚠ Scan done — %d error(s), see Logs tab", scanErrs)
-			m.state.AddLog(
-				fmt.Sprintf("Scan complete: %d outdated, %d cleanable, %d error(s)%s",
-					m.state.TotalOutdated(), m.state.TotalCleanable(), scanErrs, elapsed), false,
-			)
-		} else {
-			m.state.LastSummary = ""
-			m.state.AddLog(
-				fmt.Sprintf("Scan complete: %d outdated, %d cleanable%s",
-					m.state.TotalOutdated(), m.state.TotalCleanable(), elapsed), true,
-			)
-		}
-		return m, nil
-
+		return m.onScanFinished(msg)
 	case tui.ErrMsg:
-		m.state.Error = msg.Error.Error()
-		m.state.Scanning = false
-		return m, nil
-
+		return m.onErr(msg)
 	case tui.UpdateBatchDoneMsg:
-		m.state.UpdateDone = msg.Done
-		m.state.UpdateTotal = msg.Total
-		if msg.Results == nil && msg.Category != "" {
-			m.state.OperationLabel = msg.Category
-			m.state.AddLog(fmt.Sprintf("⟳ %s: updating...", msg.Category), true)
-			return m, tui.TickCmd()
-		}
-		for _, r := range msg.Results {
-			if r.Success {
-				m.state.AddLog(fmt.Sprintf("✓ %s: updated", r.Item.Name), true)
-			} else {
-				errMsg := r.Error
-				if len(errMsg) > 120 {
-					errMsg = errMsg[:120] + "..."
-				}
-				m.state.AddLog(fmt.Sprintf("✘ %s: %s", r.Item.Name, errMsg), false)
-			}
-		}
-		return m, nil
-
+		return m.onUpdateBatch(msg)
 	case tui.UpdateAllDoneMsg:
-		m.state.Updating = false
-		m.state.OperationLabel = ""
-		m.state.LastSummary = fmt.Sprintf("✓ Update done: %d ok, %d failed of %d",
-			msg.Success, msg.Failed, msg.Total)
-		m.state.AddLog(fmt.Sprintf("Update complete: %d ok, %d failed of %d",
-			msg.Success, msg.Failed, msg.Total), msg.Failed == 0)
-		m.state.ClampCursor()
-		return m, tui.TickCmd()
-
+		return m.onUpdateAllDone(msg)
 	case tui.CleanBatchDoneMsg:
-		m.state.CleanDone = msg.Done
-		m.state.CleanTotal = msg.Total
-		if msg.Results == nil && msg.Category != "" {
-			m.state.OperationLabel = msg.Category
-			m.state.AddLog(fmt.Sprintf("⟳ %s: cleaning...", msg.Category), true)
-			return m, tui.TickCmd()
-		}
-		for _, r := range msg.Results {
-			if r.Success {
-				if r.BytesFreed > 0 {
-					m.state.AddLog(fmt.Sprintf("✓ %s: freed %s", r.Item.Name, cleaner.FormatBytes(r.BytesFreed)), true)
-				} else {
-					m.state.AddLog(fmt.Sprintf("✓ %s: nothing to remove", r.Item.Name), true)
-				}
-			} else {
-				errMsg := r.Error
-				if len(errMsg) > 120 {
-					errMsg = errMsg[:120] + "..."
-				}
-				m.state.AddLog(fmt.Sprintf("✘ %s: %s", r.Item.Name, errMsg), false)
-			}
-		}
-		return m, nil
-
+		return m.onCleanBatch(msg)
 	case tui.CleanAllDoneMsg:
-		m.state.Cleaning = false
-		m.state.OperationLabel = ""
-		if msg.BytesFreed > 0 {
-			m.state.LastSummary = fmt.Sprintf("✓ Cleanup complete — %s freed", cleaner.FormatBytes(msg.BytesFreed))
-			m.state.AddLog(fmt.Sprintf("Cleanup complete — %s freed", cleaner.FormatBytes(msg.BytesFreed)), true)
-		} else {
-			m.state.LastSummary = "✓ Cleanup complete — nothing to remove"
-			m.state.AddLog("Cleanup complete — nothing to remove", true)
-		}
-		return m, nil
-
+		return m.onCleanAllDone(msg)
 	case tui.OutputLineMsg:
-		line := msg.Line
-		if len(line) > 72 {
-			line = line[:72] + "…"
-		}
-		m.state.OperationLabel = line
-		return m, tui.TickCmd()
-
+		return m.onOutputLine(msg)
 	case tui.ElevRequiredMsg:
-		m.state.ShowPassword = true
-		m.state.PasswordInput = ""
-		m.state.PasswordError = ""
-		if msg.Reason != "" {
-			m.state.LastSummary = msg.Reason
-		}
-		return m, tui.TickCmd()
-
+		return m.onElevRequired(msg)
 	case tui.PasswordResultMsg:
-		if msg.OK {
-			cmd := m.state.HandlePasswordOK(msg.Session, m.program)
-			return m, cmd
-		}
-		m.state.PasswordError = msg.Error
-		m.state.ShowPassword = true
+		return m.onPasswordResult(msg)
+	default:
 		return m, nil
 	}
+}
 
+func (m *bubbleModel) onWindowSize(msg tea.WindowSizeMsg) (tea.Model, tea.Cmd) {
+	m.state.Width = msg.Width
+	m.state.Height = msg.Height
+	m.state.LogWindowSize(msg.Width, msg.Height)
+	return m, nil
+}
+
+func (m *bubbleModel) onKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	action := m.state.HandleKey(msg.String())
+	switch action {
+	case tui.KeyQuit:
+		m.state.Cancel()
+		m.state.ClearElevation()
+		return m, tea.Quit
+	case tui.KeyConfirm:
+		return m, m.state.ConsumeConfirmCmd(m.program)
+	case tui.KeyCancel:
+		return m, nil
+	default:
+		cmd := m.state.HandleAction(action)
+		if cmd == nil && m.state.NeedsSpinner() {
+			return m, tui.TickCmd()
+		}
+		return m, cmd
+	}
+}
+
+func (m *bubbleModel) onTick() (tea.Model, tea.Cmd) {
+	if m.state.NeedsSpinner() {
+		m.state.AdvanceSpinner()
+		return m, tui.TickCmd()
+	}
+	return m, nil
+}
+
+func (m *bubbleModel) onScanSourceDone(msg tui.ScanSourceDoneMsg) (tea.Model, tea.Cmd) {
+	if msg.IsCleanup {
+		m.state.CleanItems = tui.MergeSummary(m.state.CleanItems, msg.Summary)
+	} else {
+		m.state.Summaries = tui.MergeSummary(m.state.Summaries, msg.Summary)
+	}
+	m.state.ScanDone++
+	m.state.OperationLabel = msg.Summary.Label
+	return m, tui.TickCmd()
+}
+
+func (m *bubbleModel) onScanFinished(msg tui.ScanFinishedMsg) (tea.Model, tea.Cmd) {
+	m.state.Scanning = false
+	m.state.OperationLabel = ""
+	m.state.ClampCursor()
+	elapsed := ""
+	if msg.Elapsed > 0 {
+		elapsed = fmt.Sprintf(" (%s)", msg.Elapsed)
+	}
+	if errs := m.state.TotalScanErrors(); errs > 0 {
+		m.state.LogScanErrors()
+		m.state.LastSummary = fmt.Sprintf("⚠ Scan done — %d error(s), see Logs tab", errs)
+		m.state.AddLog(fmt.Sprintf("Scan complete: %d outdated, %d cleanable, %d error(s)%s",
+			m.state.TotalOutdated(), m.state.TotalCleanable(), errs, elapsed), false)
+	} else {
+		m.state.LastSummary = ""
+		m.state.AddLog(fmt.Sprintf("Scan complete: %d outdated, %d cleanable%s",
+			m.state.TotalOutdated(), m.state.TotalCleanable(), elapsed), true)
+	}
+	return m, nil
+}
+
+func (m *bubbleModel) onErr(msg tui.ErrMsg) (tea.Model, tea.Cmd) {
+	m.state.Error = msg.Error.Error()
+	m.state.Scanning = false
+	return m, nil
+}
+
+func truncateErr(s string) string {
+	if len(s) > 120 {
+		return s[:120] + "..."
+	}
+	return s
+}
+
+func (m *bubbleModel) onUpdateBatch(msg tui.UpdateBatchDoneMsg) (tea.Model, tea.Cmd) {
+	m.state.UpdateDone = msg.Done
+	m.state.UpdateTotal = msg.Total
+	if msg.Results == nil && msg.Category != "" {
+		m.state.OperationLabel = msg.Category
+		m.state.AddLog(fmt.Sprintf("⟳ %s: updating...", msg.Category), true)
+		return m, tui.TickCmd()
+	}
+	for _, r := range msg.Results {
+		if r.Success {
+			m.state.AddLog(fmt.Sprintf("✓ %s: updated", r.Item.Name), true)
+			continue
+		}
+		m.state.AddLog(fmt.Sprintf("✘ %s: %s", r.Item.Name, truncateErr(r.Error)), false)
+	}
+	return m, nil
+}
+
+func (m *bubbleModel) onUpdateAllDone(msg tui.UpdateAllDoneMsg) (tea.Model, tea.Cmd) {
+	m.state.Updating = false
+	m.state.OperationLabel = ""
+	m.state.LastSummary = fmt.Sprintf("✓ Update done: %d ok, %d failed of %d",
+		msg.Success, msg.Failed, msg.Total)
+	m.state.AddLog(fmt.Sprintf("Update complete: %d ok, %d failed of %d",
+		msg.Success, msg.Failed, msg.Total), msg.Failed == 0)
+	m.state.ClampCursor()
+	return m, tui.TickCmd()
+}
+
+func (m *bubbleModel) onCleanBatch(msg tui.CleanBatchDoneMsg) (tea.Model, tea.Cmd) {
+	m.state.CleanDone = msg.Done
+	m.state.CleanTotal = msg.Total
+	if msg.Results == nil && msg.Category != "" {
+		m.state.OperationLabel = msg.Category
+		m.state.AddLog(fmt.Sprintf("⟳ %s: cleaning...", msg.Category), true)
+		return m, tui.TickCmd()
+	}
+	for _, r := range msg.Results {
+		if !r.Success {
+			m.state.AddLog(fmt.Sprintf("✘ %s: %s", r.Item.Name, truncateErr(r.Error)), false)
+			continue
+		}
+		if r.BytesFreed > 0 {
+			m.state.AddLog(fmt.Sprintf("✓ %s: freed %s", r.Item.Name, cleaner.FormatBytes(r.BytesFreed)), true)
+		} else {
+			m.state.AddLog(fmt.Sprintf("✓ %s: nothing to remove", r.Item.Name), true)
+		}
+	}
+	return m, nil
+}
+
+func (m *bubbleModel) onCleanAllDone(msg tui.CleanAllDoneMsg) (tea.Model, tea.Cmd) {
+	m.state.Cleaning = false
+	m.state.OperationLabel = ""
+	if msg.BytesFreed > 0 {
+		freed := cleaner.FormatBytes(msg.BytesFreed)
+		m.state.LastSummary = fmt.Sprintf("✓ Cleanup complete — %s freed", freed)
+		m.state.AddLog(fmt.Sprintf("Cleanup complete — %s freed", freed), true)
+	} else {
+		m.state.LastSummary = "✓ Cleanup complete — nothing to remove"
+		m.state.AddLog("Cleanup complete — nothing to remove", true)
+	}
+	return m, nil
+}
+
+func (m *bubbleModel) onOutputLine(msg tui.OutputLineMsg) (tea.Model, tea.Cmd) {
+	line := msg.Line
+	if len(line) > 72 {
+		line = line[:72] + "…"
+	}
+	m.state.OperationLabel = line
+	return m, tui.TickCmd()
+}
+
+func (m *bubbleModel) onElevRequired(msg tui.ElevRequiredMsg) (tea.Model, tea.Cmd) {
+	m.state.ShowPassword = true
+	m.state.PasswordInput = ""
+	m.state.PasswordError = ""
+	if msg.Reason != "" {
+		m.state.LastSummary = msg.Reason
+	}
+	return m, tui.TickCmd()
+}
+
+func (m *bubbleModel) onPasswordResult(msg tui.PasswordResultMsg) (tea.Model, tea.Cmd) {
+	if msg.OK {
+		return m, m.state.HandlePasswordOK(msg.Session, m.program)
+	}
+	m.state.PasswordError = msg.Error
+	m.state.ShowPassword = true
 	return m, nil
 }
 
@@ -409,9 +440,15 @@ Package managers by platform:
 `)
 }
 
+const (
+	// Binary name used for build output and install path under repo/home.
+	updashBinary = "/updash"
+)
+
 func updateSelf() {
 	home, _ := os.UserHomeDir()
 	repoDir := home + "/.config/updash"
+	binOut := repoDir + updashBinary
 
 	fmt.Println("📦 Updating updash itself...")
 
@@ -422,7 +459,7 @@ func updateSelf() {
 		fmt.Printf("⚠ git pull failed (not a git repo?): %v\n", err)
 	}
 
-	build := exec.Command("go", "build", "-o", repoDir+"/updash", repoDir+"/cmd/updash/")
+	build := exec.Command("go", "build", "-o", binOut, repoDir+"/cmd/updash/")
 	build.Dir = repoDir
 	build.Stdout = os.Stdout
 	build.Stderr = os.Stderr
@@ -436,7 +473,7 @@ func updateSelf() {
 		fmt.Fprintf(os.Stderr, "failed to create install dir: %v\n", err)
 		os.Exit(1)
 	}
-	copyCmd := exec.Command("cp", repoDir+"/updash", installDir+"/updash")
+	copyCmd := exec.Command("cp", binOut, installDir+updashBinary)
 	if err := copyCmd.Run(); err != nil {
 		fmt.Printf("✘ Install failed: %v\n", err)
 		os.Exit(1)

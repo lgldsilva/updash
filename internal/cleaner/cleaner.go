@@ -95,96 +95,75 @@ func cleanCache(ctx context.Context, item *model.Item, opts Options) *Result {
 	}
 }
 
+const (
+	fmtErrLine      = "error: %s\n"
+	dockerUntilPref = "until="
+	dockerFilter    = "--filter"
+)
+
 // cleanSDKMAN removes old SDKMAN versions, keeping only the latest per major.
 func cleanSDKMAN(ctx context.Context, item *model.Item, opts Options) *Result {
-	home := os.Getenv("HOME")
-	candidatesDir := filepath.Join(home, ".sdkman", "candidates")
-
-	// Parse item name: "java 21" -> candidate=java, major=21
 	parts := strings.Fields(item.Name)
 	if len(parts) < 2 {
-		return &Result{
-			Item:    item,
-			Success: false,
-			Error:   fmt.Sprintf("cannot parse SDKMAN item: %s", item.Name),
-		}
+		return &Result{Item: item, Success: false, Error: fmt.Sprintf("cannot parse SDKMAN item: %s", item.Name)}
 	}
-	candidate := parts[0]
-	major := parts[1]
-
-	// List installed versions for this candidate
-	verDir := filepath.Join(candidatesDir, candidate)
+	candidate, major := parts[0], parts[1]
+	verDir := filepath.Join(os.Getenv("HOME"), ".sdkman", "candidates", candidate)
 	entries, err := os.ReadDir(verDir)
 	if err != nil {
-		return &Result{
-			Item:    item,
-			Success: false,
-			Error:   err.Error(),
+		return &Result{Item: item, Success: false, Error: err.Error()}
+	}
+	removals := sdkmanRemovals(entries, major, item.CurrentVer)
+	if len(removals) == 0 {
+		return &Result{Item: item, Success: true, Output: fmt.Sprintf("%s %s: nothing to remove", candidate, major)}
+	}
+	var allOutput strings.Builder
+	for _, ver := range removals {
+		if err := sdkUninstallOne(ctx, candidate, ver, opts, &allOutput); err != nil {
+			item.Status = model.StatusError
+			return &Result{Item: item, Success: false, Error: err.Error(), Output: allOutput.String()}
 		}
 	}
+	item.Status = model.StatusCleaned
+	return &Result{Item: item, Success: true, Output: allOutput.String()}
+}
 
-	// Find which ones to remove
+func sdkmanRemovals(entries []os.DirEntry, major, keepVer string) []string {
 	var removals []string
 	for _, entry := range entries {
 		if !entry.IsDir() || entry.Name() == "current" {
 			continue
 		}
 		ver := entry.Name()
-		if getMajorVersion(ver) == major && ver != item.CurrentVer {
+		if getMajorVersion(ver) == major && ver != keepVer {
 			removals = append(removals, ver)
 		}
 	}
+	return removals
+}
 
-	if len(removals) == 0 {
-		return &Result{
-			Item:    item,
-			Success: true,
-			Output:  fmt.Sprintf("%s %s: nothing to remove", candidate, major),
+func sdkUninstallOne(ctx context.Context, candidate, ver string, opts Options, out *strings.Builder) error {
+	safeCandidate := sanitizeIdent(candidate)
+	safeVer := sanitizeIdent(ver)
+	cmd := exec.CommandContext(ctx, "bash", "-c",
+		fmt.Sprintf("source $HOME/.sdkman/bin/sdkman-init.sh && sdk uninstall %s %s", safeCandidate, safeVer))
+	if opts.Verbose || opts.Interactive {
+		configureCmd(opts, cmd)
+		fmt.Fprintf(out, "removing %s %s...\n", candidate, ver)
+		if err := cmd.Run(); err != nil {
+			fmt.Fprintf(out, fmtErrLine, err)
+			return fmt.Errorf("sdk uninstall %s %s failed", candidate, ver)
 		}
+		return nil
 	}
-
-	// Remove each old version via sdk uninstall
-	var allOutput strings.Builder
-	for _, ver := range removals {
-		// Sanitize inputs to prevent command injection
-		safeCandidate := sanitizeIdent(candidate)
-		safeVer := sanitizeIdent(ver)
-		cmd := exec.CommandContext(ctx, "bash", "-c",
-			fmt.Sprintf("source $HOME/.sdkman/bin/sdkman-init.sh && sdk uninstall %s %s", safeCandidate, safeVer))
-		var hadError bool
-		if opts.Verbose || opts.Interactive {
-			configureCmd(opts, cmd)
-			fmt.Fprintf(&allOutput, "removing %s %s...\n", candidate, ver)
-			if err := cmd.Run(); err != nil {
-				hadError = true
-				fmt.Fprintf(&allOutput, "error: %s\n", err)
-			}
-		} else {
-			out, err := cmd.CombinedOutput()
-			fmt.Fprintf(&allOutput, "removed %s %s\n", candidate, ver)
-			allOutput.Write(out)
-			if err != nil {
-				hadError = true
-				fmt.Fprintf(&allOutput, "error: %s\n", err)
-			}
-		}
-		if hadError {
-			item.Status = model.StatusError
-			return &Result{
-				Item:    item,
-				Success: false,
-				Error:   fmt.Sprintf("sdk uninstall %s %s failed", candidate, ver),
-				Output:  allOutput.String(),
-			}
-		}
+	combined, err := cmd.CombinedOutput()
+	fmt.Fprintf(out, "removed %s %s\n", candidate, ver)
+	out.Write(combined)
+	if err != nil {
+		fmt.Fprintf(out, fmtErrLine, err)
+		return fmt.Errorf("sdk uninstall %s %s failed", candidate, ver)
 	}
-
-	item.Status = model.StatusCleaned
-	return &Result{
-		Item:    item,
-		Success: true,
-		Output:  allOutput.String(),
-	}
+	return nil
 }
 
 // cleanDocker prunes Docker resources.
@@ -192,27 +171,43 @@ func cleanSDKMAN(ctx context.Context, item *model.Item, opts Options) *Result {
 func cleanDocker(ctx context.Context, item *model.Item, opts Options) *Result {
 	switch {
 	case strings.Contains(item.Name, "images"):
-		until := "until=" + config.DockerImageMaxAge()
-		return runCmd(ctx, item, opts, "docker", "image", "prune", "-a", "--filter", until, "-f")
+		return runCmd(ctx, item, opts, "docker", "image", "prune", "-a", dockerFilter, dockerUntilPref+config.DockerImageMaxAge(), "-f")
 	case strings.Contains(item.Name, "builder") || strings.Contains(item.Name, "build"):
-		until := "until=" + config.DockerBuilderMaxAge()
-		return runCmd(ctx, item, opts, "docker", "builder", "prune", "--filter", until, "-f")
+		return runCmd(ctx, item, opts, "docker", "builder", "prune", dockerFilter, dockerUntilPref+config.DockerBuilderMaxAge(), "-f")
 	case strings.Contains(item.Name, "container"):
-		until := "until=" + config.DockerContainerMaxAge()
-		return runCmd(ctx, item, opts, "docker", "container", "prune", "-f", "--filter", until)
+		return runCmd(ctx, item, opts, "docker", "container", "prune", "-f", dockerFilter, dockerUntilPref+config.DockerContainerMaxAge())
 	case strings.Contains(item.Name, "volume"):
 		return runCmd(ctx, item, opts, "docker", "volume", "prune", "-f")
 	default:
-		until := "until=" + config.DockerImageMaxAge()
-		return runCmd(ctx, item, opts, "docker", "system", "prune", "-af", "--filter", until)
+		return runCmd(ctx, item, opts, "docker", "system", "prune", "-af", dockerFilter, dockerUntilPref+config.DockerImageMaxAge())
 	}
 }
 
 // cleanVSCodeExt removes old versions of VS Code extensions.
 func cleanVSCodeExt(ctx context.Context, item *model.Item, opts Options) *Result {
-	// Determine the extensions directory from the item name or context
-	var candidates []string
+	candidates := vscodeExtDirs()
+	if len(candidates) == 0 {
+		return &Result{Item: item, Success: true, Output: "no extension directories found"}
+	}
+	extName := strings.TrimSpace(strings.TrimPrefix(item.Name, "ext: "))
+	if extName == "" {
+		return &Result{Item: item, Success: false, Error: "cannot parse extension name"}
+	}
+	var allOutput strings.Builder
+	for _, extDir := range candidates {
+		pruneOldExtVersions(extDir, extName, &allOutput)
+	}
+	if strings.Contains(allOutput.String(), "error removing") {
+		item.Status = model.StatusError
+		return &Result{Item: item, Success: false, Error: "some extension versions could not be removed", Output: allOutput.String()}
+	}
+	item.Status = model.StatusCleaned
+	return &Result{Item: item, Success: true, Output: allOutput.String()}
+}
+
+func vscodeExtDirs() []string {
 	home := os.Getenv("HOME")
+	var candidates []string
 	for _, dir := range []string{
 		filepath.Join(home, ".antigravity", "extensions"),
 		filepath.Join(home, ".antigravity-ide", "extensions"),
@@ -221,87 +216,33 @@ func cleanVSCodeExt(ctx context.Context, item *model.Item, opts Options) *Result
 			candidates = append(candidates, dir)
 		}
 	}
+	return candidates
+}
 
-	if len(candidates) == 0 {
-		return &Result{
-			Item:    item,
-			Success: true,
-			Output:  "no extension directories found",
+func pruneOldExtVersions(extDir, extName string, out *strings.Builder) {
+	entries, err := os.ReadDir(extDir)
+	if err != nil {
+		return
+	}
+	re := regexp.MustCompile(fmt.Sprintf(`^%s-(\d+\.\d+\.\d+)(?:-.+)?$`, regexp.QuoteMeta(extName)))
+	var versions []string
+	for _, entry := range entries {
+		if entry.IsDir() && re.MatchString(entry.Name()) {
+			versions = append(versions, entry.Name())
 		}
 	}
-
-	// Parse "ext: publisher.name" from item.Name
-	extName := strings.TrimPrefix(item.Name, "ext: ")
-	extName = strings.TrimSpace(extName)
-
-	if extName == "" {
-		return &Result{
-			Item:    item,
-			Success: false,
-			Error:   "cannot parse extension name",
-		}
+	sort.Slice(versions, func(i, j int) bool {
+		return compareVersions(extractVersion(versions[i]), extractVersion(versions[j])) > 0
+	})
+	if len(versions) <= 1 {
+		return
 	}
-
-	var allOutput strings.Builder
-	for _, extDir := range candidates {
-		entries, err := os.ReadDir(extDir)
-		if err != nil {
-			continue
+	for _, old := range versions[1:] {
+		if err := os.RemoveAll(filepath.Join(extDir, old)); err != nil {
+			fmt.Fprintf(out, "error removing %s: %s\n", old, err)
+		} else {
+			fmt.Fprintf(out, "removed %s\n", old)
 		}
-
-		re := regexp.MustCompile(fmt.Sprintf(`^%s-(\d+\.\d+\.\d+)(?:-.+)?$`, regexp.QuoteMeta(extName)))
-
-		var versions []string
-		for _, entry := range entries {
-			if !entry.IsDir() {
-				continue
-			}
-			m := re.FindStringSubmatch(entry.Name())
-			if m != nil {
-				versions = append(versions, entry.Name())
-			}
-		}
-
-		// Sort descending to keep latest
-		sort.Slice(versions, func(i, j int) bool {
-			return compareVersions(extractVersion(versions[i]), extractVersion(versions[j])) > 0
-		})
-
-		if len(versions) <= 1 {
-			continue
-		}
-
-		// Remove all but first (latest)
-		for _, old := range versions[1:] {
-			oldPath := filepath.Join(extDir, old)
-			err := os.RemoveAll(oldPath)
-			if err != nil {
-				fmt.Fprintf(&allOutput, "error removing %s: %s\n", old, err)
-			} else {
-				fmt.Fprintf(&allOutput, "removed %s\n", old)
-			}
-		}
-	}
-
-	var hadError bool
-	if allOutput.Len() > 0 && strings.Contains(allOutput.String(), "error removing") {
-		hadError = true
-	}
-	if hadError {
-		item.Status = model.StatusError
-		return &Result{
-			Item:    item,
-			Success: false,
-			Error:   "some extension versions could not be removed",
-			Output:  allOutput.String(),
-		}
-	}
-
-	item.Status = model.StatusCleaned
-	return &Result{
-		Item:    item,
-		Success: true,
-		Output:  allOutput.String(),
 	}
 }
 
@@ -397,14 +338,14 @@ func runMultiElevatedCmd(ctx context.Context, item *model.Item, opts Options, cm
 			configureCmd(opts, cmd)
 			if err := cmd.Run(); err != nil {
 				lastErr = err
-				fmt.Fprintf(&allOutput, "error: %s\n", err)
+				fmt.Fprintf(&allOutput, fmtErrLine, err)
 			}
 		} else {
 			out, err := cmd.CombinedOutput()
 			allOutput.Write(out)
 			if err != nil {
 				lastErr = err
-				fmt.Fprintf(&allOutput, "error: %s\n", err)
+				fmt.Fprintf(&allOutput, fmtErrLine, err)
 			}
 		}
 	}
