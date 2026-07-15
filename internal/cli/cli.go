@@ -253,6 +253,16 @@ func groupCleanBySummary(summaries []*model.SourceSummary, items []*model.Item) 
 	return groups
 }
 
+// updateBatchEnv groups shared state for update-section helpers (keeps
+// function parameter counts under Sonar S107).
+type updateBatchEnv struct {
+	plat        model.PlatformInfo
+	summaries   []*model.SourceSummary
+	opts        updater.Options
+	cfg         Config
+	elevSession **elevate.Session
+}
+
 func runUpdateBatches(
 	ctx context.Context,
 	plat model.PlatformInfo,
@@ -265,13 +275,21 @@ func runUpdateBatches(
 	var elevSession *elevate.Session
 	ctx = primeElevationSession(ctx, plat, normalItems, cfg, &elevSession)
 
-	o, f, sk, res := runNativeUpdateSection(ctx, plat, nativeItems, opts, cfg, &elevSession)
+	env := updateBatchEnv{
+		plat:        plat,
+		summaries:   summaries,
+		opts:        opts,
+		cfg:         cfg,
+		elevSession: &elevSession,
+	}
+
+	o, f, sk, res := runNativeUpdateSection(ctx, env, nativeItems)
 	ok, fail, skipped = o, f, sk
 	allResults = append(allResults, res...)
 
 	groups := groupByCategory(normalItems)
 	for _, cat := range sortedCategories(groups) {
-		o, f, sk, res := runCategoryUpdateSection(ctx, plat, summaries, cat, groups[cat], opts, cfg, &elevSession)
+		o, f, sk, res := runCategoryUpdateSection(ctx, env, cat, groups[cat])
 		ok += o
 		fail += f
 		skipped += sk
@@ -303,11 +321,8 @@ func tallyUpdateResults(results []*updater.Result) (ok, fail, skipped int) {
 
 func runNativeUpdateSection(
 	ctx context.Context,
-	plat model.PlatformInfo,
+	env updateBatchEnv,
 	nativeItems []*model.Item,
-	opts updater.Options,
-	cfg Config,
-	elevSession **elevate.Session,
 ) (ok, fail, skipped int, results []*updater.Result) {
 	if len(nativeItems) == 0 {
 		return 0, 0, 0, nil
@@ -316,35 +331,31 @@ func runNativeUpdateSection(
 	for _, it := range nativeItems {
 		fmt.Printf("  • %s\n", it.Name)
 	}
-	results = runNativeElevatedItems(ctx, plat, nativeItems, opts, cfg, elevSession)
+	results = runNativeElevatedItems(ctx, env.plat, nativeItems, env.opts, env.cfg, env.elevSession)
 	ok, fail, skipped = tallyUpdateResults(results)
 	return ok, fail, skipped, results
 }
 
 func runCategoryUpdateSection(
 	ctx context.Context,
-	plat model.PlatformInfo,
-	summaries []*model.SourceSummary,
+	env updateBatchEnv,
 	cat model.Category,
 	groupItems []*model.Item,
-	opts updater.Options,
-	cfg Config,
-	elevSession **elevate.Session,
 ) (ok, fail, skipped int, results []*updater.Result) {
-	label := categoryLabel(summaries, cat)
+	label := categoryLabel(env.summaries, cat)
 	fmt.Printf("\n→ %s (%d item(s))\n", label, len(groupItems))
 
 	batchCtx, cancel := context.WithTimeout(ctx, updater.BatchTimeout(cat))
 	defer cancel()
 
 	if cat == model.CatBrew {
-		results = runBrewUpdateBatch(batchCtx, groupItems, opts, cfg, elevSession)
+		results = runBrewUpdateBatch(batchCtx, groupItems, env.opts, env.cfg, env.elevSession)
 	} else {
-		elevCtx, batchSkipped, skipReason := ensureCategoryElevation(batchCtx, plat, cat, cfg, elevSession)
+		elevCtx, batchSkipped, skipReason := ensureCategoryElevation(batchCtx, env.plat, cat, env.cfg, env.elevSession)
 		if batchSkipped {
 			results = skipBatchResults(groupItems, skipReason)
 		} else {
-			results = updater.UpdateCategory(elevCtx, cat, groupItems, opts)
+			results = updater.UpdateCategory(elevCtx, cat, groupItems, env.opts)
 		}
 	}
 	ok, fail, skipped = tallyUpdateResults(results)
