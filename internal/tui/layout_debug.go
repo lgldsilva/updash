@@ -46,9 +46,10 @@ func layoutLog(format string, args ...any) {
 	}
 	layoutLogOnce.Do(func() {
 		layoutLogPath = layoutLogFile()
-		_ = os.MkdirAll(filepath.Dir(layoutLogPath), 0o755)
-		// truncate on first open of process
-		f, err := os.Create(layoutLogPath)
+		_ = os.MkdirAll(filepath.Dir(layoutLogPath), 0o750)
+		// truncate on first open of process (owner-only log file)
+		// Path is under ~/.cache or explicit UPDASH_DEBUG_LAYOUT_FILE (debug only).
+		f, err := os.OpenFile(layoutLogPath, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600) // #nosec G304 -- debug log path from env/home
 		if err == nil {
 			_, _ = fmt.Fprintf(f, "# updash layout debug started %s\n", time.Now().Format(time.RFC3339))
 			_, _ = fmt.Fprintf(f, "# UPDASH_DEBUG_LAYOUT=1  file=%s\n", layoutLogPath)
@@ -58,7 +59,7 @@ func layoutLog(format string, args ...any) {
 	})
 	layoutLogMu.Lock()
 	defer layoutLogMu.Unlock()
-	f, err := os.OpenFile(layoutLogPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	f, err := os.OpenFile(layoutLogPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600) // #nosec G304 -- debug log path from env/home
 	if err != nil {
 		return
 	}
@@ -69,10 +70,10 @@ func layoutLog(format string, args ...any) {
 // layoutLogAlways writes even without UPDASH_DEBUG_LAYOUT (used for overflow only).
 func layoutLogAlways(format string, args ...any) {
 	path := layoutLogFile()
-	_ = os.MkdirAll(filepath.Dir(path), 0o755)
+	_ = os.MkdirAll(filepath.Dir(path), 0o750)
 	layoutLogMu.Lock()
 	defer layoutLogMu.Unlock()
-	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600) // #nosec G304 -- debug log path from env/home
 	if err != nil {
 		return
 	}
