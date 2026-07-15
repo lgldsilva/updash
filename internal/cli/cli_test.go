@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"io"
 	"os"
 	"strings"
@@ -486,5 +487,143 @@ func TestCountScanHints(t *testing.T) {
 	// Hints depend on ClassifyItem; just ensure no panic and counters stay non-negative.
 	if np < 0 || mo < 0 {
 		t.Fatalf("np=%d mo=%d", np, mo)
+	}
+}
+
+func TestNativeElevatedFailAll(t *testing.T) {
+	items := []*model.Item{{Name: "a"}, {Name: "b"}}
+	res := nativeElevatedFailAll(items, "out", fmt.Errorf("auth failed"))
+	if len(res) != 2 {
+		t.Fatalf("len=%d", len(res))
+	}
+	if res[0].Success || res[0].Error != "auth failed" || res[0].Output != "out" {
+		t.Fatalf("%+v", res[0])
+	}
+	if items[0].Status != model.StatusError {
+		t.Fatalf("status=%v", items[0].Status)
+	}
+}
+
+func TestStdinIsTTY(t *testing.T) {
+	// Non-TTY stdin (pipe/test harness) should report false; do not fail if true.
+	_ = stdinIsTTY()
+}
+
+func TestPrimeElevationSession_paths(t *testing.T) {
+	ctx := context.Background()
+	var sess *elevate.Session
+	// No elevation needed.
+	got := primeElevationSession(ctx, model.PlatformInfo{OS: "linux"}, []*model.Item{
+		{Name: "x", Category: model.CatNpm},
+	}, Config{}, &sess)
+	if got != ctx {
+		t.Fatal("expected unchanged ctx")
+	}
+	// Needs elevation but SkipPassword — return without prompt.
+	got = primeElevationSession(ctx, model.PlatformInfo{OS: "linux"}, []*model.Item{
+		{Name: "curl", Category: model.CatApt},
+	}, Config{SkipPassword: true}, &sess)
+	if got != ctx {
+		t.Fatal("SkipPassword should leave ctx unchanged without session")
+	}
+	// Ready session is reattached.
+	s := elevate.NewSession()
+	s.SetPasswordless()
+	sess = s
+	got = primeElevationSession(ctx, model.PlatformInfo{OS: "linux"}, []*model.Item{
+		{Name: "curl", Category: model.CatApt},
+	}, Config{}, &sess)
+	if elevate.FromContext(got) == nil {
+		t.Fatal("expected session on context")
+	}
+}
+
+func TestEnsureBrewPassword(t *testing.T) {
+	ctx := context.Background()
+	var sess *elevate.Session
+	// Plain brew items do not need password session.
+	_, skip, _ := ensureBrewPassword(ctx, []*model.Item{{Name: "telegram"}}, Config{}, &sess)
+	if skip {
+		t.Fatal("telegram should not skip")
+	}
+	// Password casks without session are skipped.
+	_, skip, reason := ensureBrewPassword(ctx, []*model.Item{{Name: "microsoft-office"}}, Config{SkipPassword: true}, &sess)
+	if !skip || reason == "" {
+		t.Fatalf("skip=%v reason=%q", skip, reason)
+	}
+	// Ready session attaches.
+	s := elevate.NewSession()
+	s.SetPasswordless()
+	sess = s
+	c, skip, _ := ensureBrewPassword(ctx, []*model.Item{{Name: "microsoft-office"}}, Config{}, &sess)
+	if skip || elevate.FromContext(c) == nil {
+		t.Fatalf("skip=%v session missing", skip)
+	}
+}
+
+func TestEnsureCategoryElevation_readySession(t *testing.T) {
+	ctx := context.Background()
+	s := elevate.NewSession()
+	s.SetPasswordless()
+	sess := s
+	c, skip, _ := ensureCategoryElevation(ctx, model.PlatformInfo{OS: "linux"}, model.CatApt, Config{}, &sess)
+	if skip || elevate.FromContext(c) == nil {
+		t.Fatalf("skip=%v", skip)
+	}
+	// Non-elevated category still attaches ready session when present.
+	c, skip, _ = ensureCategoryElevation(ctx, model.PlatformInfo{OS: "linux"}, model.CatNpm, Config{}, &sess)
+	if skip || elevate.FromContext(c) == nil {
+		t.Fatalf("npm skip=%v", skip)
+	}
+}
+
+func TestContainsPasswordNote(t *testing.T) {
+	if !containsPasswordNote("precisa de SENHA de admin") {
+		t.Fatal("expected password note")
+	}
+	if containsPasswordNote("nothing special") {
+		t.Fatal("unexpected match")
+	}
+}
+
+func TestItemNeedsNativeElevation(t *testing.T) {
+	plat := model.PlatformInfo{OS: "darwin"}
+	if !itemNeedsNativeElevation(&model.Item{Name: "microsoft-office", Category: model.CatBrew}, plat) {
+		t.Fatal("microsoft brew should need native elev")
+	}
+	if !itemNeedsNativeElevation(&model.Item{Name: "app", Category: model.CatMAS}, plat) {
+		t.Fatal("mas should need elev")
+	}
+	if itemNeedsNativeElevation(&model.Item{Name: "telegram", Category: model.CatBrew}, plat) {
+		t.Fatal("plain brew should not")
+	}
+}
+
+func TestPrintCheckFooterHints(t *testing.T) {
+	out := captureStdout(t, func() {
+		printCheckFooter(3, 2, 1, 1)
+	})
+	if !strings.Contains(out, "outdated") || !strings.Contains(out, "senha") || !strings.Contains(out, "manual") || !strings.Contains(out, "cleanable") {
+		t.Fatalf("%q", out)
+	}
+}
+
+func TestPrepareCleanElevation_passwordlessOrInteractive(t *testing.T) {
+	ctx := context.Background()
+	// apt cache may need elevation; interactive=false should not panic.
+	_ = prepareCleanElevation(ctx, model.PlatformInfo{OS: "linux"}, []*model.Item{
+		{Name: "apt-cache", Category: model.CatCache},
+	}, false)
+	_ = prepareCleanElevation(ctx, model.PlatformInfo{OS: "linux"}, []*model.Item{
+		{Name: "apt-cache", Category: model.CatCache},
+	}, true)
+}
+
+func TestBrewItemNeedsPassword(t *testing.T) {
+	if !brewItemNeedsPassword(&model.Item{Name: "microsoft-office"}) {
+		t.Fatal("expected password for microsoft-office")
+	}
+	if brewItemNeedsPassword(&model.Item{Name: "wget"}) {
+		t.Fatal("wget should not need password")
 	}
 }
