@@ -2,6 +2,16 @@ package config
 
 import "strings"
 
+// Shared docker CLI fragments (Sonar go:S1192 — avoid duplicated string literals).
+const (
+	dockerFilterFlag = "--filter"
+	dockerUntilPref  = "until="
+)
+
+func untilFilter(maxAge string) []string {
+	return []string{dockerFilterFlag, dockerUntilPref + maxAge}
+}
+
 // DockerBuilderPruneArgs returns the docker subcommand args for builder prune
 // (everything after "docker"). Pure policy — no I/O — so unit tests can assert
 // exact CLI without talking to a daemon.
@@ -12,28 +22,22 @@ func DockerBuilderPruneArgs() []string {
 	if DockerBuilderMode() == DockerBuilderModeAll {
 		return []string{"builder", "prune", "-af"}
 	}
-	return []string{
-		"builder", "prune",
-		"--filter", "until=" + DockerBuilderMaxAge(),
-		"-f",
-	}
+	args := []string{"builder", "prune"}
+	args = append(args, untilFilter(DockerBuilderMaxAge())...)
+	return append(args, "-f")
 }
 
 // DockerImagePruneArgs returns args for unused-image prune with age filter.
 func DockerImagePruneArgs() []string {
-	return []string{
-		"image", "prune", "-a",
-		"--filter", "until=" + DockerImageMaxAge(),
-		"-f",
-	}
+	args := []string{"image", "prune", "-a"}
+	args = append(args, untilFilter(DockerImageMaxAge())...)
+	return append(args, "-f")
 }
 
 // DockerContainerPruneArgs returns args for stopped-container prune with age filter.
 func DockerContainerPruneArgs() []string {
-	return []string{
-		"container", "prune", "-f",
-		"--filter", "until=" + DockerContainerMaxAge(),
-	}
+	args := []string{"container", "prune", "-f"}
+	return append(args, untilFilter(DockerContainerMaxAge())...)
 }
 
 // DockerVolumePruneArgs returns args for unused volume prune (no age filter).
@@ -43,10 +47,8 @@ func DockerVolumePruneArgs() []string {
 
 // DockerSystemPruneArgs returns args for system prune with image age filter.
 func DockerSystemPruneArgs() []string {
-	return []string{
-		"system", "prune", "-af",
-		"--filter", "until=" + DockerImageMaxAge(),
-	}
+	args := []string{"system", "prune", "-af"}
+	return append(args, untilFilter(DockerImageMaxAge())...)
 }
 
 // DockerResourceKeepPolicy is the human-readable prune policy for a
@@ -59,14 +61,14 @@ func DockerResourceKeepPolicy(typ string) string {
 		if DockerBuilderMode() == DockerBuilderModeAll {
 			return "builder mode=all (prune -af, unused cache only)"
 		}
-		return "builder mode=age until=" + DockerBuilderMaxAge()
+		return "builder mode=age " + dockerUntilPref + DockerBuilderMaxAge()
 	case strings.Contains(typ, "image"):
-		return "image prune -a until=" + DockerImageMaxAge()
+		return "image prune -a " + dockerUntilPref + DockerImageMaxAge()
 	case strings.Contains(typ, "container"):
-		return "container prune until=" + DockerContainerMaxAge()
+		return "container prune " + dockerUntilPref + DockerContainerMaxAge()
 	case strings.Contains(typ, "volume"):
 		return "volume prune unused"
 	default:
-		return "system prune until=" + DockerImageMaxAge()
+		return "system prune " + dockerUntilPref + DockerImageMaxAge()
 	}
 }
