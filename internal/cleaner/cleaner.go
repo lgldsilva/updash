@@ -99,11 +99,7 @@ func cleanCache(ctx context.Context, item *model.Item, opts Options) *Result {
 	}
 }
 
-const (
-	fmtErrLine      = "error: %s\n"
-	dockerUntilPref = "until="
-	dockerFilter    = "--filter"
-)
+const fmtErrLine = "error: %s\n"
 
 // cleanSDKMAN removes old SDKMAN versions, keeping only the latest per major.
 func cleanSDKMAN(ctx context.Context, item *model.Item, opts Options) *Result {
@@ -171,19 +167,26 @@ func sdkUninstallOne(ctx context.Context, candidate, ver string, opts Options, o
 }
 
 // cleanDocker prunes Docker resources.
-// Age filters come from UPDASH_DOCKER_* (default 336h / 14 days).
+// CLI args come from config.Docker*PruneArgs (pure policy, unit-tested).
+// Builder mode (age|all): see UPDASH_DOCKER_BUILDER_MODE — "all" for CI/homelab.
 func cleanDocker(ctx context.Context, item *model.Item, opts Options) *Result {
+	return runCmd(ctx, item, opts, "docker", dockerPruneArgsForItem(item.Name)...)
+}
+
+// dockerPruneArgsForItem maps a cleanup item name to docker subcommand args
+// (everything after "docker"). Pure routing — no I/O.
+func dockerPruneArgsForItem(name string) []string {
 	switch {
-	case strings.Contains(item.Name, "images"):
-		return runCmd(ctx, item, opts, "docker", "image", "prune", "-a", dockerFilter, dockerUntilPref+config.DockerImageMaxAge(), "-f")
-	case strings.Contains(item.Name, "builder") || strings.Contains(item.Name, "build"):
-		return runCmd(ctx, item, opts, "docker", "builder", "prune", dockerFilter, dockerUntilPref+config.DockerBuilderMaxAge(), "-f")
-	case strings.Contains(item.Name, "container"):
-		return runCmd(ctx, item, opts, "docker", "container", "prune", "-f", dockerFilter, dockerUntilPref+config.DockerContainerMaxAge())
-	case strings.Contains(item.Name, "volume"):
-		return runCmd(ctx, item, opts, "docker", "volume", "prune", "-f")
+	case strings.Contains(name, "images"):
+		return config.DockerImagePruneArgs()
+	case strings.Contains(name, "builder") || strings.Contains(name, "build"):
+		return config.DockerBuilderPruneArgs()
+	case strings.Contains(name, "container"):
+		return config.DockerContainerPruneArgs()
+	case strings.Contains(name, "volume"):
+		return config.DockerVolumePruneArgs()
 	default:
-		return runCmd(ctx, item, opts, "docker", "system", "prune", "-af", dockerFilter, dockerUntilPref+config.DockerImageMaxAge())
+		return config.DockerSystemPruneArgs()
 	}
 }
 

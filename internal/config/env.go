@@ -12,10 +12,20 @@ import (
 
 // Docker prune age defaults (14 days). Homelab scripts often use 168h (7d);
 // override via UPDASH_DOCKER_* when tighter retention is desired.
+//
+// Builder prune is special: age filters often reclaim 0B on busy CI hosts
+// because build layers stay "recent". Use UPDASH_DOCKER_BUILDER_MODE=all
+// for unfiltered `docker builder prune -af` (safe: unused build cache only).
 const (
 	DefaultDockerImageMaxAge     = "336h"
 	DefaultDockerBuilderMaxAge   = "336h"
 	DefaultDockerContainerMaxAge = "336h"
+
+	// Builder prune modes.
+	DockerBuilderModeAge = "age" // --filter until=<max age>
+	DockerBuilderModeAll = "all" // no until= (builder prune -af)
+
+	DefaultDockerBuilderMode = DockerBuilderModeAge
 
 	DefaultContainerLogMaxMB = 50
 	DefaultHostLogMaxDays    = 30
@@ -29,9 +39,25 @@ func DockerImageMaxAge() string {
 	return envOr("UPDASH_DOCKER_IMAGE_MAX_AGE", DefaultDockerImageMaxAge)
 }
 
-// DockerBuilderMaxAge is the docker builder prune --filter until= value.
+// DockerBuilderMaxAge is the docker builder prune --filter until= value
+// (only used when DockerBuilderMode is "age").
 func DockerBuilderMaxAge() string {
 	return envOr("UPDASH_DOCKER_BUILDER_MAX_AGE", DefaultDockerBuilderMaxAge)
+}
+
+// DockerBuilderMode returns how builder prune is applied:
+//   - "age" (default): docker builder prune --filter until=<max age>
+//   - "all": docker builder prune -af (no until=; recommended for CI/homelab)
+func DockerBuilderMode() string {
+	v := strings.ToLower(strings.TrimSpace(os.Getenv("UPDASH_DOCKER_BUILDER_MODE")))
+	switch v {
+	case "", DockerBuilderModeAge:
+		return DockerBuilderModeAge
+	case DockerBuilderModeAll, "af", "full", "unfiltered":
+		return DockerBuilderModeAll
+	default:
+		return DockerBuilderModeAge
+	}
 }
 
 // DockerContainerMaxAge is the docker container prune --filter until= value.
@@ -72,7 +98,8 @@ func EnvDefaults() string {
 		key, value, note string
 	}{
 		{"UPDASH_DOCKER_IMAGE_MAX_AGE", DockerImageMaxAge(), "docker image prune until="},
-		{"UPDASH_DOCKER_BUILDER_MAX_AGE", DockerBuilderMaxAge(), "docker builder prune until="},
+		{"UPDASH_DOCKER_BUILDER_MODE", DockerBuilderMode(), "builder prune: age|all (CI/homelab: all)"},
+		{"UPDASH_DOCKER_BUILDER_MAX_AGE", DockerBuilderMaxAge(), "builder prune until= (mode=age only)"},
 		{"UPDASH_DOCKER_CONTAINER_MAX_AGE", DockerContainerMaxAge(), "docker container prune until="},
 		{"UPDASH_CONTAINER_LOG_MAX_MB", strconv.Itoa(ContainerLogMaxMB()), "container log truncate threshold"},
 		{"UPDASH_HOST_LOG_MAX_DAYS", strconv.Itoa(HostLogMaxDays()), "host log mtime age"},

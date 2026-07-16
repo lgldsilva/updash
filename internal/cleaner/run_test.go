@@ -88,6 +88,34 @@ func TestCleanDocker_Routes(t *testing.T) {
 	}
 }
 
+func TestDockerPruneArgsForItem(t *testing.T) {
+	t.Setenv("UPDASH_DOCKER_BUILDER_MODE", "all")
+	t.Setenv("UPDASH_DOCKER_IMAGE_MAX_AGE", "12h")
+	t.Setenv("UPDASH_DOCKER_CONTAINER_MAX_AGE", "6h")
+
+	cases := []struct {
+		name string
+		want []string
+	}{
+		{"docker images", []string{"image", "prune", "-a", "--filter", "until=12h", "-f"}},
+		{"docker build cache", []string{"builder", "prune", "-af"}},
+		{"docker containers", []string{"container", "prune", "-f", "--filter", "until=6h"}},
+		{"docker volumes", []string{"volume", "prune", "-f"}},
+		{"docker misc", []string{"system", "prune", "-af", "--filter", "until=12h"}},
+	}
+	for _, tc := range cases {
+		got := dockerPruneArgsForItem(tc.name)
+		if len(got) != len(tc.want) {
+			t.Fatalf("%s: got %v, want %v", tc.name, got, tc.want)
+		}
+		for i := range tc.want {
+			if got[i] != tc.want[i] {
+				t.Fatalf("%s: got %v, want %v", tc.name, got, tc.want)
+			}
+		}
+	}
+}
+
 func TestCleanWindowsCache_Default(t *testing.T) {
 	item := &model.Item{Name: "win misc", Category: model.CatCache}
 	r := cleanWindowsCache(context.Background(), item, SilentOptions())
