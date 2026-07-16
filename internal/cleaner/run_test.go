@@ -88,22 +88,31 @@ func TestCleanDocker_Routes(t *testing.T) {
 	}
 }
 
-func TestCleanDockerBuilder_ModeAll(t *testing.T) {
+func TestDockerPruneArgsForItem(t *testing.T) {
 	t.Setenv("UPDASH_DOCKER_BUILDER_MODE", "all")
-	item := &model.Item{Name: "docker build cache", Category: model.CatDockerClean}
-	r := cleanDockerBuilder(context.Background(), item, SilentOptions())
-	if r == nil {
-		t.Fatal("nil result")
-	}
-}
+	t.Setenv("UPDASH_DOCKER_IMAGE_MAX_AGE", "12h")
+	t.Setenv("UPDASH_DOCKER_CONTAINER_MAX_AGE", "6h")
 
-func TestCleanDockerBuilder_ModeAge(t *testing.T) {
-	t.Setenv("UPDASH_DOCKER_BUILDER_MODE", "age")
-	t.Setenv("UPDASH_DOCKER_BUILDER_MAX_AGE", "24h")
-	item := &model.Item{Name: "docker build cache", Category: model.CatDockerClean}
-	r := cleanDockerBuilder(context.Background(), item, SilentOptions())
-	if r == nil {
-		t.Fatal("nil result")
+	cases := []struct {
+		name string
+		want []string
+	}{
+		{"docker images", []string{"image", "prune", "-a", "--filter", "until=12h", "-f"}},
+		{"docker build cache", []string{"builder", "prune", "-af"}},
+		{"docker containers", []string{"container", "prune", "-f", "--filter", "until=6h"}},
+		{"docker volumes", []string{"volume", "prune", "-f"}},
+		{"docker misc", []string{"system", "prune", "-af", "--filter", "until=12h"}},
+	}
+	for _, tc := range cases {
+		got := dockerPruneArgsForItem(tc.name)
+		if len(got) != len(tc.want) {
+			t.Fatalf("%s: got %v, want %v", tc.name, got, tc.want)
+		}
+		for i := range tc.want {
+			if got[i] != tc.want[i] {
+				t.Fatalf("%s: got %v, want %v", tc.name, got, tc.want)
+			}
+		}
 	}
 }
 

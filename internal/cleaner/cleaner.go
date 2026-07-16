@@ -99,11 +99,7 @@ func cleanCache(ctx context.Context, item *model.Item, opts Options) *Result {
 	}
 }
 
-const (
-	fmtErrLine      = "error: %s\n"
-	dockerUntilPref = "until="
-	dockerFilter    = "--filter"
-)
+const fmtErrLine = "error: %s\n"
 
 // cleanSDKMAN removes old SDKMAN versions, keeping only the latest per major.
 func cleanSDKMAN(ctx context.Context, item *model.Item, opts Options) *Result {
@@ -171,30 +167,27 @@ func sdkUninstallOne(ctx context.Context, candidate, ver string, opts Options, o
 }
 
 // cleanDocker prunes Docker resources.
-// Age filters come from UPDASH_DOCKER_* (default 336h / 14 days).
-// Builder uses UPDASH_DOCKER_BUILDER_MODE (age|all); "all" is recommended
-// on CI/homelab hosts where until= filters reclaim ~0B on active caches.
+// CLI args come from config.Docker*PruneArgs (pure policy, unit-tested).
+// Builder mode (age|all): see UPDASH_DOCKER_BUILDER_MODE — "all" for CI/homelab.
 func cleanDocker(ctx context.Context, item *model.Item, opts Options) *Result {
-	switch {
-	case strings.Contains(item.Name, "images"):
-		return runCmd(ctx, item, opts, "docker", "image", "prune", "-a", dockerFilter, dockerUntilPref+config.DockerImageMaxAge(), "-f")
-	case strings.Contains(item.Name, "builder") || strings.Contains(item.Name, "build"):
-		return cleanDockerBuilder(ctx, item, opts)
-	case strings.Contains(item.Name, "container"):
-		return runCmd(ctx, item, opts, "docker", "container", "prune", "-f", dockerFilter, dockerUntilPref+config.DockerContainerMaxAge())
-	case strings.Contains(item.Name, "volume"):
-		return runCmd(ctx, item, opts, "docker", "volume", "prune", "-f")
-	default:
-		return runCmd(ctx, item, opts, "docker", "system", "prune", "-af", dockerFilter, dockerUntilPref+config.DockerImageMaxAge())
-	}
+	return runCmd(ctx, item, opts, "docker", dockerPruneArgsForItem(item.Name)...)
 }
 
-// cleanDockerBuilder runs builder prune according to UPDASH_DOCKER_BUILDER_MODE.
-func cleanDockerBuilder(ctx context.Context, item *model.Item, opts Options) *Result {
-	if config.DockerBuilderMode() == config.DockerBuilderModeAll {
-		return runCmd(ctx, item, opts, "docker", "builder", "prune", "-af")
+// dockerPruneArgsForItem maps a cleanup item name to docker subcommand args
+// (everything after "docker"). Pure routing — no I/O.
+func dockerPruneArgsForItem(name string) []string {
+	switch {
+	case strings.Contains(name, "images"):
+		return config.DockerImagePruneArgs()
+	case strings.Contains(name, "builder") || strings.Contains(name, "build"):
+		return config.DockerBuilderPruneArgs()
+	case strings.Contains(name, "container"):
+		return config.DockerContainerPruneArgs()
+	case strings.Contains(name, "volume"):
+		return config.DockerVolumePruneArgs()
+	default:
+		return config.DockerSystemPruneArgs()
 	}
-	return runCmd(ctx, item, opts, "docker", "builder", "prune", dockerFilter, dockerUntilPref+config.DockerBuilderMaxAge(), "-f")
 }
 
 // cleanHomelab applies retention policies for logs, caches, AI outputs, and disk pressure.
