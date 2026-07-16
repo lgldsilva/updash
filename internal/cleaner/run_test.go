@@ -88,6 +88,25 @@ func TestCleanDocker_Routes(t *testing.T) {
 	}
 }
 
+func TestCleanDockerBuilder_ModeAll(t *testing.T) {
+	t.Setenv("UPDASH_DOCKER_BUILDER_MODE", "all")
+	item := &model.Item{Name: "docker build cache", Category: model.CatDockerClean}
+	r := cleanDockerBuilder(context.Background(), item, SilentOptions())
+	if r == nil {
+		t.Fatal("nil result")
+	}
+}
+
+func TestCleanDockerBuilder_ModeAge(t *testing.T) {
+	t.Setenv("UPDASH_DOCKER_BUILDER_MODE", "age")
+	t.Setenv("UPDASH_DOCKER_BUILDER_MAX_AGE", "24h")
+	item := &model.Item{Name: "docker build cache", Category: model.CatDockerClean}
+	r := cleanDockerBuilder(context.Background(), item, SilentOptions())
+	if r == nil {
+		t.Fatal("nil result")
+	}
+}
+
 func TestCleanWindowsCache_Default(t *testing.T) {
 	item := &model.Item{Name: "win misc", Category: model.CatCache}
 	r := cleanWindowsCache(context.Background(), item, SilentOptions())

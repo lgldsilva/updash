@@ -246,6 +246,9 @@ func printCleanItemDetail(it *model.Item) {
 	if it.Reclaimable != "" {
 		detail = fmt.Sprintf("%s (~%s reclaimable)", it.Name, it.Reclaimable)
 	}
+	if it.KeepPolicy != "" {
+		detail = fmt.Sprintf("%s  [%s]", detail, it.KeepPolicy)
+	}
 	fmt.Printf("  • %s\n", detail)
 }
 

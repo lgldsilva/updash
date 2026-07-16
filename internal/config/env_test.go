@@ -9,6 +9,7 @@ func TestDockerAgesDefault(t *testing.T) {
 	t.Setenv("UPDASH_DOCKER_IMAGE_MAX_AGE", "")
 	t.Setenv("UPDASH_DOCKER_BUILDER_MAX_AGE", "")
 	t.Setenv("UPDASH_DOCKER_CONTAINER_MAX_AGE", "")
+	t.Setenv("UPDASH_DOCKER_BUILDER_MODE", "")
 
 	if got := DockerImageMaxAge(); got != DefaultDockerImageMaxAge {
 		t.Errorf("DockerImageMaxAge() = %q, want %q", got, DefaultDockerImageMaxAge)
@@ -18,6 +19,9 @@ func TestDockerAgesDefault(t *testing.T) {
 	}
 	if got := DockerContainerMaxAge(); got != DefaultDockerContainerMaxAge {
 		t.Errorf("DockerContainerMaxAge() = %q, want %q", got, DefaultDockerContainerMaxAge)
+	}
+	if got := DockerBuilderMode(); got != DefaultDockerBuilderMode {
+		t.Errorf("DockerBuilderMode() = %q, want %q", got, DefaultDockerBuilderMode)
 	}
 }
 
@@ -34,6 +38,29 @@ func TestDockerAgesOverride(t *testing.T) {
 	}
 	if got := DockerContainerMaxAge(); got != "24h" {
 		t.Errorf("DockerContainerMaxAge() = %q, want 24h", got)
+	}
+}
+
+func TestDockerBuilderMode(t *testing.T) {
+	cases := []struct {
+		env  string
+		want string
+	}{
+		{"", DockerBuilderModeAge},
+		{"age", DockerBuilderModeAge},
+		{"AGE", DockerBuilderModeAge},
+		{"all", DockerBuilderModeAll},
+		{"ALL", DockerBuilderModeAll},
+		{"af", DockerBuilderModeAll},
+		{"full", DockerBuilderModeAll},
+		{"unfiltered", DockerBuilderModeAll},
+		{"nonsense", DockerBuilderModeAge},
+	}
+	for _, tc := range cases {
+		t.Setenv("UPDASH_DOCKER_BUILDER_MODE", tc.env)
+		if got := DockerBuilderMode(); got != tc.want {
+			t.Errorf("DockerBuilderMode(env=%q) = %q, want %q", tc.env, got, tc.want)
+		}
 	}
 }
 
@@ -86,6 +113,7 @@ func TestEnvDefaultsListing(t *testing.T) {
 		t.Errorf("EnvDefaults missing override:\n%s", out)
 	}
 	for _, key := range []string{
+		"UPDASH_DOCKER_BUILDER_MODE",
 		"UPDASH_DOCKER_BUILDER_MAX_AGE",
 		"UPDASH_DOCKER_CONTAINER_MAX_AGE",
 		"UPDASH_CONTAINER_LOG_MAX_MB",

@@ -423,7 +423,8 @@ Options (CLI modes):
 
 Docker cleanup age defaults to 336h (14d). Override with UPDASH_DOCKER_IMAGE_MAX_AGE,
 UPDASH_DOCKER_BUILDER_MAX_AGE, UPDASH_DOCKER_CONTAINER_MAX_AGE (e.g. 168h for 7d).
-See --env-defaults for the full list.
+Builder prune: UPDASH_DOCKER_BUILDER_MODE=age|all (CI/homelab: use all — age often
+reclaims 0B on active build caches). See --env-defaults for the full list.
 
 On startup (TUI and --check/--update/--clean/--all), updash prints its build
 version and checks the Gitea release API. When a newer release exists, it

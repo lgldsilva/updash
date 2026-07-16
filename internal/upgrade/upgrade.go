@@ -246,14 +246,21 @@ func extractBinary(data []byte, archName, goos string) ([]byte, error) {
 	return extractFromTarGz(data)
 }
 
+// archiveMember is one regular file found inside a release archive.
+type archiveMember struct {
+	name string
+	data []byte
+}
+
 func extractFromTarGz(data []byte) ([]byte, error) {
 	gzr, err := gzip.NewReader(bytes.NewReader(data))
 	if err != nil {
 		return nil, fmt.Errorf("gzip: %w", err)
 	}
-	_ = gzr.Close()
+	defer func() { _ = gzr.Close() }()
 
 	tr := tar.NewReader(gzr)
+	var members []archiveMember
 	for {
 		hdr, err := tr.Next()
 		if errors.Is(err, io.EOF) {
@@ -262,17 +269,16 @@ func extractFromTarGz(data []byte) ([]byte, error) {
 		if err != nil {
 			return nil, fmt.Errorf("tar: %w", err)
 		}
-		if hdr.Typeflag != tar.TypeReg {
+		if hdr.Typeflag != tar.TypeReg && hdr.Typeflag != tar.TypeRegA {
 			continue
 		}
-		// Accept the first regular file
-		bin, err := io.ReadAll(tr)
+		body, err := io.ReadAll(tr)
 		if err != nil {
 			return nil, fmt.Errorf("read %s: %w", hdr.Name, err)
 		}
-		return bin, nil
+		members = append(members, archiveMember{name: hdr.Name, data: body})
 	}
-	return nil, errors.New("no files found in archive")
+	return pickReleaseBinary(members)
 }
 
 func extractFromZip(data []byte) ([]byte, error) {
@@ -280,6 +286,7 @@ func extractFromZip(data []byte) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("zip: %w", err)
 	}
+	var members []archiveMember
 	for _, f := range zr.File {
 		if f.FileInfo().IsDir() {
 			continue
@@ -288,14 +295,86 @@ func extractFromZip(data []byte) ([]byte, error) {
 		if err != nil {
 			return nil, fmt.Errorf("open %s: %w", f.Name, err)
 		}
-		defer func() { _ = r.Close() }()
-		bin, err := io.ReadAll(r)
+		body, err := io.ReadAll(r)
+		_ = r.Close()
 		if err != nil {
 			return nil, fmt.Errorf("read %s: %w", f.Name, err)
 		}
-		return bin, nil
+		members = append(members, archiveMember{name: f.Name, data: body})
 	}
-	return nil, errors.New("no files found in archive")
+	return pickReleaseBinary(members)
+}
+
+// pickReleaseBinary selects the updash executable from release archive members.
+// Prefer an explicit "updash" / "updash.exe" name; never install README/LICENSE
+// (GoReleaser often packs docs before the binary — that used to brick --upgrade).
+func pickReleaseBinary(members []archiveMember) ([]byte, error) {
+	if len(members) == 0 {
+		return nil, errors.New("no files found in archive")
+	}
+	var fallback []byte
+	for _, m := range members {
+		base := filepath.Base(m.name)
+		if isReleaseBinaryName(base) {
+			return m.data, nil
+		}
+		if isSkippableArchiveFile(base) {
+			continue
+		}
+		if looksLikeExecutable(m.data) && fallback == nil {
+			fallback = m.data
+		}
+	}
+	if fallback != nil {
+		return fallback, nil
+	}
+	return nil, errors.New("no updash binary found in archive (only docs/text?)")
+}
+
+func isReleaseBinaryName(base string) bool {
+	switch strings.ToLower(base) {
+	case "updash", "updash.exe":
+		return true
+	default:
+		return false
+	}
+}
+
+func isSkippableArchiveFile(base string) bool {
+	lower := strings.ToLower(base)
+	switch {
+	case strings.HasSuffix(lower, ".md"),
+		strings.HasSuffix(lower, ".txt"),
+		strings.HasSuffix(lower, ".rst"),
+		lower == "license", lower == "licence", lower == "copying",
+		lower == "changelog", lower == "notice", lower == "authors":
+		return true
+	default:
+		return false
+	}
+}
+
+// looksLikeExecutable checks common binary magic numbers (ELF / Mach-O / PE).
+func looksLikeExecutable(data []byte) bool {
+	if len(data) < 4 {
+		return false
+	}
+	// ELF
+	if data[0] == 0x7f && data[1] == 'E' && data[2] == 'L' && data[3] == 'F' {
+		return true
+	}
+	// Mach-O 64/32 (big/little endian)
+	if (data[0] == 0xfe && data[1] == 0xed && data[2] == 0xfa) ||
+		(data[0] == 0xcf && data[1] == 0xfa && data[2] == 0xed && data[3] == 0xfe) ||
+		(data[0] == 0xce && data[1] == 0xfa && data[2] == 0xed && data[3] == 0xfe) ||
+		(data[0] == 0xca && data[1] == 0xfe && data[2] == 0xba && data[3] == 0xbe) {
+		return true
+	}
+	// PE / DOS MZ
+	if data[0] == 'M' && data[1] == 'Z' {
+		return true
+	}
+	return false
 }
 
 // --- Binary replacement ---
