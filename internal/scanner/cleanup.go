@@ -126,7 +126,7 @@ func (s *DockerCleanSource) Scan(ctx context.Context, plat model.PlatformInfo) (
 					CurrentVer:  size,
 					Reclaimable: reclaim,
 					Status:      model.StatusCleanCandidate,
-					KeepPolicy:  dockerCleanKeepPolicy(typ),
+					KeepPolicy:  config.DockerResourceKeepPolicy(typ),
 				})
 			}
 		}
@@ -139,25 +139,6 @@ func (s *DockerCleanSource) Scan(ctx context.Context, plat model.PlatformInfo) (
 	}
 
 	return items, nil
-}
-
-// dockerCleanKeepPolicy documents the prune policy that clean will apply.
-func dockerCleanKeepPolicy(typ string) string {
-	switch {
-	case strings.Contains(typ, "build"):
-		if config.DockerBuilderMode() == config.DockerBuilderModeAll {
-			return "builder mode=all (prune -af, unused cache only)"
-		}
-		return "builder mode=age until=" + config.DockerBuilderMaxAge()
-	case strings.Contains(typ, "image"):
-		return "image prune -a until=" + config.DockerImageMaxAge()
-	case strings.Contains(typ, "container"):
-		return "container prune until=" + config.DockerContainerMaxAge()
-	case strings.Contains(typ, "volume"):
-		return "volume prune unused"
-	default:
-		return "system prune until=" + config.DockerImageMaxAge()
-	}
 }
 
 // --- Go Cleanup ---
