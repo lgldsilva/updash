@@ -269,7 +269,7 @@ func extractFromTarGz(data []byte) ([]byte, error) {
 		if err != nil {
 			return nil, fmt.Errorf("tar: %w", err)
 		}
-		if hdr.Typeflag != tar.TypeReg && hdr.Typeflag != tar.TypeRegA {
+		if hdr.Typeflag != tar.TypeReg {
 			continue
 		}
 		body, err := io.ReadAll(tr)
