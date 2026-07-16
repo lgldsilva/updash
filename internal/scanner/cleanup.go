@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/lgldsilva/updash/internal/config"
 	"github.com/lgldsilva/updash/internal/model"
 	"github.com/lgldsilva/updash/internal/sizefmt"
 )
@@ -125,6 +126,7 @@ func (s *DockerCleanSource) Scan(ctx context.Context, plat model.PlatformInfo) (
 					CurrentVer:  size,
 					Reclaimable: reclaim,
 					Status:      model.StatusCleanCandidate,
+					KeepPolicy:  config.DockerResourceKeepPolicy(typ),
 				})
 			}
 		}

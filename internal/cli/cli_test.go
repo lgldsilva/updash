@@ -190,12 +190,19 @@ func TestPrintCleanItemDetail(t *testing.T) {
 	out := captureStdout(t, func() {
 		printCleanItemDetail(&model.Item{Name: "cache", Reclaimable: "1.2GB"})
 		printCleanItemDetail(&model.Item{Name: "tmp"})
+		printCleanItemDetail(&model.Item{
+			Name: "docker build cache", Reclaimable: "20GB",
+			KeepPolicy: "builder mode=all (prune -af, unused cache only)",
+		})
 	})
 	if !strings.Contains(out, "cache (~1.2GB reclaimable)") {
 		t.Fatalf("reclaimable: %q", out)
 	}
 	if !strings.Contains(out, "• tmp") {
 		t.Fatalf("plain: %q", out)
+	}
+	if !strings.Contains(out, "builder mode=all") {
+		t.Fatalf("keep policy missing: %q", out)
 	}
 }
 
