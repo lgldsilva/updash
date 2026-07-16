@@ -172,12 +172,14 @@ func sdkUninstallOne(ctx context.Context, candidate, ver string, opts Options, o
 
 // cleanDocker prunes Docker resources.
 // Age filters come from UPDASH_DOCKER_* (default 336h / 14 days).
+// Builder uses UPDASH_DOCKER_BUILDER_MODE (age|all); "all" is recommended
+// on CI/homelab hosts where until= filters reclaim ~0B on active caches.
 func cleanDocker(ctx context.Context, item *model.Item, opts Options) *Result {
 	switch {
 	case strings.Contains(item.Name, "images"):
 		return runCmd(ctx, item, opts, "docker", "image", "prune", "-a", dockerFilter, dockerUntilPref+config.DockerImageMaxAge(), "-f")
 	case strings.Contains(item.Name, "builder") || strings.Contains(item.Name, "build"):
-		return runCmd(ctx, item, opts, "docker", "builder", "prune", dockerFilter, dockerUntilPref+config.DockerBuilderMaxAge(), "-f")
+		return cleanDockerBuilder(ctx, item, opts)
 	case strings.Contains(item.Name, "container"):
 		return runCmd(ctx, item, opts, "docker", "container", "prune", "-f", dockerFilter, dockerUntilPref+config.DockerContainerMaxAge())
 	case strings.Contains(item.Name, "volume"):
@@ -185,6 +187,14 @@ func cleanDocker(ctx context.Context, item *model.Item, opts Options) *Result {
 	default:
 		return runCmd(ctx, item, opts, "docker", "system", "prune", "-af", dockerFilter, dockerUntilPref+config.DockerImageMaxAge())
 	}
+}
+
+// cleanDockerBuilder runs builder prune according to UPDASH_DOCKER_BUILDER_MODE.
+func cleanDockerBuilder(ctx context.Context, item *model.Item, opts Options) *Result {
+	if config.DockerBuilderMode() == config.DockerBuilderModeAll {
+		return runCmd(ctx, item, opts, "docker", "builder", "prune", "-af")
+	}
+	return runCmd(ctx, item, opts, "docker", "builder", "prune", dockerFilter, dockerUntilPref+config.DockerBuilderMaxAge(), "-f")
 }
 
 // cleanHomelab applies retention policies for logs, caches, AI outputs, and disk pressure.

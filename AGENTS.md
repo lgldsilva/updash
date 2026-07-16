@@ -73,11 +73,14 @@ model/types.go       → Item, Category, Status, PlatformInfo
 `updash --env-defaults` prints effective values. Defaults:
 
 - Docker ages: `336h` (14d)
+- Docker builder mode: `age` (use `UPDASH_DOCKER_BUILDER_MODE=all` on CI/homelab)
 - Container log truncate: `50` MB
 - Host logs / AI outputs / dev caches: age in days (30 / 7 / 90)
 - Disk pressure: prune aggressively when used% ≥ 85
 
 Homelab clean category: `homelab-clean` (`--only homelab-clean`).
+
+**Builder mode note:** `age` + `until=` frequently reclaims 0B on active build hosts. Prefer `all` there; keep shell `builder prune -af` as belt-and-suspenders if desired.
 
 ## Repository
 
