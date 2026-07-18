@@ -76,3 +76,26 @@ jobs:
         run: goreleaser check --config goreleaser.github.yaml
       - name: Snapshot build
         run: GOFLAGS=-mod=mod goreleaser release --snapshot --clean --config goreleaser.github.yaml --skip=publish
+
+  ci-gate:
+    name: PR gate (all jobs must pass)
+    runs-on: ubuntu-latest
+    needs: [test, security-govulncheck, secrets-scan, package]
+    if: always()
+    steps:
+      - name: Verify all gates
+        run: |
+          set -eu
+          failed=()
+          for j in test security-govulncheck secrets-scan package; do
+            r="${{ needs[j].result }}"
+            echo "  $j: $r"
+            if [ "$r" != "success" ]; then
+              failed+=("$j")
+            fi
+          done
+          if [ ${#failed[@]} -gt 0 ]; then
+            echo "Failed: ${failed[*]}"
+            exit 1
+          fi
+          echo "OK"
