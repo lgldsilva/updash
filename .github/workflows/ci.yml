@@ -93,8 +93,12 @@ jobs:
       - name: gitleaks
         run: |
           set -eu
-          curl -sSfL -o /tmp/gl.tgz             "https://github.com/gitleaks/gitleaks/releases/download/v${{ env.GITLEAKS_VERSION }}/gitleaks_${GITLEAKS_VERSION#v}_linux_x64.tar.gz"
-          echo "downloaded"
+          curl -sSfL -o /tmp/gl.tgz \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${{ env.GITLEAKS_VERSION }}/gitleaks_${GITLEAKS_VERSION#v}_linux_x64.tar.gz"
+          tar xzf /tmp/gl.tgz -C /tmp gitleaks
+          sudo mv /tmp/gitleaks /usr/local/bin/gitleaks
+          sudo chmod +x /usr/local/bin/gitleaks
+          gitleaks detect --source . --no-git --redact --verbose
 
   security-gosec:
     name: gosec

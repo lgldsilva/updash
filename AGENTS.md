@@ -18,7 +18,7 @@ Entry modes in `cmd/updash/main.go`:
 | update | `--update` | outdated only |
 | clean | `--clean` | cleanup candidates |
 | all | `--all` | update + clean |
-| upgrade | `--upgrade` | Gitea release self-update |
+| upgrade | `--upgrade` | GitHub release self-update |
 | update-self | `--update-self` | git pull + rebuild (dev) |
 
 ## Architecture
