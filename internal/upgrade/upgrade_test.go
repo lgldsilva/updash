@@ -928,6 +928,10 @@ func TestInstall_downloadFails(t *testing.T) {
 // ── Run with install path (auto-upgrade) ──────────────────────────────────
 
 func TestRun_autoUpgrade_success(t *testing.T) {
+	// Tests run from a temporary binary path, so bypass the package-manager
+	// guard to exercise the full download-and-replace path.
+	t.Setenv("UPDASH_ALLOW_SELF_UPDATE", "1")
+
 	elfBin := []byte{0x7f, 'E', 'L', 'F', 1, 2, 3, 4}
 	archive := makeTarGz(t, map[string][]byte{"updash": elfBin})
 	h := sha256.Sum256(archive)
@@ -1072,6 +1076,10 @@ func TestCheck_checkOnlyExplicitVersion(t *testing.T) {
 // ── Startup auto-upgrade path (install fails) ─────────────────────────────
 
 func TestStartup_autoUpgrade_success(t *testing.T) {
+	// Tests run from a temporary binary path, so bypass the package-manager
+	// guard to exercise the full download-and-replace path.
+	t.Setenv("UPDASH_ALLOW_SELF_UPDATE", "1")
+
 	elfBin := []byte{0x7f, 'E', 'L', 'F', 1, 2, 3, 4}
 	archive := makeTarGz(t, map[string][]byte{"updash": elfBin})
 	h := sha256.Sum256(archive)
@@ -1106,5 +1114,50 @@ func TestStartup_autoUpgrade_success(t *testing.T) {
 	}
 	if !res.Updated || res.Note != "upgraded" {
 		t.Fatalf("res = %+v", res)
+	}
+}
+
+// ── Package-managed install guard (distribution channels) ────────────────
+
+func TestRun_packageManaged(t *testing.T) {
+	stubSelfUpdateDeps(t, "/usr/bin/updash", t.TempDir(), nil, nil, nil)
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/releases/latest", func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]string{"tag_name": "v2.0.0"})
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	cfg := Config{API: srv.URL, Download: srv.URL}
+	err := Run(context.Background(), cfg, "1.0.0")
+	if err == nil {
+		t.Fatal("system install must refuse self-update")
+	}
+	if !strings.Contains(err.Error(), "package manager") {
+		t.Fatalf("expected package-manager hint, got %v", err)
+	}
+}
+
+func TestStartup_packageManaged(t *testing.T) {
+	stubSelfUpdateDeps(t, "/usr/bin/updash", t.TempDir(), nil, nil, nil)
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/releases/latest", func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]string{"tag_name": "v2.0.0"})
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	cfg := Config{API: srv.URL, Download: srv.URL}
+	res, err := Startup(context.Background(), cfg, "1.0.0", true)
+	if err != nil {
+		t.Fatalf("Startup failed: %v", err)
+	}
+	if res.Updated {
+		t.Fatal("system install must not self-update at startup")
+	}
+	if res.Note != "package-managed" {
+		t.Fatalf("note = %q, want package-managed", res.Note)
 	}
 }

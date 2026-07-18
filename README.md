@@ -64,6 +64,12 @@ make install        # → $HOME/.local/bin/updash
 updash --upgrade      # download + verify + replace binary in-place
 ```
 
+Release binaries and native Linux packages are published on GitHub. See the
+[distribution model](docs/DISTRIBUTION.md) for `.deb`, `.rpm`, `.apk`, Arch,
+AUR, and Snap availability. `updash --upgrade` is reserved for a binary
+installed in `~/.local/bin`; package-manager installations update through their
+own manager.
+
 ## CLI
 
 | Flag | Description |
