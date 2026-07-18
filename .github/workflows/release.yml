@@ -107,7 +107,7 @@ jobs:
       - name: Install goreleaser
         run: go install github.com/goreleaser/goreleaser/v2@${{ env.GORELEASER_VERSION }}
       - name: Download SBOM
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: sbom
       - name: Clean up SBOM before GoReleaser
@@ -117,7 +117,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: goreleaser release --clean --config goreleaser.github.yaml
       - name: Re-download SBOM for release attachment
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: sbom
       - name: Attach SBOM to release
