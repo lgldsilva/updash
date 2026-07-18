@@ -178,10 +178,16 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: sbom
+      - name: Clean up SBOM before GoReleaser
+        run: rm -f bom.json
       - name: Run GoReleaser
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: goreleaser release --clean --config goreleaser.github.yaml
+      - name: Re-download SBOM for release attachment
+        uses: actions/download-artifact@v4
+        with:
+          name: sbom
       - name: Attach SBOM to release
         uses: softprops/action-gh-release@v2
         with:
