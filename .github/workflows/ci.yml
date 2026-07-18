@@ -20,7 +20,7 @@ jobs:
       COVER_PKGS: ./internal/model/... ./internal/config/... ./internal/sizefmt/... ./internal/cli/... ./internal/retention/...
       TEST_IO_PKGS: ./internal/scanner/... ./internal/tui/... ./internal/cleaner/...
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-go@v5
         with:
           go-version: ${{ env.GO_VERSION }}
@@ -44,7 +44,7 @@ jobs:
       GO_VERSION: '1.26'
       GOLANGCI_LINT_VERSION: v2.12.2
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-go@v5
         with:
           go-version: ${{ env.GO_VERSION }}
@@ -69,7 +69,7 @@ jobs:
     env:
       GOVULNCHECK_VERSION: 'latest'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-go@v5
         with:
           go-version: '1.26'
@@ -87,7 +87,7 @@ jobs:
     env:
       GITLEAKS_VERSION: '8.30.1'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
       - name: gitleaks
@@ -111,7 +111,7 @@ jobs:
       GO_VERSION: '1.26'
       GOSEC_VERSION: 'v2.27.1'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-go@v5
         with:
           go-version: ${{ env.GO_VERSION }}
@@ -139,7 +139,7 @@ jobs:
     env:
       TRIVY_VERSION: '0.72.0'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Install Trivy
         run: |
           set -uo pipefail
@@ -177,7 +177,7 @@ jobs:
     env:
       GO_VERSION: '1.26'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
       - uses: actions/setup-go@v5
