@@ -10,15 +10,6 @@ on:
 permissions:
   contents: read
 
-env:
-  GO_VERSION: '1.26'
-  GITLEAKS_VERSION: '8.30.1'
-  GOSEC_VERSION: 'v2.27.1'
-  GOVULNCHECK_VERSION: 'latest'
-  TRIVY_VERSION: '0.72.0'
-  GOLANGCI_LINT_VERSION: v2.12.2
-  GOLANGCI_LINT_ACTION_VERSION: v9.3.0
-
 jobs:
   test:
     name: test
