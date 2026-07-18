@@ -25,7 +25,7 @@ env:
   IMAGE_NAME: ${{ github.repository_owner }}/updash
   GORELEASER_VERSION: v2.13.0
   CYCLODEX_VERSION: v1.10.0
-  TRIVY_VERSION: '0.58.1'
+  TRIVY_VERSION: '0.72.0'
 
 jobs:
   resolve-tag:
@@ -83,7 +83,9 @@ jobs:
         run: |
           set -eu
           go install github.com/CycloneDX/cyclonedx-gomod/cmd/cyclonedx-gomod@${{ env.CYCLODEX_VERSION }}
-          cyclonedx-gomod mod -json -output bom.json ./...
+          # `cyclonedx-gomod mod` takes a single MODULE_PATH, not a glob.
+          # For a single-module repo, the module root is the current dir.
+          cyclonedx-gomod mod -json -output bom.json .
           test -s bom.json
       - name: Upload SBOM artifact
         uses: actions/upload-artifact@v4

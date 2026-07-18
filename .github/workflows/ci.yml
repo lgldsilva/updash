@@ -19,8 +19,9 @@ env:
   GO_VERSION: '1.26'
   COVER_PKGS: ./internal/model/... ./internal/config/... ./internal/sizefmt/... ./internal/cli/... ./internal/retention/...
   TEST_IO_PKGS: ./internal/scanner/... ./internal/tui/... ./internal/cleaner/...
+  GOLANGCI_LINT_ACTION_VERSION: v9.3.0
   GOLANGCI_LINT_VERSION: v2.12.2
-  TRIVY_VERSION: '0.58.1'
+  TRIVY_VERSION: '0.72.0'
   GITLEAKS_VERSION: '8.30.1'
   GOSEC_VERSION: 'v2.27.1'
   GOVULNCHECK_VERSION: 'latest'
@@ -79,7 +80,7 @@ jobs:
             exit 1
           fi
       - name: golangci-lint
-        uses: golangci/golangci-lint-action@${{ env.GOLANGCI_LINT_VERSION }}
+        uses: golangci/golangci-lint-action@${{ env.GOLANGCI_LINT_ACTION_VERSION }}
         with:
           version: ${{ env.GOLANGCI_LINT_VERSION }}
 
