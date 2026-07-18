@@ -61,5 +61,7 @@ jobs:
   ci-gate:
     name: PR gate
     runs-on: ubuntu-latest
+    needs: [test]
+    if: always()
     steps:
-      - run: echo "no needs"
+      - run: echo "test: ${{ needs.test.result }}"
