@@ -1,0 +1,72 @@
+name: Auto-tag
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency: autotag-main
+
+permissions:
+  contents: write
+
+env:
+  GO_VERSION: '1.26'
+  SVU_VERSION: v3.2.1
+
+jobs:
+  autotag:
+    name: Auto-tag (semver)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    if: github.repository == 'lgldsilva/updash'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: false
+      - name: Install svu
+        run: go install github.com/caarlos0/svu/v3@${{ env.SVU_VERSION }}
+      - name: Configure Git
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+      - name: Compute next version
+        id: svu
+        run: |
+          set -eu
+          CURRENT="$(svu current)"
+          NEXT="$(svu next)"
+          echo "current=$CURRENT next=$NEXT"
+          if [ -z "$AUTOTAG_TOKEN" ]; then
+            echo "AUTOTAG_TOKEN not set, skipping tag push"
+            echo "tag=" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ "$NEXT" = "$CURRENT" ]; then
+            echo "No version bump — skipping"
+            echo "tag=" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # svu returns full vX.Y.Z; do not double-prefix
+          echo "tag=$NEXT" >> "$GITHUB_OUTPUT"
+        env:
+          AUTOTAG_TOKEN: ${{ secrets.AUTOTAG_TOKEN }}
+      - name: Create and push tag
+        if: steps.svu.outputs.tag != ''
+        env:
+          AUTOTAG_TOKEN: ${{ secrets.AUTOTAG_TOKEN }}
+        run: |
+          set -eu
+          VERSION="${{ steps.svu.outputs.tag }}"
+          if git rev-parse -q --verify "refs/tags/$VERSION" >/dev/null; then
+            echo "Tag $VERSION already exists — skipping"
+            exit 0
+          fi
+          git tag -a "$VERSION" -m "Release $VERSION"
+          git remote set-url origin https://x-access-token:${AUTOTAG_TOKEN}@github.com/${{ github.repository }}.git
+          git push origin "$VERSION"
+          echo "✓ Tagged and pushed $VERSION — release.yml will build & publish"
