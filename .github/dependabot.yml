@@ -1,0 +1,59 @@
+# Dependabot — keep actions and Go modules up to date.
+#
+# Two ecosystems:
+#   - github-actions: bumps action SHAs in .github/workflows/*.yml
+#   - gomod:          bumps indirect Go module versions in go.mod / go.sum
+#
+# Both run weekly (Mondays 09:00 BRT / 12:00 UTC) and group patch/minor
+# updates into a single PR per ecosystem. Major versions stay separate.
+#
+# Why weekly: the project has a codeql cron at the same cadence, so the
+# codeql.yml + dependabot PRs line up on the same Monday review window.
+#
+# Labels make it easy to triage in the GitHub PR list.
+
+version: 2
+updates:
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "12:00"
+      timezone: "Etc/UTC"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "ci"
+    groups:
+      patch-and-minor:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
+    commit-message:
+      prefix: "ci"
+      include: "scope"
+
+  - package-ecosystem: "gomod"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "12:00"
+      timezone: "Etc/UTC"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "go"
+    groups:
+      patch-and-minor:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
+    commit-message:
+      prefix: "chore(deps)"
+      include: "scope"
