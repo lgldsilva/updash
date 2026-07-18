@@ -61,7 +61,5 @@ jobs:
   ci-gate:
     name: PR gate
     runs-on: ubuntu-latest
-    needs: [security-govulncheck]
-    if: always()
     steps:
-      - run: echo "govulncheck: ${{ needs.security-govulncheck.result }}"
+      - run: echo "no needs"
