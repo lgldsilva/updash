@@ -90,6 +90,9 @@ func Run(ctx context.Context, cfg Config, currentVersion string) error {
 		fmt.Println("already up to date.")
 		return nil
 	}
+	if !canSelfUpdate() {
+		return errors.New("this installation is managed by a package manager; update it with that package manager (set UPDASH_ALLOW_SELF_UPDATE=1 only for a deliberately self-managed install)")
+	}
 
 	return install(ctx, hc, cfg, tag)
 }

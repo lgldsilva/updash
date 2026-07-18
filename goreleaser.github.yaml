@@ -44,6 +44,24 @@ checksum:
   name_template: checksums.txt
   algorithm: sha256
 
+# Native Linux packages are attached to every GitHub release alongside the
+# archives. They let users install through their distribution tooling without
+# granting the application ownership of /usr/bin for self-updates.
+nfpms:
+  - id: linux-packages
+    ids: [updash]
+    package_name: updash
+    vendor: lgldsilva
+    homepage: https://github.com/lgldsilva/updash
+    maintainer: Luiz Guilherme <luiz.guilherme.89@outlook.com>
+    description: System Update Dashboard for package updates and cleanup.
+    license: MIT
+    formats: [deb, rpm, apk, archlinux]
+    bindir: /usr/bin
+    contents:
+      - src: ./LICENSE
+        dst: /usr/share/doc/updash/copyright
+
 snapshot:
   version_template: "{{ incpatch .Version }}-snapshot-{{ .ShortCommit }}"
 

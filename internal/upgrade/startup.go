@@ -38,6 +38,34 @@ func ShouldAutoUpgrade(version string, skipFlag bool) bool {
 	return true
 }
 
+// selfUpdateAllowed reports whether the binary lives in the user-owned install
+// location used by install.sh. System and package-manager installs must remain
+// immutable so that their manager owns updates and integrity metadata.
+func selfUpdateAllowed(executable, home string) bool {
+	userBin := filepath.Join(home, ".local", "bin")
+	rel, err := filepath.Rel(userBin, executable)
+	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+}
+
+func canSelfUpdate() bool {
+	if os.Getenv("UPDASH_ALLOW_SELF_UPDATE") == "1" {
+		return true
+	}
+	executable, err := os.Executable()
+	if err != nil {
+		return false
+	}
+	executable, err = filepath.EvalSymlinks(executable)
+	if err != nil {
+		return false
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return false
+	}
+	return selfUpdateAllowed(executable, home)
+}
+
 // Startup prints the build line, optionally upgrades, and may re-exec the binary.
 func Startup(ctx context.Context, cfg Config, current string, auto bool) (StartupResult, error) {
 	res := StartupResult{Current: current}
@@ -62,6 +90,11 @@ func Startup(ctx context.Context, cfg Config, current string, auto bool) (Startu
 
 	if !auto {
 		res.Note = "update available"
+		PrintBanner(res)
+		return res, nil
+	}
+	if !canSelfUpdate() {
+		res.Note = "package-managed"
 		PrintBanner(res)
 		return res, nil
 	}
@@ -108,6 +141,8 @@ func PrintBanner(res StartupResult) {
 		line += " · upgrade check skipped"
 	case "upgrade failed":
 		line += " · upgrade failed"
+	case "package-managed":
+		line += " · update with your package manager"
 	}
 	fmt.Println(line)
 }

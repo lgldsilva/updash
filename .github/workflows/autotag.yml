@@ -67,6 +67,6 @@ jobs:
             exit 0
           fi
           git tag -a "$VERSION" -m "Release $VERSION"
-          git remote set-url origin https://x-access-token:${AUTOTAG_TOKEN}@github.com/${{ github.repository }}.git
+          git remote set-url origin "https://x-access-token:${AUTOTAG_TOKEN}@github.com/${{ github.repository }}.git"
           git push origin "$VERSION"
           echo "✓ Tagged and pushed $VERSION — release.yml will build & publish"

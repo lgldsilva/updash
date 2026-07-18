@@ -1,6 +1,9 @@
 package upgrade
 
-import "testing"
+import (
+	"path/filepath"
+	"testing"
+)
 
 func TestShouldAutoUpgrade(t *testing.T) {
 	if !ShouldAutoUpgrade("v1.0.0", false) {
@@ -27,5 +30,15 @@ func TestModeSkipsStartupUpgrade(t *testing.T) {
 	}
 	if ModeSkipsStartupUpgrade("check") {
 		t.Fatal("check mode should not skip")
+	}
+}
+
+func TestSelfUpdateAllowed(t *testing.T) {
+	home := t.TempDir()
+	if !selfUpdateAllowed(filepath.Join(home, ".local", "bin", "updash"), home) {
+		t.Fatal("expected a user-installed binary to allow self-update")
+	}
+	if selfUpdateAllowed("/usr/bin/updash", home) {
+		t.Fatal("system package binaries must be updated by their package manager")
 	}
 }
