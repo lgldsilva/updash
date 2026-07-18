@@ -404,7 +404,7 @@ Usage:
   updash --update             Update outdated packages (CLI, live output)
   updash --clean              Run cleanup operations (CLI)
   updash --all, -a            Update + clean everything
-  updash --upgrade            Self-update from latest Gitea release
+  updash --upgrade            Self-update from latest GitHub release
   updash --check-upgrade      Check for self-update without installing
   updash --version, -v        Show version
   updash --env-defaults       Print UPDASH_* retention vars (effective values)
@@ -427,7 +427,7 @@ Builder prune: UPDASH_DOCKER_BUILDER_MODE=age|all (CI/homelab: use all — age o
 reclaims 0B on active build caches). See --env-defaults for the full list.
 
 On startup (TUI and --check/--update/--clean/--all), updash prints its build
-version and checks the Gitea release API. When a newer release exists, it
+version and checks the GitHub release API. When a newer release exists, it
 downloads, verifies, and reinstalls itself before scanning.
 
 Examples:

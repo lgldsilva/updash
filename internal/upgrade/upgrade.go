@@ -1,6 +1,6 @@
-// Package upgrade self-updates the updash binary from a Gitea release.
+// Package upgrade self-updates the updash binary from a GitHub release.
 // The release URL can be overridden with UPDASH_UPDATE_API / UPDASH_UPDATE_URL
-// env vars, making it compatible with any Gitea or GitHub releases host.
+// env vars, making it compatible with any GitHub-compatible releases host.
 package upgrade
 
 import (
@@ -28,18 +28,18 @@ import (
 	"time"
 )
 
-// Defaults — homelab Gitea. Override via env vars.
+// Defaults — public GitHub. Override via env vars for private mirrors.
 const (
-	DefaultUpdateAPI = "https://github.com/api/v1/repos/lgldsilva/updash"
+	DefaultUpdateAPI = "https://api.github.com/repos/lgldsilva/updash"
 	DefaultUpdateDL  = "https://github.com/lgldsilva/updash/releases/download"
 )
 
 // Config holds upgrade configuration, sourced from env vars.
 type Config struct {
-	API       string // Gitea API base URL for releases
+	API       string // GitHub API base URL for releases
 	Download  string // Download URL prefix for release assets
 	Token     string // Optional token for private repos
-	CAFile    string // Optional custom CA cert path (self-signed homelab)
+	CAFile    string // Optional custom CA cert path (self-signed host)
 	CheckOnly bool   // Only check, don't install
 	Version   string // Specific version to install (default: latest)
 }
@@ -126,7 +126,7 @@ func fetchLatestTag(ctx context.Context, hc *http.Client, apiURL, token string) 
 		return "", err
 	}
 
-	// Fallback: list all releases (Gitea-style)
+	// Fallback: list all releases (paginated, GitHub-compatible)
 	return fetchLatestFromList(ctx, hc, base+"/releases?limit=50", token)
 }
 

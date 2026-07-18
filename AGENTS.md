@@ -84,6 +84,5 @@ Homelab clean category: `homelab-clean` (`--only homelab-clean`).
 
 ## Repository
 
-- Module: `github.com/lgldsilva/updash`
-- Gitea: `github.com/lgldsilva/updash`
+- Public: `github.com/lgldsilva/updash`
 - **No direct pushes to `main`** — feature branches + PRs

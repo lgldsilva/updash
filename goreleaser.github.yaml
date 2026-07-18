@@ -1,0 +1,75 @@
+# GoReleaser — cross-platform release artifacts for updash (GitHub).
+#
+# Builds the CLI for linux/macOS/Windows on amd64+arm64, packages each as
+# tar.gz (zip on Windows) with LICENSE + README, emits SHA-256 checksums and a
+# grouped changelog, and publishes a GitHub release.
+#
+# Validate locally without publishing:
+#   goreleaser check --config goreleaser.github.yaml
+#   goreleaser release --snapshot --clean --config goreleaser.github.yaml
+version: 2
+
+project_name: updash
+
+before:
+  hooks:
+    - go mod download
+
+builds:
+  - id: updash
+    main: ./cmd/updash
+    binary: updash
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w
+      - -X main.version={{ .Version }}
+      - -X main.commit={{ .ShortCommit }}
+      - -X main.date={{ .Date }}
+    goos: [linux, darwin, windows]
+    goarch: [amd64, arm64]
+
+archives:
+  - id: updash
+    formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    name_template: >-
+      {{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}
+
+checksum:
+  name_template: checksums.txt
+  algorithm: sha256
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-snapshot-{{ .ShortCommit }}"
+
+changelog:
+  sort: asc
+  use: git
+  groups:
+    - title: Features
+      regexp: '^.*?feat(\(.+\))??!?:.+$'
+      order: 0
+    - title: Fixes
+      regexp: '^.*?fix(\(.+\))??!?:.+$'
+      order: 1
+    - title: Others
+      order: 999
+  filters:
+    exclude:
+      - '^docs:'
+      - '^test:'
+      - '^ci:'
+      - '^chore:'
+      - '^Merge '
+
+release:
+  github:
+    owner: lgldsilva
+    name: updash
+  draft: false
+  prerelease: auto

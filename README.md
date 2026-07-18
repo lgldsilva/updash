@@ -18,7 +18,7 @@ make install        # → $HOME/.local/bin/updash
 updash --update-self
 ```
 
-Release binaries: Gitea `github.com/lgldsilva/updash` (`updash --upgrade`).
+Release binaries: GitHub `github.com/lgldsilva/updash` (`updash --upgrade`).
 
 ## CLI
 
@@ -93,8 +93,8 @@ make test          # race + coverage on gate packages
 Coverage gate packages (`≥90%`): `internal/model`, `config`, `sizefmt`, `cli`, `retention`.  
 I/O packages (`scanner`, `tui`, `cleaner`) are race-tested without the 90% floor.
 
-Architecture notes: see [AGENTS.md](./AGENTS.md). CI: [docs/CICD.md](./docs/CICD.md).
+Architecture notes: see [AGENTS.md](./AGENTS.md). CI: [`.github/workflows/`](./.github/workflows/).
 
 ## License
 
-Private / personal homelab use (see repo hosting).
+MIT — see [LICENSE](./LICENSE).
