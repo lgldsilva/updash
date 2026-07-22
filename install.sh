@@ -80,7 +80,6 @@ install_from_github_release() {
   local download_url="https://github.com/$GITHUB_REPO/releases/download/$version/$archive_name"
   local checksums_url="https://github.com/$GITHUB_REPO/releases/download/$version/checksums.txt"
 
-  local tmp_dir
   tmp_dir=$(mktemp -d)
   trap 'rm -rf "$tmp_dir"' EXIT
 
