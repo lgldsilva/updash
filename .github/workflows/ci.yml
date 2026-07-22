@@ -189,7 +189,7 @@ jobs:
       - name: Validate config
         run: goreleaser check --config goreleaser.github.yaml
       - name: Snapshot build
-        run: GOFLAGS=-mod=mod goreleaser release --snapshot --clean --config goreleaser.github.yaml --skip=publish
+        run: GOFLAGS=-mod=mod goreleaser release --snapshot --clean --config goreleaser.github.yaml --skip=publish --skip=docker
   ci-gate:
     name: PR gate
     runs-on: ubuntu-latest

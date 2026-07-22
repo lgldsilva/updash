@@ -272,7 +272,7 @@ func TestHttpGet_success(t *testing.T) {
 		if r.Header.Get("Authorization") != "token tok" {
 			t.Error("missing auth header")
 		}
-		fmt.Fprint(w, "ok")
+		_, _ = fmt.Fprint(w, "ok")
 	}))
 	defer srv.Close()
 
@@ -358,7 +358,7 @@ func TestTlsConfigFor_missingCA(t *testing.T) {
 
 func TestFetchLatestFromEndpoint(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		json.NewEncoder(w).Encode(map[string]string{"tag_name": "v1.5.0"})
+		_ = json.NewEncoder(w).Encode(map[string]string{"tag_name": "v1.5.0"})
 	}))
 	defer srv.Close()
 
@@ -370,7 +370,7 @@ func TestFetchLatestFromEndpoint(t *testing.T) {
 
 func TestFetchLatestFromEndpoint_noTag(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		json.NewEncoder(w).Encode(map[string]string{})
+		_ = json.NewEncoder(w).Encode(map[string]string{})
 	}))
 	defer srv.Close()
 
@@ -382,7 +382,7 @@ func TestFetchLatestFromEndpoint_noTag(t *testing.T) {
 
 func TestFetchLatestFromEndpoint_badJSON(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		fmt.Fprint(w, "not json")
+		_, _ = fmt.Fprint(w, "not json")
 	}))
 	defer srv.Close()
 
@@ -394,7 +394,7 @@ func TestFetchLatestFromEndpoint_badJSON(t *testing.T) {
 
 func TestFetchLatestFromList(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		json.NewEncoder(w).Encode([]map[string]interface{}{
+		_ = json.NewEncoder(w).Encode([]map[string]interface{}{
 			{"tag_name": "v1.0.0", "draft": false},
 			{"tag_name": "v2.0.0", "draft": false},
 			{"tag_name": "v1.5.0", "draft": true}, // draft — skipped
@@ -411,7 +411,7 @@ func TestFetchLatestFromList(t *testing.T) {
 
 func TestFetchLatestFromList_noReleases(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		json.NewEncoder(w).Encode([]map[string]interface{}{})
+		_ = json.NewEncoder(w).Encode([]map[string]interface{}{})
 	}))
 	defer srv.Close()
 
@@ -423,7 +423,7 @@ func TestFetchLatestFromList_noReleases(t *testing.T) {
 
 func TestFetchLatestFromList_badJSON(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		fmt.Fprint(w, "not json")
+		_, _ = fmt.Fprint(w, "not json")
 	}))
 	defer srv.Close()
 
@@ -439,7 +439,7 @@ func TestFetchLatestTag_fallbackToList(t *testing.T) {
 			w.WriteHeader(404) // no latest endpoint
 			return
 		}
-		json.NewEncoder(w).Encode([]map[string]interface{}{
+		_ = json.NewEncoder(w).Encode([]map[string]interface{}{
 			{"tag_name": "v3.0.0", "draft": false},
 		})
 	}))
@@ -474,7 +474,7 @@ func TestResolveTag_explicit(t *testing.T) {
 
 func TestCheck_updateAvailable(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		json.NewEncoder(w).Encode(map[string]string{"tag_name": "v2.0.0"})
+		_ = json.NewEncoder(w).Encode(map[string]string{"tag_name": "v2.0.0"})
 	}))
 	defer srv.Close()
 
@@ -490,7 +490,7 @@ func TestCheck_updateAvailable(t *testing.T) {
 
 func TestCheck_upToDate(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		json.NewEncoder(w).Encode(map[string]string{"tag_name": "v1.0.0"})
+		_ = json.NewEncoder(w).Encode(map[string]string{"tag_name": "v1.0.0"})
 	}))
 	defer srv.Close()
 
@@ -516,7 +516,7 @@ func TestCheck_error(t *testing.T) {
 
 func TestRun_checkOnly_upToDate(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		json.NewEncoder(w).Encode(map[string]string{"tag_name": "v1.0.0"})
+		_ = json.NewEncoder(w).Encode(map[string]string{"tag_name": "v1.0.0"})
 	}))
 	defer srv.Close()
 
@@ -528,7 +528,7 @@ func TestRun_checkOnly_upToDate(t *testing.T) {
 
 func TestRun_checkOnly_updateAvailable(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		json.NewEncoder(w).Encode(map[string]string{"tag_name": "v2.0.0"})
+		_ = json.NewEncoder(w).Encode(map[string]string{"tag_name": "v2.0.0"})
 	}))
 	defer srv.Close()
 
@@ -540,7 +540,7 @@ func TestRun_checkOnly_updateAvailable(t *testing.T) {
 
 func TestRun_alreadyUpToDate(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		json.NewEncoder(w).Encode(map[string]string{"tag_name": "v1.0.0"})
+		_ = json.NewEncoder(w).Encode(map[string]string{"tag_name": "v1.0.0"})
 	}))
 	defer srv.Close()
 
@@ -578,8 +578,8 @@ func makeTarGz(t *testing.T, files map[string][]byte) []byte {
 			t.Fatal(err)
 		}
 	}
-	tw.Close()
-	gw.Close()
+	_ = tw.Close()
+	_ = gw.Close()
 	return buf.Bytes()
 }
 
@@ -596,7 +596,7 @@ func makeZip(t *testing.T, files map[string][]byte) []byte {
 			t.Fatal(err)
 		}
 	}
-	zw.Close()
+	_ = zw.Close()
 	return buf.Bytes()
 }
 
@@ -611,10 +611,10 @@ func TestDownloadReleaseBinary_success(t *testing.T) {
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasSuffix(r.URL.Path, "checksums.txt") {
-			fmt.Fprint(w, checksum)
+			_, _ = fmt.Fprint(w, checksum)
 			return
 		}
-		w.Write(archive)
+		_, _ = w.Write(archive)
 	}))
 	defer srv.Close()
 
@@ -633,10 +633,10 @@ func TestDownloadReleaseBinary_checksumMismatch(t *testing.T) {
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasSuffix(r.URL.Path, "checksums.txt") {
-			fmt.Fprint(w, checksum)
+			_, _ = fmt.Fprint(w, checksum)
 			return
 		}
-		w.Write(archive)
+		_, _ = w.Write(archive)
 	}))
 	defer srv.Close()
 
@@ -665,7 +665,7 @@ func TestDownloadReleaseBinary_checksumDownloadFails(t *testing.T) {
 			w.WriteHeader(500)
 			return
 		}
-		w.Write(archive)
+		_, _ = w.Write(archive)
 	}))
 	defer srv.Close()
 
@@ -683,10 +683,10 @@ func TestDownloadReleaseBinary_zip(t *testing.T) {
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasSuffix(r.URL.Path, "checksums.txt") {
-			fmt.Fprint(w, checksum)
+			_, _ = fmt.Fprint(w, checksum)
 			return
 		}
-		w.Write(archive)
+		_, _ = w.Write(archive)
 	}))
 	defer srv.Close()
 
@@ -751,10 +751,10 @@ func TestPrintBanner(t *testing.T) {
 
 	PrintBanner(StartupResult{Current: "1.0.0", Latest: "v1.0.0", Note: "up to date"})
 
-	w.Close()
+	_ = w.Close()
 	os.Stdout = old
 	var buf bytes.Buffer
-	buf.ReadFrom(r)
+	_, _ = buf.ReadFrom(r)
 	out := buf.String()
 
 	if !strings.Contains(out, "up to date") {
@@ -769,10 +769,10 @@ func TestPrintBanner_updateAvailable(t *testing.T) {
 
 	PrintBanner(StartupResult{Current: "1.0.0", Latest: "v2.0.0", Note: "update available"})
 
-	w.Close()
+	_ = w.Close()
 	os.Stdout = old
 	var buf bytes.Buffer
-	buf.ReadFrom(r)
+	_, _ = buf.ReadFrom(r)
 	out := buf.String()
 
 	if !strings.Contains(out, "v2.0.0") || !strings.Contains(out, "--upgrade") {
@@ -787,10 +787,10 @@ func TestPrintBanner_upgradeFailed(t *testing.T) {
 
 	PrintBanner(StartupResult{Current: "1.0.0", Note: "upgrade failed"})
 
-	w.Close()
+	_ = w.Close()
 	os.Stdout = old
 	var buf bytes.Buffer
-	buf.ReadFrom(r)
+	_, _ = buf.ReadFrom(r)
 	out := buf.String()
 
 	if !strings.Contains(out, "upgrade failed") {
@@ -805,10 +805,10 @@ func TestPrintBanner_checkFailed(t *testing.T) {
 
 	PrintBanner(StartupResult{Current: "1.0.0", Note: "upgrade check failed"})
 
-	w.Close()
+	_ = w.Close()
 	os.Stdout = old
 	var buf bytes.Buffer
-	buf.ReadFrom(r)
+	_, _ = buf.ReadFrom(r)
 	out := buf.String()
 
 	if !strings.Contains(out, "skipped") {
@@ -836,7 +836,7 @@ func TestStartup_checkFailed(t *testing.T) {
 
 func TestStartup_upToDate(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		json.NewEncoder(w).Encode(map[string]string{"tag_name": "v1.0.0"})
+		_ = json.NewEncoder(w).Encode(map[string]string{"tag_name": "v1.0.0"})
 	}))
 	defer srv.Close()
 
@@ -852,7 +852,7 @@ func TestStartup_upToDate(t *testing.T) {
 
 func TestStartup_updateAvailable_noAuto(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		json.NewEncoder(w).Encode(map[string]string{"tag_name": "v2.0.0"})
+		_ = json.NewEncoder(w).Encode(map[string]string{"tag_name": "v2.0.0"})
 	}))
 	defer srv.Close()
 
@@ -876,10 +876,10 @@ func TestInstall_downloadOK(t *testing.T) {
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasSuffix(r.URL.Path, "checksums.txt") {
-			fmt.Fprint(w, checksum)
+			_, _ = fmt.Fprint(w, checksum)
 			return
 		}
-		w.Write(archive)
+		_, _ = w.Write(archive)
 	}))
 	defer srv.Close()
 
@@ -913,14 +913,14 @@ func TestRun_autoUpgrade_success(t *testing.T) {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/releases/latest", func(w http.ResponseWriter, _ *http.Request) {
-		json.NewEncoder(w).Encode(map[string]string{"tag_name": "v2.0.0"})
+		_ = json.NewEncoder(w).Encode(map[string]string{"tag_name": "v2.0.0"})
 	})
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasSuffix(r.URL.Path, "checksums.txt") {
-			fmt.Fprint(w, checksum)
+			_, _ = fmt.Fprint(w, checksum)
 			return
 		}
-		w.Write(archive)
+		_, _ = w.Write(archive)
 	})
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
@@ -953,8 +953,8 @@ func TestExtractFromTarGz_emptyArchive(t *testing.T) {
 	var buf bytes.Buffer
 	gw := gzip.NewWriter(&buf)
 	tw := tar.NewWriter(gw)
-	tw.Close()
-	gw.Close()
+	_ = tw.Close()
+	_ = gw.Close()
 
 	_, err := extractFromTarGz(buf.Bytes())
 	if err == nil || !strings.Contains(err.Error(), "no files") {
@@ -965,7 +965,7 @@ func TestExtractFromTarGz_emptyArchive(t *testing.T) {
 func TestExtractFromZip_emptyArchive(t *testing.T) {
 	var buf bytes.Buffer
 	zw := zip.NewWriter(&buf)
-	zw.Close()
+	_ = zw.Close()
 
 	_, err := extractFromZip(buf.Bytes())
 	if err == nil || !strings.Contains(err.Error(), "no files") {
@@ -1011,7 +1011,7 @@ func TestHttpGet_invalidURL(t *testing.T) {
 
 func TestHttpGet_cancelledContext(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		fmt.Fprint(w, "ok")
+		_, _ = fmt.Fprint(w, "ok")
 	}))
 	defer srv.Close()
 
@@ -1057,14 +1057,14 @@ func TestStartup_autoUpgrade_success(t *testing.T) {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/releases/latest", func(w http.ResponseWriter, _ *http.Request) {
-		json.NewEncoder(w).Encode(map[string]string{"tag_name": "v2.0.0"})
+		_ = json.NewEncoder(w).Encode(map[string]string{"tag_name": "v2.0.0"})
 	})
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasSuffix(r.URL.Path, "checksums.txt") {
-			fmt.Fprint(w, checksum)
+			_, _ = fmt.Fprint(w, checksum)
 			return
 		}
-		w.Write(archive)
+		_, _ = w.Write(archive)
 	})
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
