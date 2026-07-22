@@ -8,6 +8,9 @@ LDFLAGS := -X main.version=$(VERSION)
 
 # ── Primary ────────────────────────────────────────────────────────────────
 
+# Coverage gate packages (≥90%) — keep in sync with .ai-standards.env and ci.yml
+COVER_PKGS=./internal/model/... ./internal/config/... ./internal/sizefmt/... ./internal/cli/... ./internal/retention/... ./internal/upgrade/...
+
 all: build test lint fmt
 
 build:
@@ -19,8 +22,14 @@ build-release:
 test: test-race
 
 test-race:
-	go test -race -shuffle=on -count=1 -coverprofile=coverage.out ./...
+	go test -race -shuffle=on -count=1 ./...
+
+test-gate:
+	go test -race -shuffle=on -count=1 -coverprofile=coverage.out $(COVER_PKGS)
 	@go tool cover -func=coverage.out | tail -1
+
+coverage: test-gate
+	@go tool cover -func=coverage.out
 
 test-short:
 	go test -race -shuffle=on -short -count=1 ./...
@@ -72,6 +81,8 @@ help:
 	@echo "  make all          Build, test, and lint (default)"
 	@echo "  make build        Compile all packages"
 	@echo "  make test         Run all tests with race detector"
+	@echo "  make test-gate    Run gate packages with coverage (≥90%)"
+	@echo "  make coverage     Show full coverage report"
 	@echo "  make lint         Run golangci-lint"
 	@echo ""
 	@echo "Quality gates:"

@@ -79,8 +79,6 @@ jobs:
         run: |
           set -eu
           go install github.com/CycloneDX/cyclonedx-gomod/cmd/cyclonedx-gomod@${{ env.CYCLODEX_VERSION }}
-          # `cyclonedx-gomod mod` takes a single MODULE_PATH, not a glob.
-          # For a single-module repo, the module root is the current dir.
           cyclonedx-gomod mod -json -output bom.json .
           test -s bom.json
       - name: Upload SBOM artifact
@@ -92,37 +90,91 @@ jobs:
   release-artifacts:
     name: GoReleaser
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     needs: [build-test, sbom]
+    outputs:
+      artifacts-sha256: ${{ steps.hash.outputs.subjects }}
     permissions:
       contents: write
+      packages: write
+      id-token: write
+      attestations: write
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+
       - uses: actions/setup-go@v5
         with:
           go-version: ${{ env.GO_VERSION }}
           cache: true
+
+      # Multi-arch Docker support
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Install goreleaser
         run: go install github.com/goreleaser/goreleaser/v2@${{ env.GORELEASER_VERSION }}
+
       - name: Download SBOM
         uses: actions/download-artifact@v4
         with:
           name: sbom
+
       - name: Clean up SBOM before GoReleaser
         run: rm -f bom.json
+
       - name: Run GoReleaser
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          SCOOP_BUCKET_TOKEN: ${{ secrets.SCOOP_BUCKET_TOKEN }}
         run: goreleaser release --clean --config goreleaser.github.yaml
+
       - name: Re-download SBOM for release attachment
         uses: actions/download-artifact@v4
         with:
           name: sbom
+
       - name: Attach SBOM to release
         uses: softprops/action-gh-release@v2
         with:
           files: bom.json
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # Compute SHA-256 subjects for SLSA provenance
+      - name: Compute artifact hashes
+        id: hash
+        run: |
+          set -eu
+          cd dist
+          subjects=""
+          for f in *.tar.gz *.zip *.deb *.rpm *.apk; do
+            [ -f "$f" ] || continue
+            h=$(sha256sum "$f" | awk '{print $1}')
+            subjects="${subjects}${h}  ${f}\n"
+          done
+          echo "subjects=$(printf '%b' "$subjects" | base64 -w0)" >> "$GITHUB_OUTPUT"
+
+  # ── SLSA provenance (build L3) ──────────────────────────────────────────
+  provenance:
+    name: SLSA provenance
+    needs: [release-artifacts, resolve-tag]
+    permissions:
+      actions: read
+      id-token: write
+      contents: write
+    uses: slsa-framework/slsa-github-generator/.github/workflows/generator_generic_slsa3.yml@v2.1.0
+    with:
+      base64-subjects: "${{ needs.release-artifacts.outputs.artifacts-sha256 }}"
+      upload-assets: true
+      upload-tag-name: "${{ needs.resolve-tag.outputs.tag }}"

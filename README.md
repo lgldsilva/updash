@@ -10,15 +10,59 @@ updash --all        # update + clean
 
 ## Install
 
-```sh
-# From source (this repo)
-make install        # → $HOME/.local/bin/updash
+### Homebrew (macOS / Linux)
 
-# Dev self-update
-updash --update-self
+```sh
+brew install lgldsilva/tap/updash
 ```
 
-Release binaries: GitHub `github.com/lgldsilva/updash` (`updash --upgrade`).
+### Scoop (Windows)
+
+```sh
+scoop bucket add lgldsilva https://github.com/lgldsilva/scoop-bucket
+scoop install updash
+```
+
+### Linux packages (.deb / .rpm / .apk)
+
+Download from [GitHub Releases](https://github.com/lgldsilva/updash/releases):
+
+```sh
+# Debian / Ubuntu
+sudo dpkg -i updash_*_linux_amd64.deb
+
+# RHEL / Fedora
+sudo rpm -i updash_*_linux_amd64.rpm
+
+# Alpine
+sudo apk add --allow-untrusted updash_*_linux_amd64.apk
+```
+
+### Docker
+
+```sh
+docker run --rm ghcr.io/lgldsilva/updash:latest --check
+```
+
+### From source
+
+```sh
+go install github.com/lgldsilva/updash/cmd/updash@latest
+# or
+make install        # → $HOME/.local/bin/updash
+```
+
+### Prebuilt binary (curl)
+
+```sh
+./install.sh binary   # downloads latest release with SHA-256 verification
+```
+
+### Self-update
+
+```sh
+updash --upgrade      # download + verify + replace binary in-place
+```
 
 ## CLI
 
@@ -86,12 +130,13 @@ updash --clean --only docker
 
 ```sh
 make build
-make test          # race + coverage on gate packages
-./scripts/validate.sh
+make test          # race tests on all packages
+make test-gate     # race + coverage on gate packages (≥90%)
+make coverage      # full coverage report
 ```
 
-Coverage gate packages (`≥90%`): `internal/model`, `config`, `sizefmt`, `cli`, `retention`.  
-I/O packages (`scanner`, `tui`, `cleaner`) are race-tested without the 90% floor.
+Coverage gate packages (`≥90%`): `model`, `config`, `sizefmt`, `cli`, `retention`, `upgrade`.
+I/O packages (`scanner`, `tui`, `cleaner`, `updater`, `elevate`, `platform`) are race-tested without the 90% floor.
 
 Architecture notes: see [AGENTS.md](./AGENTS.md). CI: [`.github/workflows/`](./.github/workflows/).
 

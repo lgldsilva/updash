@@ -4,6 +4,13 @@
 # tar.gz (zip on Windows) with LICENSE + README, emits SHA-256 checksums and a
 # grouped changelog, and publishes a GitHub release.
 #
+# Distribution channels:
+#   - GitHub Releases (archives + checksums + SBOM)
+#   - Homebrew tap  → lgldsilva/homebrew-tap
+#   - Scoop bucket  → lgldsilva/scoop-bucket
+#   - Linux packages → .deb / .rpm / .apk
+#   - Docker image  → ghcr.io/lgldsilva/updash
+#
 # Validate locally without publishing:
 #   goreleaser check --config goreleaser.github.yaml
 #   goreleaser release --snapshot --clean --config goreleaser.github.yaml
@@ -73,3 +80,63 @@ release:
     name: updash
   draft: false
   prerelease: auto
+
+# ── Homebrew ──────────────────────────────────────────────────────────────
+brews:
+  - name: updash
+    repository:
+      owner: lgldsilva
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+    directory: Formula
+    homepage: "https://github.com/lgldsilva/updash"
+    description: "System Update Dashboard — one binary for package updates, AI tools, and smart cleanup"
+    license: MIT
+    install: |
+      bin.install "updash"
+    test: |
+      system "#{bin}/updash", "--version"
+
+# ── Scoop (Windows) ──────────────────────────────────────────────────────
+scoops:
+  - name: updash
+    repository:
+      owner: lgldsilva
+      name: scoop-bucket
+      token: "{{ .Env.SCOOP_BUCKET_TOKEN }}"
+    homepage: "https://github.com/lgldsilva/updash"
+    description: "System Update Dashboard — one binary for package updates, AI tools, and smart cleanup"
+    license: MIT
+
+# ── Linux packages ───────────────────────────────────────────────────────
+nfpms:
+  - id: updash-packages
+    package_name: updash
+    vendor: lgldsilva
+    homepage: "https://github.com/lgldsilva/updash"
+    maintainer: "Luiz Silva <lgldsilva@users.noreply.github.com>"
+    description: >-
+      System Update Dashboard for macOS, Linux, and Windows —
+      one binary for package updates, AI tools, and smart cleanup.
+    license: MIT
+    formats: [deb, rpm, apk]
+    bindir: /usr/bin
+    contents:
+      - src: LICENSE
+        dst: /usr/share/licenses/updash/LICENSE
+      - src: README.md
+        dst: /usr/share/doc/updash/README.md
+
+# ── Docker (GHCR) ────────────────────────────────────────────────────────
+dockers_v2:
+  - images:
+      - "ghcr.io/lgldsilva/updash:{{ .Version }}"
+      - "ghcr.io/lgldsilva/updash:latest"
+    dockerfile: Dockerfile.goreleaser
+    platforms:
+      - linux/amd64
+      - linux/arm64
+    labels:
+      "org.opencontainers.image.version": "{{ .Version }}"
+      "org.opencontainers.image.revision": "{{ .FullCommit }}"
+      "org.opencontainers.image.source": "https://github.com/lgldsilva/updash"
