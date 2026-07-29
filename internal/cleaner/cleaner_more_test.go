@@ -111,10 +111,11 @@ func TestCleanSDKMAN_RemovesOlderVersion(t *testing.T) {
 	r := cleanSDKMAN(context.Background(), item, SilentOptions())
 	if r == nil {
 		t.Fatal("nil result")
-	}
-	// sdk uninstall may fail without SDKMAN installed; still exercises removal path
-	if r.Output == "" && r.Error == "" {
-		t.Fatal("expected some output or error")
+	} else {
+		// sdk uninstall may fail without SDKMAN installed; still exercises removal path
+		if r.Output == "" && r.Error == "" {
+			t.Fatal("expected some output or error")
+		}
 	}
 }
 

@@ -12,15 +12,16 @@ func TestNew(t *testing.T) {
 	s := New()
 	if s == nil {
 		t.Fatal("New() returned nil")
-	}
-	if s.Platform.OS == "" {
-		t.Error("Platform.OS must be set")
-	}
-	if s.ActiveTab != model.TabUpdates {
-		t.Errorf("ActiveTab = %v, want TabUpdates", s.ActiveTab)
-	}
-	if s.Ctx == nil {
-		t.Error("Ctx must not be nil")
+	} else {
+		if s.Platform.OS == "" {
+			t.Error("Platform.OS must be set")
+		}
+		if s.ActiveTab != model.TabUpdates {
+			t.Errorf("ActiveTab = %v, want TabUpdates", s.ActiveTab)
+		}
+		if s.Ctx == nil {
+			t.Error("Ctx must not be nil")
+		}
 	}
 }
 
