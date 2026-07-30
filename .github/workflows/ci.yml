@@ -206,3 +206,22 @@ jobs:
           r="${{ needs.test.result }}"
           echo "test: $r"
           [ "$r" = "success" ]
+
+  dispatch-autotag:
+    name: Dispatch release tagging
+    runs-on: ubuntu-latest
+    needs: [test, lint, security-govulncheck, secrets-scan, security-gosec, security-trivy-fs, package]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    permissions:
+      actions: write
+      contents: read
+    steps:
+      - name: Dispatch Auto-tag for the tested commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -eu
+          gh workflow run autotag.yml \
+            --repo "$GITHUB_REPOSITORY" \
+            --ref main \
+            -f tested_sha="$GITHUB_SHA"
