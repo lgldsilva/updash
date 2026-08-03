@@ -56,28 +56,77 @@ const (
 	agentUpdateManual
 )
 
+// agentDef is the single data-driven description of one AI coding assistant:
+// how to probe its version, how to learn the latest release, and how to
+// upgrade it. Adding an agent = adding one entry here (no updater changes).
 type agentDef struct {
 	name       string
 	binary     string
 	verCmd     []string
 	mode       agentUpdateMode
-	npmPackage string // optional: match against `npm outdated -g`
+	keepPolicy string   // manual-mode reason shown to the user ("" = policyManual)
+	npmPackage string   // npm package name: drives registry latest lookup + npm-based update
+	updateCmd  []string // explicit upgrade command (required for auto mode without npmPackage)
+	latestCmd  []string // optional: command whose stdout holds the latest version
 }
 
 func agentCatalog() []agentDef {
 	return []agentDef{
-		{"Claude Code", "claude", []string{"claude", flagVersion}, agentUpdateAuto, "@anthropic-ai/claude-code"},
-		{"OpenCode", "opencode", []string{"opencode", flagVersion}, agentUpdateAuto, ""},
-		{"Grok", "grok", []string{"grok", flagVersion}, agentUpdateAuto, ""},
-		{"Antigravity", "antigravity", []string{"antigravity", flagVersion}, agentUpdateManual, ""},
-		{"Agy", "agy", []string{"agy", flagVersion}, agentUpdateManual, ""},
-		{"MimoCode", "mimo", []string{"mimo", flagVersion}, agentUpdateManual, ""},
-		{"Codex", "codex", []string{"codex", flagVersion}, agentUpdateAuto, "@openai/codex"},
-		{"Gemini CLI", "gemini", []string{"gemini", flagVersion}, agentUpdateAuto, "@google/gemini-cli"},
-		{"Copilot CLI", "copilot", []string{"copilot", flagVersion}, agentUpdateAuto, ""},
-		{"Crush", "crush", []string{"crush", flagVersion}, agentUpdateManual, ""},
-		{"Cursor", "cursor", []string{"cursor", flagVersion}, agentUpdateManual, ""},
+		{name: "Claude Code", binary: "claude", verCmd: []string{"claude", flagVersion}, mode: agentUpdateAuto, npmPackage: "@anthropic-ai/claude-code", updateCmd: []string{"claude", "update"}},
+		{name: "OpenCode", binary: "opencode", verCmd: []string{"opencode", flagVersion}, mode: agentUpdateAuto, updateCmd: []string{"opencode", "upgrade"}},
+		{name: "Grok", binary: "grok", verCmd: []string{"grok", flagVersion}, mode: agentUpdateAuto, updateCmd: []string{"grok", "update"}},
+		{name: "Antigravity", binary: "antigravity", verCmd: []string{"antigravity", flagVersion}, mode: agentUpdateManual},
+		{name: "Agy", binary: "agy", verCmd: []string{"agy", flagVersion}, mode: agentUpdateManual},
+		{name: "MimoCode", binary: "mimo", verCmd: []string{"mimo", flagVersion}, mode: agentUpdateManual},
+		{name: "Codex", binary: "codex", verCmd: []string{"codex", flagVersion}, mode: agentUpdateAuto, npmPackage: "@openai/codex", updateCmd: []string{"npm", "install", "-g", "@openai/codex@latest"}},
+		{name: "Gemini CLI", binary: "gemini", verCmd: []string{"gemini", flagVersion}, mode: agentUpdateAuto, npmPackage: "@google/gemini-cli", updateCmd: []string{"gemini", "update"}},
+		{name: "Copilot CLI", binary: "copilot", verCmd: []string{"copilot", flagVersion}, mode: agentUpdateAuto, updateCmd: []string{"copilot", "update"}},
+		{name: "Crush", binary: "crush", verCmd: []string{"crush", flagVersion}, mode: agentUpdateManual},
+		{name: "Cursor", binary: "cursor", verCmd: []string{"cursor", flagVersion}, mode: agentUpdateManual},
+		{name: "pi", binary: "pi", verCmd: []string{"pi", flagVersion}, mode: agentUpdateAuto, npmPackage: "@earendil-works/pi-coding-agent", updateCmd: []string{"npm", "install", "-g", "@earendil-works/pi-coding-agent@latest"}},
+		{name: "Qwen Code", binary: "qwen", verCmd: []string{"qwen", flagVersion}, mode: agentUpdateAuto, npmPackage: "@qwen-code/qwen-code", updateCmd: []string{"npm", "install", "-g", "@qwen-code/qwen-code@latest"}},
+		{name: "Aider", binary: "aider", verCmd: []string{"aider", flagVersion}, mode: agentUpdateManual, keepPolicy: "pipx upgrade aider (or pip install -U aider)"},
+		{name: "Amazon Q", binary: "q", verCmd: []string{"q", flagVersion}, mode: agentUpdateManual, keepPolicy: "q doctor / installer re-run"},
+		{name: "Windsurf", binary: "windsurf", verCmd: []string{"windsurf", flagVersion}, mode: agentUpdateManual},
 	}
+}
+
+// lookupAgentDef returns the catalog entry matching an item name.
+func lookupAgentDef(name string) (agentDef, bool) {
+	for _, a := range agentCatalog() {
+		if a.name == name {
+			return a, true
+		}
+	}
+	return agentDef{}, false
+}
+
+// AgentUpdateCommand returns the upgrade command for an auto-update agent
+// (nil for manual/unknown agents). Data-driven: mirrors agentCatalog.
+func AgentUpdateCommand(name string) []string {
+	a, ok := lookupAgentDef(name)
+	if !ok || a.mode != agentUpdateAuto {
+		return nil
+	}
+	if len(a.updateCmd) > 0 {
+		return a.updateCmd
+	}
+	if a.npmPackage != "" {
+		return []string{"npm", "install", "-g", a.npmPackage + "@latest"}
+	}
+	return nil
+}
+
+// AgentKeepPolicy returns the manual-mode reason for an agent ("" = auto).
+func AgentKeepPolicy(name string) string {
+	a, ok := lookupAgentDef(name)
+	if !ok || a.mode != agentUpdateManual {
+		return ""
+	}
+	if a.keepPolicy != "" {
+		return a.keepPolicy
+	}
+	return policyManual
 }
 
 func (s *AgentSource) Scan(ctx context.Context, plat model.PlatformInfo) ([]*model.Item, error) {
@@ -96,6 +145,7 @@ func (s *AgentSource) Scan(ctx context.Context, plat model.PlatformInfo) ([]*mod
 	}
 	if plat.HasNpm {
 		applyNpmOutdatedToAgents(ctx, items, catalog)
+		resolveRegistryLatest(ctx, items, catalog)
 	}
 	return items, nil
 }
@@ -110,7 +160,11 @@ func probeAgentItem(ctx context.Context, plat model.PlatformInfo, a agentDef) *m
 		it.PackageID = a.npmPackage
 	}
 	if a.mode == agentUpdateManual {
-		it.KeepPolicy = policyManual
+		if a.keepPolicy != "" {
+			it.KeepPolicy = a.keepPolicy
+		} else {
+			it.KeepPolicy = policyManual
+		}
 	}
 	if len(a.verCmd) == 0 {
 		return it
@@ -121,6 +175,16 @@ func probeAgentItem(ctx context.Context, plat model.PlatformInfo, a agentDef) *m
 	}
 	it.CurrentVer = probeAgentVersion(ctx, a.verCmd)
 	return it
+}
+
+// npmInstalledPackages lists globally npm-installed package names (depth 0).
+func npmInstalledPackages(ctx context.Context) map[string]bool {
+	out, err := execCombined(ctx, "npm", "ls", "-g", "--json", "--depth=0")
+	installed := ParseNpmLsGlobal(out)
+	if err != nil && len(installed) == 0 {
+		return nil
+	}
+	return installed
 }
 
 func applyNpmOutdatedToAgents(ctx context.Context, items []*model.Item, catalog []agentDef) {
@@ -150,6 +214,49 @@ func applyNpmOutdatedToAgents(ctx context.Context, items []*model.Item, catalog 
 			ApplyAgentOutdated(it, latest)
 		}
 	}
+}
+
+// resolveRegistryLatest flags agents whose npm package is NOT installed via
+// global npm (native installer, brew, pnpm/bun store) by asking the registry
+// for the latest version. Agents already handled by `npm outdated -g` or
+// without an npmPackage are skipped.
+func resolveRegistryLatest(ctx context.Context, items []*model.Item, catalog []agentDef) {
+	installed := npmInstalledPackages(ctx)
+	defByName := make(map[string]agentDef, len(catalog))
+	for _, a := range catalog {
+		defByName[a.name] = a
+	}
+	for _, it := range items {
+		if it.Status == model.StatusOutdated {
+			continue // already flagged by the npm-outdated merge
+		}
+		a, ok := defByName[it.Name]
+		if !ok || a.npmPackage == "" || installed[a.npmPackage] {
+			continue
+		}
+		latest := registryLatest(ctx, a)
+		if latest != "" {
+			ApplyAgentOutdated(it, latest)
+		}
+	}
+}
+
+// registryLatest returns the newest published version of the agent's npm
+// package: an explicit latestCmd wins, otherwise `npm view <pkg> version`
+// (which honours the user's .npmrc registry/proxy).
+func registryLatest(ctx context.Context, a agentDef) string {
+	if len(a.latestCmd) > 0 {
+		out, err := execCommandBudget(ctx, agentProbeTimeout, a.latestCmd[0], a.latestCmd[1:]...)
+		if err == nil {
+			return parseAgentVersion(string(out))
+		}
+		return ""
+	}
+	out, err := execCommandBudget(ctx, agentProbeTimeout, "npm", "view", a.npmPackage, "version")
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
 }
 
 // ApplyAgentOutdated marks an agent item outdated when latest differs from current.
@@ -204,7 +311,7 @@ func agentSkipVersionProbe(plat model.PlatformInfo, binary string) bool {
 		return false
 	}
 	switch binary {
-	case "antigravity", "cursor":
+	case "antigravity", "cursor", "windsurf":
 		return true
 	default:
 		return false
@@ -219,18 +326,33 @@ func (s *AIInfraSource) Label() string            { return "AI Infra" }
 func (s *AIInfraSource) Icon() string             { return "⚙️" }
 
 type infraTool struct {
-	name     string
-	binary   string
-	category model.Category
-	verCmd   []string
+	name      string
+	binary    string
+	category  model.Category
+	verCmd    []string
+	latestCmd []string // optional freshness probe (see infraLatestMode)
+	latest    infraLatestMode
 }
+
+// infraLatestMode describes how to interpret a latestCmd's output.
+type infraLatestMode int
+
+const (
+	infraLatestNone     infraLatestMode = iota // informational only
+	infraLatestNonEmpty                        // any output = update available
+	infraLatestSemidx                          // "latest: vX" + "update is available"
+	infraLatestGhExt                           // gh extension list update-marker column
+)
 
 func aiInfraCatalog() []infraTool {
 	return []infraTool{
-		{toolAIMemory, toolAIMemory, model.CatAI, []string{toolAIMemory, "version"}},
-		{"semidx", "semidx", model.CatAI, []string{"semidx", "version"}},
-		{"Gh Extensions", "gh", model.CatGHExt, []string{"gh", "extension", "list"}},
-		{"gcloud", "gcloud", model.CatAI, []string{"gcloud", "version", "--format=json"}},
+		{name: toolAIMemory, binary: toolAIMemory, category: model.CatAI, verCmd: []string{toolAIMemory, "--version"}},
+		{name: "semidx", binary: "semidx", category: model.CatAI, verCmd: []string{"semidx", "--version"},
+			latestCmd: []string{"semidx", "upgrade", "--check"}, latest: infraLatestSemidx},
+		{name: "Gh Extensions", binary: "gh", category: model.CatGHExt, verCmd: []string{"gh", "extension", "list"},
+			latestCmd: []string{"gh", "extension", "list"}, latest: infraLatestGhExt},
+		{name: "gcloud", binary: "gcloud", category: model.CatAI, verCmd: []string{"gcloud", "version", "--format=json"},
+			latestCmd: []string{"gcloud", "components", "list", "--only-filter-updates-available", "--format=value(id)"}, latest: infraLatestNonEmpty},
 	}
 }
 
@@ -252,15 +374,78 @@ func (s *AIInfraSource) Scan(ctx context.Context, plat model.PlatformInfo) ([]*m
 
 func probeInfraItem(ctx context.Context, t infraTool) *model.Item {
 	it := &model.Item{Name: t.name, Category: t.category, Status: model.StatusOK}
-	if len(t.verCmd) == 0 {
-		return it
+	if len(t.verCmd) > 0 {
+		out, err := execCommandBudget(ctx, agentProbeTimeout, t.verCmd[0], t.verCmd[1:]...)
+		if err == nil {
+			it.CurrentVer = truncateVersionOutput(string(out))
+		}
+		// A failed version probe must not skip the freshness check below.
 	}
-	out, err := execCommandBudget(ctx, agentProbeTimeout, t.verCmd[0], t.verCmd[1:]...)
-	if err != nil {
-		return it
+	if len(t.latestCmd) > 0 {
+		applyInfraLatest(ctx, it, t)
 	}
-	it.CurrentVer = truncateVersionOutput(string(out))
 	return it
+}
+
+// applyInfraLatest runs the freshness probe and flags the item outdated.
+func applyInfraLatest(ctx context.Context, it *model.Item, t infraTool) {
+	out, err := execCommandBudget(ctx, infraLatestTimeout, t.latestCmd[0], t.latestCmd[1:]...)
+	if err != nil && len(out) == 0 {
+		return // probe unavailable — stay informational
+	}
+	latest, hasUpdate := parseInfraLatest(t.latest, string(out))
+	if !hasUpdate {
+		return
+	}
+	it.Status = model.StatusOutdated
+	if latest != "" {
+		it.AvailableVer = latest
+	}
+}
+
+// InfraUpdateCommand returns the upgrade command for an AI-infra tool
+// (nil = no auto-update). Data-driven counterpart of aiInfraCatalog.
+func InfraUpdateCommand(name string) []string {
+	switch name {
+	case toolAIMemory:
+		return []string{toolAIMemory, "upgrade"}
+	case "semidx":
+		return []string{"semidx", "upgrade"}
+	case "gcloud":
+		return []string{"gcloud", "components", "update", "--quiet"}
+	default:
+		return nil
+	}
+}
+
+// parseInfraLatest interprets a latestCmd output per mode.
+func parseInfraLatest(mode infraLatestMode, out string) (string, bool) {
+	switch mode {
+	case infraLatestNonEmpty:
+		return "", strings.TrimSpace(out) != ""
+	case infraLatestSemidx:
+		if !strings.Contains(out, "update is available") {
+			return "", false
+		}
+		for _, line := range strings.Split(out, "\n") {
+			line = strings.TrimSpace(line)
+			if strings.HasPrefix(line, "latest:") {
+				return strings.TrimSpace(strings.TrimPrefix(line, "latest:")), true
+			}
+		}
+		return "", true
+	case infraLatestGhExt:
+		// Newer gh adds an "Update available" column; older ones have none.
+		for _, line := range strings.Split(out, "\n") {
+			fields := strings.Fields(line)
+			if len(fields) >= 4 && strings.Contains(strings.Join(fields[3:], " "), "Update") {
+				return "", true
+			}
+		}
+		return "", false
+	default:
+		return "", false
+	}
 }
 
 func truncateVersionOutput(v string) string {

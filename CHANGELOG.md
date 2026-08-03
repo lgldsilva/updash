@@ -6,6 +6,25 @@ Format follows [Keep a Changelog](https://keepachangelog.com/); versions follow 
 ## [Unreleased]
 
 ### Added
+- Linux system scanners: dnf/yum (Fedora/RHEL), zypper (openSUSE), apk (Alpine) — scan + sudo-aware update
+- pnpm and bun global-store scanners with update support
+- Agent catalog entries: pi, Qwen Code, Aider, Amazon Q, Windsurf
+- Registry-based latest lookup for agents (`npm view`) — native/brew/pnpm/bun installs now get flagged outdated
+- AI infra outdated detection: semidx (`upgrade --check`), gh extension update marker, gcloud components
+- Data-driven agent/infra catalogs: `AgentUpdateCommand`/`InfraUpdateCommand` replace substring dispatch
+- CI cross-build job (darwin/windows/linux × amd64/arm64) in the PR gate; `validate.sh` cross-build gate
+
+### Changed
+- Agent update dispatch is catalog-driven (no more `strings.Contains`); manual agents keep explicit notes (Aider → pipx, Amazon Q → doctor)
+- nvm/omz/SDKMAN updates degrade to a manual note when bash is missing (bare Windows hosts); nvm scan understands nvm-windows paths
+
+### Fixed
+- nvm detection on Windows no longer points the updater at unix-only `nvm.sh`
+- Startup banner prints to stderr; headless modes (`--check`, `--update`, `--clean`, `--all`) skip startup auto-upgrade and banner entirely so `--check --json` output stays machine-parseable and cron runs never self-replace mid-run
+
+## [0.6.1] - 2026-07-18
+
+### Added
 - Homebrew tap (`brew install lgldsilva/tap/updash`)
 - Scoop bucket (`scoop install updash`)
 - Linux packages: `.deb`, `.rpm`, `.apk` via GoReleaser nfpms
@@ -13,10 +32,6 @@ Format follows [Keep a Changelog](https://keepachangelog.com/); versions follow 
 - SLSA L3 provenance attestation on release artifacts
 - Coverage gate (≥90%) expanded to `upgrade`, `updater`, `elevate` packages
 - `make test-gate` and `make coverage` targets
-
-## [0.6.1] - 2026-07-18
-
-### Added
 - Docker builder prune mode `age|all` + safe self-upgrade extract
 - OpenCode plugins scanning, homelab retention cleanup, agent updates, `--json` output
 - Build version banner on startup with auto-upgrade from release

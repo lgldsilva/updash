@@ -31,12 +31,16 @@ echo ""
 # ── 8 required gates ──────────────────────────────────────────────────────
 
 step "Build"           go build ./...
+# Platform-specific files (*_darwin.go, Windows paths) are otherwise never
+# compiled on a Linux dev box — mirror the CI cross-build job.
+step "Cross-build"     bash -c 'for t in darwin/amd64 darwin/arm64 windows/amd64 windows/arm64 linux/arm64; do GOOS=${t%/*} GOARCH=${t#*/} go build ./... || exit 1; done'
 step "Format"          bash -c 'gofmt -l . | test ! -s /dev/stdin'
 step "Vet"             go vet ./...
 # I/O packages: race-tested, not folded into the 90% gate (see .github/workflows/ci.yml).
 step "Tests I/O (race)" go test -race -count=1 \
                          ./internal/scanner/... ./internal/tui/... \
-                         ./internal/cleaner/... 2>&1 | tail -1
+                         ./internal/cleaner/... ./internal/updater/... \
+                         ./internal/elevate/... ./internal/platform/... 2>&1 | tail -1
 step "Tests gate+cover" go test -race -count=1 -coverprofile=/tmp/updash-cov.out \
                          ./internal/model/... ./internal/config/... \
                          ./internal/sizefmt/... ./internal/cli/... \

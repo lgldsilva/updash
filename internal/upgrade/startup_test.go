@@ -25,7 +25,12 @@ func TestModeSkipsStartupUpgrade(t *testing.T) {
 	if !ModeSkipsStartupUpgrade("env-defaults") {
 		t.Fatal("env-defaults mode should skip")
 	}
-	if ModeSkipsStartupUpgrade("check") {
-		t.Fatal("check mode should not skip")
+	if ModeSkipsStartupUpgrade("tui") {
+		t.Fatal("tui mode should not skip")
+	}
+	for _, m := range []string{"check", "update", "clean", "all"} {
+		if !ModeSkipsStartupUpgrade(m) {
+			t.Fatalf("headless mode %q must skip startup upgrade (automation output stays parseable)", m)
+		}
 	}
 }
