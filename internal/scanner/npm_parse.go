@@ -37,6 +37,26 @@ func ParseNpmOutdatedJSON(out []byte, cat model.Category) []*model.Item {
 	return items
 }
 
+// npmLsGlobal is the shape of `npm ls -g --json --depth=0`.
+type npmLsGlobal struct {
+	Dependencies map[string]struct {
+		Version string `json:"version"`
+	} `json:"dependencies"`
+}
+
+// ParseNpmLsGlobal returns the set of globally installed npm package names.
+func ParseNpmLsGlobal(out []byte) map[string]bool {
+	var data npmLsGlobal
+	if err := json.Unmarshal(out, &data); err != nil || len(data.Dependencies) == 0 {
+		return nil
+	}
+	m := make(map[string]bool, len(data.Dependencies))
+	for name := range data.Dependencies {
+		m[name] = true
+	}
+	return m
+}
+
 // ParseNpmOutdatedMap returns package name → latest version from npm outdated JSON.
 func ParseNpmOutdatedMap(out []byte) map[string]string {
 	var data map[string]npmOutdatedEntry

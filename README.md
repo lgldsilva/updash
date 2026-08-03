@@ -90,7 +90,9 @@ updash --check --json --strict
 
 ## What it covers
 
-**Updates:** Homebrew, MAS, apt, pacman/yay, flatpak, snap, winget, chocolatey, scoop, npm (global), OpenCode plugins (`~/.config/opencode`), pipx, Go (`gup`), rustup/cargo, SDKMAN (cleanup), nvm/omz (presence), Docker disk summary, AI agents (Claude, OpenCode, Grok, Codex, Gemini, …), AI infra (ai-memory, semidx, gh extensions, gcloud).
+**Updates:** Homebrew, MAS, apt, dnf/yum, zypper, pacman/yay, flatpak, snap, winget, chocolatey, scoop, npm (global), pnpm (global), bun (global), OpenCode plugins (`~/.config/opencode`), pipx, Go (`gup`), rustup/cargo, SDKMAN (cleanup), nvm/omz (presence), Docker disk summary, AI agents (Claude, OpenCode, Grok, Codex, Gemini, pi, Qwen, …), AI infra (ai-memory, semidx, gh extensions, gcloud).
+
+Agent outdated detection merges `npm outdated -g` with a direct npm-registry latest lookup, so agents installed via native installer, Homebrew, pnpm or bun are flagged too.
 
 **Cleanup:** brew/apt/go/npm/snap caches, Docker prune (age-filtered images/containers; builder mode configurable), SDKMAN old majors, Antigravity/VS Code extension dupes, Windows TEMP, **homelab retention** (maven/gradle caches, AI tool outputs, host logs, container log truncate, disk-pressure prune).
 

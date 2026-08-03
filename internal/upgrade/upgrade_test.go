@@ -233,14 +233,19 @@ func TestNormalizeVersion(t *testing.T) {
 }
 
 func TestModeShowsStartupBanner(t *testing.T) {
-	if !ModeShowsStartupBanner("check") {
-		t.Fatal("check should show banner")
+	if !ModeShowsStartupBanner("tui") {
+		t.Fatal("tui should show banner")
 	}
 	if !ModeShowsStartupBanner("version") {
 		t.Fatal("version should show banner")
 	}
 	if ModeShowsStartupBanner("upgrade") {
 		t.Fatal("upgrade should not show banner")
+	}
+	for _, m := range []string{"check", "update", "clean", "all"} {
+		if ModeShowsStartupBanner(m) {
+			t.Fatalf("headless mode %q must not show banner", m)
+		}
 	}
 }
 
@@ -744,15 +749,15 @@ func TestReplaceRunningBinary(t *testing.T) {
 // ── PrintBanner ───────────────────────────────────────────────────────────
 
 func TestPrintBanner(t *testing.T) {
-	// Capture stdout
-	old := os.Stdout
+	// Capture stderr
+	old := os.Stderr
 	r, w, _ := os.Pipe()
-	os.Stdout = w
+	os.Stderr = w
 
 	PrintBanner(StartupResult{Current: "1.0.0", Latest: "v1.0.0", Note: "up to date"})
 
 	_ = w.Close()
-	os.Stdout = old
+	os.Stderr = old
 	var buf bytes.Buffer
 	_, _ = buf.ReadFrom(r)
 	out := buf.String()
@@ -763,14 +768,14 @@ func TestPrintBanner(t *testing.T) {
 }
 
 func TestPrintBanner_updateAvailable(t *testing.T) {
-	old := os.Stdout
+	old := os.Stderr
 	r, w, _ := os.Pipe()
-	os.Stdout = w
+	os.Stderr = w
 
 	PrintBanner(StartupResult{Current: "1.0.0", Latest: "v2.0.0", Note: "update available"})
 
 	_ = w.Close()
-	os.Stdout = old
+	os.Stderr = old
 	var buf bytes.Buffer
 	_, _ = buf.ReadFrom(r)
 	out := buf.String()
@@ -781,14 +786,14 @@ func TestPrintBanner_updateAvailable(t *testing.T) {
 }
 
 func TestPrintBanner_upgradeFailed(t *testing.T) {
-	old := os.Stdout
+	old := os.Stderr
 	r, w, _ := os.Pipe()
-	os.Stdout = w
+	os.Stderr = w
 
 	PrintBanner(StartupResult{Current: "1.0.0", Note: "upgrade failed"})
 
 	_ = w.Close()
-	os.Stdout = old
+	os.Stderr = old
 	var buf bytes.Buffer
 	_, _ = buf.ReadFrom(r)
 	out := buf.String()
@@ -799,14 +804,14 @@ func TestPrintBanner_upgradeFailed(t *testing.T) {
 }
 
 func TestPrintBanner_checkFailed(t *testing.T) {
-	old := os.Stdout
+	old := os.Stderr
 	r, w, _ := os.Pipe()
-	os.Stdout = w
+	os.Stderr = w
 
 	PrintBanner(StartupResult{Current: "1.0.0", Note: "upgrade check failed"})
 
 	_ = w.Close()
-	os.Stdout = old
+	os.Stderr = old
 	var buf bytes.Buffer
 	_, _ = buf.ReadFrom(r)
 	out := buf.String()

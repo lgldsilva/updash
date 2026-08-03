@@ -6,7 +6,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
+	"runtime"
 	"sort"
 	"strings"
 	"time"
@@ -74,6 +76,12 @@ func updateBatch(ctx context.Context, cat model.Category, items []*model.Item, o
 		return batchMASUpgrade(ctx, items, opts)
 	case model.CatApt:
 		return batchAptUpgrade(ctx, items, opts)
+	case model.CatDnf:
+		return batchDnfUpgrade(ctx, items, opts)
+	case model.CatZypper:
+		return batchZypperUpgrade(ctx, items, opts)
+	case model.CatApk:
+		return batchApkUpgrade(ctx, items, opts)
 	case model.CatPacman:
 		return batchPacmanUpgrade(ctx, items, opts)
 	case model.CatWinget:
@@ -84,6 +92,10 @@ func updateBatch(ctx context.Context, cat model.Category, items []*model.Item, o
 		return batchScoopUpgrade(ctx, items, opts)
 	case model.CatNpm:
 		return batchNpmUpgrade(ctx, items, opts)
+	case model.CatPnpm:
+		return batchPnpmUpgrade(ctx, items, opts)
+	case model.CatBun:
+		return batchBunUpgrade(ctx, items, opts)
 	case model.CatOpenCodePlugins:
 		return batchOpenCodePlugins(ctx, items, opts)
 	case model.CatPipx:
@@ -390,6 +402,48 @@ func batchAptUpgrade(ctx context.Context, items []*model.Item, opts Options) []*
 	return results
 }
 
+// batchDnfUpgrade runs dnf upgrade (or yum update fallback) for all items.
+func batchDnfUpgrade(ctx context.Context, items []*model.Item, opts Options) []*Result {
+	for _, it := range items {
+		it.Status = model.StatusUpdating
+	}
+
+	tool := scanner.RpmToolName()
+	var args []string
+	switch tool {
+	case "yum":
+		args = []string{"update", "-y"}
+	default:
+		args = []string{"upgrade", "--refresh", "-y"}
+	}
+	cmd := elevate.Sudo(ctx, tool, args...)
+	return batchMarkAll(items, runCmdWithBuilder(ctx, items[0], cmd, opts))
+}
+
+// batchZypperUpgrade runs a non-interactive zypper update for all items.
+func batchZypperUpgrade(ctx context.Context, items []*model.Item, opts Options) []*Result {
+	for _, it := range items {
+		it.Status = model.StatusUpdating
+	}
+	cmd := elevate.Sudo(ctx, "zypper", "--non-interactive", "update")
+	return batchMarkAll(items, runCmdWithBuilder(ctx, items[0], cmd, opts))
+}
+
+// batchApkUpgrade runs apk upgrade; sudo only when not already root
+// (Alpine containers often run as root without sudo installed).
+func batchApkUpgrade(ctx context.Context, items []*model.Item, opts Options) []*Result {
+	for _, it := range items {
+		it.Status = model.StatusUpdating
+	}
+	var cmd *exec.Cmd
+	if os.Geteuid() == 0 {
+		cmd = exec.CommandContext(ctx, "apk", "upgrade")
+	} else {
+		cmd = elevate.Sudo(ctx, "apk", "upgrade")
+	}
+	return batchMarkAll(items, runCmdWithBuilder(ctx, items[0], cmd, opts))
+}
+
 // batchPacmanUpgrade runs yay/pacman -Syu.
 func batchPacmanUpgrade(ctx context.Context, items []*model.Item, opts Options) []*Result {
 	for _, it := range items {
@@ -487,6 +541,24 @@ func npmGlobalNeedsSudo(ctx context.Context) bool {
 	return false
 }
 
+// batchPnpmUpgrade updates all pnpm global packages.
+func batchPnpmUpgrade(ctx context.Context, items []*model.Item, opts Options) []*Result {
+	for _, it := range items {
+		it.Status = model.StatusUpdating
+	}
+	cmd := exec.CommandContext(ctx, "pnpm", "update", "-g")
+	return batchMarkAll(items, runCmdWithBuilder(ctx, items[0], cmd, opts))
+}
+
+// batchBunUpgrade updates all bun global packages.
+func batchBunUpgrade(ctx context.Context, items []*model.Item, opts Options) []*Result {
+	for _, it := range items {
+		it.Status = model.StatusUpdating
+	}
+	cmd := exec.CommandContext(ctx, "bun", "update", "-g")
+	return batchMarkAll(items, runCmdWithBuilder(ctx, items[0], cmd, opts))
+}
+
 func batchPipxUpgrade(ctx context.Context, items []*model.Item, opts Options) []*Result {
 	for _, it := range items {
 		it.Status = model.StatusUpdating
@@ -531,9 +603,17 @@ func updateOne(ctx context.Context, item *model.Item, opts Options) *Result {
 	case model.CatSDKMAN:
 		return runSDKMANUpgrade(ctx, item, opts)
 	case model.CatNvm:
-		return runCmd(ctx, item, opts, "bash", "-c", "source $HOME/.nvm/nvm.sh && nvm install-latest-npm")
+		if runtime.GOOS == "windows" {
+			// nvm-windows is a different product; it has no install-latest-npm.
+			return manualAgentResult(item, "update nvm-windows via its installer")
+		}
+		return runBashScript(ctx, item, opts,
+			"source $HOME/.nvm/nvm.sh && nvm install-latest-npm",
+			"install bash or update nvm manually")
 	case model.CatOmz:
-		return runCmd(ctx, item, opts, "bash", "-c", "source $HOME/.oh-my-zsh/tools/upgrade.sh")
+		return runBashScript(ctx, item, opts,
+			"source $HOME/.oh-my-zsh/tools/upgrade.sh",
+			"install bash or run the Oh My Zsh upgrade script manually")
 	case model.CatAgent:
 		return updateAgent(ctx, item, opts)
 	case model.CatGHExt:
@@ -586,47 +666,45 @@ func runCmdWithBuilder(ctx context.Context, item *model.Item, cmd *exec.Cmd, opt
 }
 
 func runSDKMANUpgrade(ctx context.Context, item *model.Item, opts Options) *Result {
-	bashCmd := `
+	script := `
 		source $HOME/.sdkman/bin/sdkman-init.sh
 		echo "Y" | sdk upgrade
 	`
-	return runCmd(ctx, item, opts, "bash", "-c", bashCmd)
+	return runBashScript(ctx, item, opts, script, "install bash or run 'sdk upgrade' manually")
+}
+
+// runBashScript runs a shell-script update, degrading to a manual note when
+// bash is unavailable (e.g. bare Windows hosts).
+func runBashScript(ctx context.Context, item *model.Item, opts Options, script, manualNote string) *Result {
+	if _, err := exec.LookPath("bash"); err != nil {
+		return manualAgentResult(item, manualNote)
+	}
+	return runCmd(ctx, item, opts, "bash", "-c", script)
+}
+
+// manualAgentResult marks an item as skipped-manual without running anything.
+func manualAgentResult(item *model.Item, reason string) *Result {
+	item.Status = model.StatusOutdated
+	return &Result{
+		Item:    item,
+		Success: false,
+		Error:   "⊘ " + reason,
+		Output:  fmt.Sprintf("%s: %s", item.Name, reason),
+	}
 }
 
 func updateAgent(ctx context.Context, item *model.Item, opts Options) *Result {
-	switch {
-	case strings.Contains(item.Name, "Claude"):
-		return runCmd(ctx, item, opts, "claude", "update")
-	case strings.Contains(item.Name, "OpenCode"):
-		return runCmd(ctx, item, opts, "opencode", "upgrade")
-	case strings.Contains(item.Name, "Grok"):
-		return runCmd(ctx, item, opts, "grok", "update")
-	case strings.Contains(item.Name, "Gemini"):
-		return runCmd(ctx, item, opts, "gemini", "update")
-	case strings.Contains(item.Name, "Codex"):
-		return updateAgentViaNpm(ctx, item, opts, "@openai/codex")
-	case strings.Contains(item.Name, "Copilot"):
-		return runCmd(ctx, item, opts, "copilot", "update")
-	default:
-		reason := item.KeepPolicy
-		if reason == "" {
-			reason = "manual reinstall / app update"
-		}
-		item.Status = model.StatusOutdated
-		return &Result{
-			Item:    item,
-			Success: false,
-			Error:   "⊘ " + reason,
-			Output:  fmt.Sprintf("%s: %s", item.Name, reason),
-		}
+	if cmd := scanner.AgentUpdateCommand(item.Name); len(cmd) > 0 {
+		return runCmd(ctx, item, opts, cmd[0], cmd[1:]...)
 	}
-}
-
-func updateAgentViaNpm(ctx context.Context, item *model.Item, opts Options, pkg string) *Result {
-	if item.PackageID != "" {
-		pkg = item.PackageID
+	reason := item.KeepPolicy
+	if reason == "" {
+		reason = scanner.AgentKeepPolicy(item.Name)
 	}
-	return runCmd(ctx, item, opts, "npm", "install", "-g", pkg+"@latest")
+	if reason == "" {
+		reason = "manual reinstall / app update"
+	}
+	return manualAgentResult(item, reason)
 }
 
 // batchOpenCodePlugins updates local plugins under ~/.config/opencode.
@@ -643,18 +721,12 @@ func batchOpenCodePlugins(ctx context.Context, items []*model.Item, opts Options
 }
 
 func updateAIInfra(ctx context.Context, item *model.Item, opts Options) *Result {
-	switch {
-	case strings.Contains(item.Name, "ai-memory"):
-		return runCmd(ctx, item, opts, "ai-memory", "upgrade")
-	case strings.Contains(item.Name, "semidx"):
-		return runCmd(ctx, item, opts, "semidx", "upgrade")
-	case strings.Contains(item.Name, "gcloud"):
-		return runCmd(ctx, item, opts, "gcloud", "components", "update", "--quiet")
-	default:
-		return &Result{
-			Item:    item,
-			Success: true,
-			Output:  fmt.Sprintf("%s: no auto-update", item.Name),
-		}
+	if cmd := scanner.InfraUpdateCommand(item.Name); len(cmd) > 0 {
+		return runCmd(ctx, item, opts, cmd[0], cmd[1:]...)
+	}
+	return &Result{
+		Item:    item,
+		Success: true,
+		Output:  fmt.Sprintf("%s: no auto-update", item.Name),
 	}
 }

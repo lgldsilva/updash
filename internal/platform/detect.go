@@ -25,6 +25,10 @@ func Detect() model.PlatformInfo {
 	case "linux":
 		detectLinuxDistro(&p)
 		p.HasApt = has("apt-get")
+		p.HasDnf = has("dnf") || has("dnf5")
+		p.HasYum = !p.HasDnf && has("yum")
+		p.HasZypper = has("zypper")
+		p.HasApk = has("apk")
 		p.HasPacman = has("pacman")
 		p.HasYay = has("yay")
 		p.HasFlatpak = has("flatpak")
@@ -40,6 +44,8 @@ func Detect() model.PlatformInfo {
 
 	// Cross-platform tools
 	p.HasNpm = has("npm")
+	p.HasPnpm = has("pnpm")
+	p.HasBun = has("bun")
 	p.HasPipx = has("pipx")
 	p.HasGo = has("go")
 	p.HasGup = has("gup")
@@ -87,6 +93,10 @@ func detectLinuxDistro(p *model.PlatformInfo) {
 			p.Distro = "debian"
 		case strings.Contains(content, "ID=fedora"):
 			p.Distro = "fedora"
+		case strings.Contains(content, "ID=opensuse"), strings.Contains(content, "ID_LIKE=suse"), strings.Contains(content, "ID_LIKE=\"suse\""):
+			p.Distro = "opensuse"
+		case strings.Contains(content, "ID=alpine"):
+			p.Distro = "alpine"
 		default:
 			p.Distro = "linux"
 		}

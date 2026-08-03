@@ -71,6 +71,10 @@ func appendPlatformSources(src []Source, plat model.PlatformInfo) []Source {
 		{plat.HasBrew, &BrewSource{}},
 		{plat.HasMAS, &MASource{}},
 		{plat.HasApt, &AptSource{}},
+		{plat.HasDnf || plat.HasYum, &RpmSource{}},
+		{plat.HasZypper, &ZypperSource{}},
+		{plat.HasApk, &ApkSource{}},
+		{plat.HasPacman || plat.HasYay, &PacmanSource{}},
 		{plat.HasPacman || plat.HasYay, &PacmanSource{}},
 		{plat.HasFlatpak, &FlatpakSource{}},
 		{plat.HasSnap, &SnapSource{}},
@@ -92,6 +96,8 @@ func appendLanguageSources(src []Source, plat model.PlatformInfo) []Source {
 	}
 	for _, c := range []cond{
 		{plat.HasNpm, &NpmSource{}},
+		{plat.HasPnpm, &PnpmSource{}},
+		{plat.HasBun, &BunSource{}},
 		{plat.HasPipx, &PipxSource{}},
 		{plat.HasGo, &GoSource{}},
 		{plat.HasRustup, &RustupSource{}},

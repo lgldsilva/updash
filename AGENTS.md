@@ -61,10 +61,14 @@ model/types.go       → Item, Category, Status, PlatformInfo
 | OS | PMs | Notes |
 |---|---|---|
 | macOS | brew, mas | brew cask exclusion list in `brew.go` |
-| Linux | apt, pacman/yay, flatpak, snap | `sudo` for apt/pacman/snap |
+| Linux | apt, dnf/yum, zypper, pacman/yay, flatpak, snap | `sudo` for apt/dnf/zypper/pacman/snap; apk when root or sudo |
 | Windows | winget, choco, scoop | TEMP cleanup |
 
 - Agent version probes skip Electron CLIs without `DISPLAY` on Linux
+- Agent catalog is data-driven (`agentDef` in `agents.go`): add one entry to add an agent; auto agents need `updateCmd` or `npmPackage`
+- Agents not installed via global npm get their latest version from the npm registry (`npm view`), so native/brew/pnpm/bun installs are flagged
+- semidx (`semidx upgrade --check`), gh extensions and gcloud components are flagged outdated when updates exist — `--update` reaches them headless
+- nvm/omz/SDKMAN updates need `bash`; hosts without it get a manual note instead of a failing command
 - Manual-only agents use `KeepPolicy` containing `manual` → skipped in CLI update
 - OpenCode binary: `opencode upgrade`; plugins: `npm update --prefix ~/.config/opencode`
 
