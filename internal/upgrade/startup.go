@@ -89,7 +89,8 @@ func Startup(ctx context.Context, cfg Config, current string, auto bool) (Startu
 	return res, nil
 }
 
-// PrintBanner writes the one-line build/status header to stdout.
+// PrintBanner writes the one-line build/status header to stderr so that
+// machine-readable modes (--check --json) keep stdout pure JSON.
 func PrintBanner(res StartupResult) {
 	line := "updash " + FormatBuild(res.Current)
 	switch {
@@ -109,7 +110,7 @@ func PrintBanner(res StartupResult) {
 	case "upgrade failed":
 		line += " · upgrade failed"
 	}
-	fmt.Println(line)
+	fmt.Fprintln(os.Stderr, line)
 }
 
 // Reexec runs the same binary with the same arguments and exits the current process.
@@ -136,9 +137,12 @@ func Reexec() error {
 }
 
 // ModeSkipsStartupUpgrade reports CLI modes that must not auto-upgrade or banner before work.
+// Headless modes are skipped entirely: cron/automation runs must not self-replace
+// the binary mid-run, and their stdout/stderr must stay parseable (--check --json).
 func ModeSkipsStartupUpgrade(mode string) bool {
 	switch mode {
-	case "version", "help", "upgrade", "check-upgrade", "update-self", "env-defaults":
+	case "version", "help", "upgrade", "check-upgrade", "update-self", "env-defaults",
+		"check", "update", "clean", "all":
 		return true
 	default:
 		return false

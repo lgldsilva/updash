@@ -8,6 +8,9 @@ const (
 	CatBrew    Category = "brew"
 	CatMAS     Category = "mas"
 	CatApt     Category = "apt"
+	CatDnf     Category = "dnf"
+	CatZypper  Category = "zypper"
+	CatApk     Category = "apk"
 	CatPacman  Category = "pacman"
 	CatFlatpak Category = "flatpak"
 	CatSnap    Category = "snap"
@@ -18,6 +21,8 @@ const (
 	CatScoop  Category = "scoop"
 
 	CatNpm             Category = "npm"
+	CatPnpm            Category = "pnpm"
+	CatBun             Category = "bun"
 	CatPipx            Category = "pipx"
 	CatGo              Category = "go"
 	CatRustup          Category = "rustup"
@@ -141,6 +146,10 @@ type PlatformInfo struct {
 
 	// Linux package managers
 	HasApt     bool
+	HasDnf     bool
+	HasYum     bool
+	HasZypper  bool
+	HasApk     bool
 	HasPacman  bool
 	HasYay     bool
 	HasFlatpak bool
@@ -152,6 +161,8 @@ type PlatformInfo struct {
 	HasScoop  bool
 
 	HasNpm      bool
+	HasPnpm     bool
+	HasBun      bool
 	HasPipx     bool
 	HasGo       bool
 	HasGup      bool
