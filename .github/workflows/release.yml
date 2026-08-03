@@ -67,7 +67,9 @@ jobs:
     name: Generate SBOM
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    needs: [build-test]
+    # resolve-tag as direct dependency (see release-artifacts): the SBOM
+    # must be generated from the tagged code, not the dispatch ref.
+    needs: [resolve-tag, build-test]
     steps:
       - uses: actions/checkout@v4
         with:
@@ -93,7 +95,10 @@ jobs:
     name: GoReleaser
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    needs: [build-test, sbom]
+    # resolve-tag must be a DIRECT dependency: the needs context does not
+    # expose transitive outputs, so without it the tag ref resolves empty
+    # on workflow_dispatch and the job silently checks out main.
+    needs: [resolve-tag, build-test, sbom]
     outputs:
       artifacts-sha256: ${{ steps.hash.outputs.subjects }}
     permissions:
