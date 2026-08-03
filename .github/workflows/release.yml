@@ -151,6 +151,10 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: bom.json
+          # Release runs via workflow_dispatch (autotag pushes the tag with
+          # GITHUB_TOKEN, which cannot trigger workflows), so the action cannot
+          # infer the tag from GITHUB_REF — pass it explicitly.
+          tag_name: ${{ needs.resolve-tag.outputs.tag }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
