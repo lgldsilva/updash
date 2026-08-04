@@ -112,7 +112,7 @@ func suggestAgentCommand(name string) string {
 	case strings.Contains(name, "Gemini"):
 		return "gemini update"
 	case strings.Contains(name, "Codex"):
-		return "npm install -g @openai/codex@latest"
+		return "npm install -g --allow-scripts=@openai/codex @openai/codex@latest"
 	case strings.Contains(name, "Copilot"):
 		return "copilot update"
 	default:

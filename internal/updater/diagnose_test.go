@@ -56,7 +56,7 @@ func TestSuggestCommand_agentsAndPlugins(t *testing.T) {
 		{&model.Item{Category: model.CatOpenCodePlugins}, "npm update --prefix ~/.config/opencode"},
 		{&model.Item{Category: model.CatAgent, Name: "OpenCode"}, "opencode upgrade"},
 		{&model.Item{Category: model.CatAgent, Name: "Claude Code"}, "claude update"},
-		{&model.Item{Category: model.CatAgent, Name: "Codex"}, "npm install -g @openai/codex@latest"},
+		{&model.Item{Category: model.CatAgent, Name: "Codex"}, "npm install -g --allow-scripts=@openai/codex @openai/codex@latest"},
 		{&model.Item{Category: model.CatAgent, Name: "Copilot CLI"}, "copilot update"},
 		{&model.Item{Category: model.CatAgent, Name: "Cursor"}, ""},
 	}

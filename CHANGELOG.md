@@ -19,6 +19,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/); versions follow 
 - nvm/omz/SDKMAN updates degrade to a manual note when bash is missing (bare Windows hosts); nvm scan understands nvm-windows paths
 
 ### Fixed
+- npm ≥ 12 blocks dependency install scripts by default (RFC npm/rfcs#868): `npm update -g` and npm-based agent updates now pass `--allow-scripts` for the packages being updated, so wrapper packages like `@anthropic-ai/claude-code` no longer end up with a silently skipped postinstall ("Error: claude native binary not installed")
+- Claude Code updates self-heal: after an update, updash verifies `claude --version` and re-runs the wrapper's postinstall when npm left the placeholder stub in place; retries the update once when it failed because claude was already the broken stub
 - nvm detection on Windows no longer points the updater at unix-only `nvm.sh`
 - Startup banner prints to stderr; headless modes (`--check`, `--update`, `--clean`, `--all`) skip startup auto-upgrade and banner entirely so `--check --json` output stays machine-parseable and cron runs never self-replace mid-run
 
