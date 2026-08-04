@@ -16,11 +16,11 @@ func (s *PnpmSource) Label() string            { return "pnpm (global)" }
 func (s *PnpmSource) Icon() string             { return "📦" }
 
 func (s *PnpmSource) Scan(ctx context.Context, plat model.PlatformInfo) ([]*model.Item, error) {
-	out, err := execCombined(ctx, "pnpm", "outdated", "-g", "--json")
+	out, err := execCombined(ctx, binPnpm, "outdated", flagGlobal, "--json")
 	if err != nil && len(out) == 0 {
-		return []*model.Item{errItem("pnpm", model.CatPnpm)}, nil
+		return []*model.Item{errItem(binPnpm, model.CatPnpm)}, nil
 	}
-	return okOrOutdated("pnpm", model.CatPnpm, ParsePnpmOutdatedGlobal(out)), nil
+	return okOrOutdated(binPnpm, model.CatPnpm, ParsePnpmOutdatedGlobal(out)), nil
 }
 
 // pnpmOutdatedEntry is one package from `pnpm outdated --json`.
@@ -66,11 +66,11 @@ func (s *BunSource) Label() string            { return "bun (global)" }
 func (s *BunSource) Icon() string             { return "🍞" }
 
 func (s *BunSource) Scan(ctx context.Context, plat model.PlatformInfo) ([]*model.Item, error) {
-	out, err := execCombined(ctx, "bun", "pm", "ls", "-g")
+	out, err := execCombined(ctx, binBun, "pm", "ls", flagGlobal)
 	if err != nil && len(out) == 0 {
-		return []*model.Item{errItem("bun", model.CatBun)}, nil
+		return []*model.Item{errItem(binBun, model.CatBun)}, nil
 	}
-	return okOrOutdated("bun", model.CatBun, ParseBunPmLsGlobal(string(out))), nil
+	return okOrOutdated(binBun, model.CatBun, ParseBunPmLsGlobal(string(out))), nil
 }
 
 // ParseBunPmLsGlobal parses `bun pm ls -g` tree rows like:

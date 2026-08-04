@@ -11,7 +11,7 @@ import (
 type PacmanSource struct{}
 
 func (s *PacmanSource) Category() model.Category { return model.CatPacman }
-func (s *PacmanSource) Label() string            { return "pacman" }
+func (s *PacmanSource) Label() string            { return binPacman }
 func (s *PacmanSource) Icon() string             { return "🐧" }
 
 func (s *PacmanSource) Scan(ctx context.Context, plat model.PlatformInfo) ([]*model.Item, error) {
@@ -22,19 +22,19 @@ func (s *PacmanSource) Scan(ctx context.Context, plat model.PlatformInfo) ([]*mo
 }
 
 func (s *PacmanSource) scanYay(ctx context.Context) ([]*model.Item, error) {
-	out, err := execCommand(ctx, "yay", "-Qua")
+	out, err := execCommand(ctx, binYay, "-Qua")
 	if err != nil {
-		return []*model.Item{errItem("yay", model.CatPacman)}, nil
+		return []*model.Item{errItem(binYay, model.CatPacman)}, nil
 	}
-	return okOrOutdated("yay", model.CatPacman, parsePacmanArrowLines(string(out), true)), nil
+	return okOrOutdated(binYay, model.CatPacman, parsePacmanArrowLines(string(out), true)), nil
 }
 
 func (s *PacmanSource) scanPacman(ctx context.Context) ([]*model.Item, error) {
-	out, err := execCommand(ctx, "pacman", "-Qu")
+	out, err := execCommand(ctx, binPacman, "-Qu")
 	if err != nil {
-		return []*model.Item{errItem("pacman", model.CatPacman)}, nil
+		return []*model.Item{errItem(binPacman, model.CatPacman)}, nil
 	}
-	return okOrOutdated("pacman", model.CatPacman, parsePacmanArrowLines(string(out), false)), nil
+	return okOrOutdated(binPacman, model.CatPacman, parsePacmanArrowLines(string(out), false)), nil
 }
 
 // parsePacmanArrowLines parses "name 1.0 -> 2.0" or "repo/name 1.0 -> 2.0" lines.

@@ -96,10 +96,10 @@ type namedPath struct {
 
 func aiOutputTargets(home string) []namedPath {
 	return []namedPath{
-		{"claude", filepath.Join(home, ".claude", "debug")},
+		{binClaude, filepath.Join(home, ".claude", "debug")},
 		{"codex", filepath.Join(home, ".codex", "log")},
-		{"opencode", filepath.Join(home, ".cache", "opencode")},
-		{"grok", filepath.Join(home, ".grok", "sessions")},
+		{binOpenCode, filepath.Join(home, ".cache", binOpenCode)},
+		{binGrok, filepath.Join(home, ".grok", "sessions")},
 	}
 }
 

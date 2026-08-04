@@ -16,13 +16,13 @@ const rpmCheckExitCode = 100
 type RpmSource struct{}
 
 func (s *RpmSource) Category() model.Category { return model.CatDnf }
-func (s *RpmSource) Label() string            { return "dnf" }
+func (s *RpmSource) Label() string            { return binDnf }
 func (s *RpmSource) Icon() string             { return "🐧" }
 
 // RpmToolName returns the binary used for scans/updates ("dnf" preferred, "yum" fallback).
 func RpmToolName() string {
-	if _, err := exec.LookPath("dnf"); err == nil {
-		return "dnf"
+	if _, err := exec.LookPath(binDnf); err == nil {
+		return binDnf
 	}
 	if _, err := exec.LookPath("dnf5"); err == nil {
 		return "dnf5"

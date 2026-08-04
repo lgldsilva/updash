@@ -12,21 +12,21 @@ import (
 type PipxSource struct{}
 
 func (s *PipxSource) Category() model.Category { return model.CatPipx }
-func (s *PipxSource) Label() string            { return "pipx" }
+func (s *PipxSource) Label() string            { return binPipx }
 func (s *PipxSource) Icon() string             { return "🐍" }
 
 func (s *PipxSource) Scan(ctx context.Context, plat model.PlatformInfo) ([]*model.Item, error) {
 	// pipx list --json gives installed packages with versions
-	out, err := execCommand(ctx, "pipx", "list", "--json")
+	out, err := execCommand(ctx, binPipx, cmdList, "--json")
 	if err != nil {
 		return []*model.Item{
-			{Name: "pipx", Category: model.CatPipx, Status: model.StatusError, CurrentVer: "error"},
+			{Name: binPipx, Category: model.CatPipx, Status: model.StatusError, CurrentVer: "error"},
 		}, nil
 	}
 
 	output := string(out)
 	if !strings.Contains(output, "venvs") {
-		return []*model.Item{okItem("pipx", model.CatPipx)}, nil
+		return []*model.Item{okItem(binPipx, model.CatPipx)}, nil
 	}
 
 	// Parse JSON manually since structure is nested
@@ -38,7 +38,7 @@ func (s *PipxSource) Scan(ctx context.Context, plat model.PlatformInfo) ([]*mode
 		} `json:"venvs"`
 	}
 	if err := json.Unmarshal([]byte(output), &data); err != nil {
-		return []*model.Item{okItem("pipx", model.CatPipx)}, nil
+		return []*model.Item{okItem(binPipx, model.CatPipx)}, nil
 	}
 
 	var items []*model.Item
@@ -52,7 +52,7 @@ func (s *PipxSource) Scan(ctx context.Context, plat model.PlatformInfo) ([]*mode
 	}
 
 	if len(items) == 0 {
-		items = append(items, okItem("pipx", model.CatPipx))
+		items = append(items, okItem(binPipx, model.CatPipx))
 	}
 
 	return items, nil

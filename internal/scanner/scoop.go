@@ -15,15 +15,15 @@ func (s *ScoopSource) Label() string            { return "Scoop" }
 func (s *ScoopSource) Icon() string             { return "🪣" }
 
 func (s *ScoopSource) Scan(ctx context.Context, plat model.PlatformInfo) ([]*model.Item, error) {
-	out, err := execCommand(ctx, "scoop", "status")
+	out, err := execCommand(ctx, binScoop, "status")
 	if err != nil {
-		return []*model.Item{errItem("scoop", model.CatScoop)}, nil
+		return []*model.Item{errItem(binScoop, model.CatScoop)}, nil
 	}
 	output := string(out)
 	if strings.Contains(output, "Everything is ok") {
-		return []*model.Item{okItem("scoop", model.CatScoop)}, nil
+		return []*model.Item{okItem(binScoop, model.CatScoop)}, nil
 	}
-	return okOrOutdated("scoop", model.CatScoop, parseScoopStatus(output)), nil
+	return okOrOutdated(binScoop, model.CatScoop, parseScoopStatus(output)), nil
 }
 
 // parseScoopStatus parses "appName: cur (latest: new)" lines after the updates header.

@@ -16,6 +16,8 @@ func PromptMacPassword(reason string) (string, error) {
 	}
 	// Escape double quotes for AppleScript string literal.
 	safe := strings.ReplaceAll(reason, `"`, `\"`)
+	// The dialog text and button labels are internal AppleScript constants;
+	// only the user-facing reason is interpolated after quote escaping.
 	script := fmt.Sprintf(
 		`display dialog "%s" default answer "" with hidden answer with title "updash" buttons {"Cancel", "OK"} default button "OK"`,
 		safe,

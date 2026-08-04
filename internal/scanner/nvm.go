@@ -12,7 +12,7 @@ import (
 type NvmSource struct{}
 
 func (s *NvmSource) Category() model.Category { return model.CatNvm }
-func (s *NvmSource) Label() string            { return "nvm" }
+func (s *NvmSource) Label() string            { return binNvm }
 func (s *NvmSource) Icon() string             { return "⬡" }
 
 // nvmInstalled reports whether nvm (unix) or nvm-windows is present.
@@ -26,10 +26,10 @@ func nvmInstalled(plat model.PlatformInfo) bool {
 	}
 	if plat.OS == "windows" {
 		// nvm-windows installs under %APPDATA%\nvm (or %USERPROFILE%\AppData\Roaming\nvm).
-		if appData := os.Getenv("APPDATA"); appData != "" && isDir(filepath.Join(appData, "nvm")) {
+		if appData := os.Getenv("APPDATA"); appData != "" && isDir(filepath.Join(appData, binNvm)) {
 			return true
 		}
-		return isDir(filepath.Join(home, "AppData", "Roaming", "nvm"))
+		return isDir(filepath.Join(home, "AppData", "Roaming", binNvm))
 	}
 	return false
 }
@@ -42,11 +42,11 @@ func isDir(path string) bool {
 func (s *NvmSource) Scan(ctx context.Context, plat model.PlatformInfo) ([]*model.Item, error) {
 	if nvmInstalled(plat) {
 		return []*model.Item{
-			{Name: "nvm", Category: model.CatNvm, Status: model.StatusOK, CurrentVer: "installed"},
+			{Name: binNvm, Category: model.CatNvm, Status: model.StatusOK, CurrentVer: statusInstalled},
 		}, nil
 	}
 	return []*model.Item{
-		{Name: "nvm", Category: model.CatNvm, Status: model.StatusOK, CurrentVer: "not installed"},
+		{Name: binNvm, Category: model.CatNvm, Status: model.StatusOK, CurrentVer: "not installed"},
 	}, nil
 }
 
@@ -69,7 +69,7 @@ func omzInstalled() bool {
 func (s *OmzSource) Scan(ctx context.Context, plat model.PlatformInfo) ([]*model.Item, error) {
 	if omzInstalled() {
 		return []*model.Item{
-			{Name: "omz", Category: model.CatOmz, Status: model.StatusOK, CurrentVer: "installed"},
+			{Name: "omz", Category: model.CatOmz, Status: model.StatusOK, CurrentVer: statusInstalled},
 		}, nil
 	}
 	return []*model.Item{

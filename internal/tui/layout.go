@@ -222,7 +222,7 @@ func padRight(text string, width int) string {
 	if pad <= 0 {
 		return text
 	}
-	return text + strings.Repeat(" ", pad)
+	return text + strings.Repeat(tuiSpace, pad)
 }
 
 func padLeft(text string, width int) string {
@@ -234,7 +234,7 @@ func padLeft(text string, width int) string {
 	if pad <= 0 {
 		return text
 	}
-	return strings.Repeat(" ", pad) + text
+	return strings.Repeat(tuiSpace, pad) + text
 }
 
 // iconCell normalizes category/item icons to exactly 2 display cells and
@@ -272,7 +272,7 @@ func iconCell(icon string) string {
 	case w >= 2:
 		return truncatePlain(icon, 2)
 	case w == 1:
-		return icon + " "
+		return icon + tuiSpace
 	default:
 		return "  "
 	}
@@ -285,7 +285,7 @@ func truncateStyled(text string, max int) string {
 	if visibleWidth(text) <= max {
 		return text
 	}
-	out := strings.TrimRight(lipgloss.NewStyle().MaxWidth(max).Render(text), "\n")
+	out := strings.TrimRight(lipgloss.NewStyle().MaxWidth(max).Render(text), tuiNewline)
 	if visibleWidth(out) <= max {
 		return out
 	}
@@ -305,7 +305,7 @@ func fitLine(line string, max int) string {
 	case w > max:
 		return truncateStyled(line, max)
 	case w < max:
-		return line + strings.Repeat(" ", max-w)
+		return line + strings.Repeat(tuiSpace, max-w)
 	default:
 		return line
 	}
@@ -331,7 +331,7 @@ func joinRow(parts ...string) string {
 // Spaces are only inserted INSIDE mid — never after the final │.
 func paintFrameLine(body string, boxW int, border lipgloss.Style) string {
 	if boxW < 3 {
-		return "│"
+		return tuiBoxVertical
 	}
 	inner := boxW - 2
 
@@ -345,15 +345,15 @@ func paintFrameLine(body string, boxW int, border lipgloss.Style) string {
 		}
 	}
 	if gap := inner - plainWidth(mid); gap > 0 {
-		mid += strings.Repeat(" ", gap)
+		mid += strings.Repeat(tuiSpace, gap)
 	}
 	// Final plain-width check
 	if plainWidth(mid) != inner {
 		mid = padRight(truncatePlain(stripANSIForLog(body), inner), inner)
 	}
 
-	left := border.Render("│")
-	right := border.Render("│")
+	left := border.Render(tuiBoxVertical)
+	right := border.Render(tuiBoxVertical)
 	line := left + mid + right
 
 	// Prefer plain width (terminal-like); lipgloss may still disagree on edge glyphs
@@ -361,7 +361,7 @@ func paintFrameLine(body string, boxW int, border lipgloss.Style) string {
 		return line
 	}
 	// Absolute plain fallback
-	return "│" + padRight(truncatePlain(stripANSIForLog(body), inner), inner) + "│"
+	return tuiBoxVertical + padRight(truncatePlain(stripANSIForLog(body), inner), inner) + tuiBoxVertical
 }
 
 // paintEdgeRow paints top or bottom border of exact boxW (no trailing pad after ╮/╯).
@@ -392,18 +392,18 @@ func (s *State) frame(content string) string {
 	}
 
 	border := lipgloss.NewStyle().Foreground(ColorCyan)
-	pad := strings.Repeat(" ", framePadX)
+	pad := strings.Repeat(tuiSpace, framePadX)
 	innerW := boxW - 2
 
 	var b strings.Builder
 	b.WriteString(paintEdgeRow("╭", "─", "╮", boxW, border))
 	b.WriteByte('\n')
 
-	empty := strings.Repeat(" ", innerW)
+	empty := strings.Repeat(tuiSpace, innerW)
 	b.WriteString(paintFrameLine(empty, boxW, border))
 	b.WriteByte('\n')
 
-	for _, raw := range strings.Split(content, "\n") {
+	for _, raw := range strings.Split(content, tuiNewline) {
 		// Content only (no borders here). fitLine must never run on a full frame row.
 		line := fitLine(raw, cw)
 		if visibleWidth(line) != cw {
@@ -449,5 +449,5 @@ func wrapFooter(hints []string, maxWidth int) string {
 			lines = append(lines, FooterStyle.Render(current.String()))
 		}
 	}
-	return strings.Join(lines, "\n")
+	return strings.Join(lines, tuiNewline)
 }

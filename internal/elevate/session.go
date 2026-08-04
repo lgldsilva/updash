@@ -64,7 +64,7 @@ func (s *Session) Validate(ctx context.Context, password string) error {
 	if s == nil {
 		return fmt.Errorf("no elevation session")
 	}
-	cmd := exec.CommandContext(ctx, "sudo", "-S", "-p", "", "-v")
+	cmd := exec.CommandContext(ctx, sudoBin, "-S", "-p", "", "-v")
 	cmd.Stdin = strings.NewReader(password + "\n")
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
@@ -87,7 +87,7 @@ func (s *Session) Refresh(ctx context.Context) error {
 	if s == nil || !s.valid {
 		return nil
 	}
-	cmd := exec.CommandContext(ctx, "sudo", "-S", "-p", "", "-v")
+	cmd := exec.CommandContext(ctx, sudoBin, "-S", "-p", "", "-v")
 	cmd.Stdin = strings.NewReader(s.password + "\n")
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
@@ -133,6 +133,6 @@ func EnsureSudoReady(ctx context.Context) error {
 func CanElevateWithoutPassword(ctx context.Context) bool {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, "sudo", "-n", "true")
+	cmd := exec.CommandContext(ctx, sudoBin, "-n", "true")
 	return cmd.Run() == nil
 }

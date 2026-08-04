@@ -11,17 +11,17 @@ import (
 type ZypperSource struct{}
 
 func (s *ZypperSource) Category() model.Category { return model.CatZypper }
-func (s *ZypperSource) Label() string            { return "zypper" }
+func (s *ZypperSource) Label() string            { return binZypper }
 func (s *ZypperSource) Icon() string             { return "🦎" }
 
 func (s *ZypperSource) Scan(ctx context.Context, plat model.PlatformInfo) ([]*model.Item, error) {
 	// list-updates exits 100-103 when updates of various kinds are available,
 	// so parse the table regardless of exit code and only fail on empty output.
-	out, err := execCombined(ctx, "zypper", "--quiet", "--non-interactive", "list-updates")
+	out, err := execCombined(ctx, binZypper, "--quiet", "--non-interactive", "list-updates")
 	if err != nil && len(out) == 0 {
-		return []*model.Item{errItem("zypper", model.CatZypper)}, nil
+		return []*model.Item{errItem(binZypper, model.CatZypper)}, nil
 	}
-	return okOrOutdated("zypper", model.CatZypper, ParseZypperListUpdates(string(out))), nil
+	return okOrOutdated(binZypper, model.CatZypper, ParseZypperListUpdates(string(out))), nil
 }
 
 // ParseZypperListUpdates parses `zypper --quiet list-updates` table rows:

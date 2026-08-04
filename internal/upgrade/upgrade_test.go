@@ -632,6 +632,23 @@ func TestDownloadReleaseBinary_success(t *testing.T) {
 	}
 }
 
+func TestDownloadReleaseBinary_missingChecksum(t *testing.T) {
+	archive := makeTarGz(t, map[string][]byte{"updash": {0x7f, 'E', 'L', 'F'}})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "checksums.txt") {
+			_, _ = fmt.Fprint(w, "other-hash  another-asset.tar.gz\n")
+			return
+		}
+		_, _ = w.Write(archive)
+	}))
+	defer srv.Close()
+
+	_, err := downloadReleaseBinary(context.Background(), srv.Client(), srv.URL, "v1.0.0", "linux", "amd64", "")
+	if err == nil || !strings.Contains(err.Error(), "no checksum entry for") {
+		t.Fatalf("expected missing checksum error, got %v", err)
+	}
+}
+
 func TestDownloadReleaseBinary_checksumMismatch(t *testing.T) {
 	archive := makeTarGz(t, map[string][]byte{"updash": {0x7f, 'E', 'L', 'F'}})
 	checksum := "0000000000000000000000000000000000000000000000000000000000000000  updash_1.0.0_linux_amd64.tar.gz\n"

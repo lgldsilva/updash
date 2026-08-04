@@ -17,9 +17,9 @@ import (
 // because build layers stay "recent". Use UPDASH_DOCKER_BUILDER_MODE=all
 // for unfiltered `docker builder prune -af` (safe: unused build cache only).
 const (
-	DefaultDockerImageMaxAge     = "336h"
-	DefaultDockerBuilderMaxAge   = "336h"
-	DefaultDockerContainerMaxAge = "336h"
+	DefaultDockerImageMaxAge     = defaultDockerAge
+	DefaultDockerBuilderMaxAge   = defaultDockerAge
+	DefaultDockerContainerMaxAge = defaultDockerAge
 
 	// Builder prune modes.
 	DockerBuilderModeAge = "age" // --filter until=<max age>

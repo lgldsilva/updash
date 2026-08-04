@@ -16,10 +16,10 @@ func (s *ChocoSource) Icon() string             { return "🍫" }
 
 func (s *ChocoSource) Scan(ctx context.Context, plat model.PlatformInfo) ([]*model.Item, error) {
 	// choco outdated returns a list of outdated packages
-	out, err := execCommand(ctx, "choco", "outdated", "--no-color", "--limit-output")
+	out, err := execCommand(ctx, binChoco, "outdated", "--no-color", "--limit-output")
 	if err != nil {
 		return []*model.Item{
-			{Name: "choco", Category: model.CatChoco, Status: model.StatusError, CurrentVer: "error"},
+			{Name: binChoco, Category: model.CatChoco, Status: model.StatusError, CurrentVer: "error"},
 		}, nil
 	}
 
@@ -46,7 +46,7 @@ func (s *ChocoSource) Scan(ctx context.Context, plat model.PlatformInfo) ([]*mod
 
 	if len(items) == 0 {
 		items = append(items, &model.Item{
-			Name: "choco", Category: model.CatChoco, Status: model.StatusOK, CurrentVer: statusUpToDate,
+			Name: binChoco, Category: model.CatChoco, Status: model.StatusOK, CurrentVer: statusUpToDate,
 		})
 	}
 
