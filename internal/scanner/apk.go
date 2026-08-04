@@ -11,16 +11,16 @@ import (
 type ApkSource struct{}
 
 func (s *ApkSource) Category() model.Category { return model.CatApk }
-func (s *ApkSource) Label() string            { return "apk" }
+func (s *ApkSource) Label() string            { return binApk }
 func (s *ApkSource) Icon() string             { return "🔷" }
 
 func (s *ApkSource) Scan(ctx context.Context, plat model.PlatformInfo) ([]*model.Item, error) {
 	// List installed packages older than the repository version.
-	out, err := execCombined(ctx, "apk", "version", "-l", "<")
+	out, err := execCombined(ctx, binApk, "version", "-l", "<")
 	if err != nil && len(out) == 0 {
-		return []*model.Item{errItem("apk", model.CatApk)}, nil
+		return []*model.Item{errItem(binApk, model.CatApk)}, nil
 	}
-	return okOrOutdated("apk", model.CatApk, ParseApkVersion(string(out))), nil
+	return okOrOutdated(binApk, model.CatApk, ParseApkVersion(string(out))), nil
 }
 
 // ParseApkVersion parses `apk version -l '<'` lines of the form:

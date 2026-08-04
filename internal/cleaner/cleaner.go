@@ -83,8 +83,8 @@ func cleanCache(ctx context.Context, item *model.Item, opts Options) *Result {
 			[]string{"apt-get", "autoclean"},
 		)
 	case strings.HasPrefix(item.Name, "go"):
-		return runCmd(ctx, item, opts, "go", "clean", "-cache")
-	case strings.HasPrefix(item.Name, "npm"):
+		return runCmd(ctx, item, opts, "go", cleanCommand, "-cache")
+	case strings.HasPrefix(item.Name, cleanerNpm):
 		return cleanNpm(ctx, item, opts)
 	case strings.HasPrefix(item.Name, "snap"):
 		return runElevatedCmd(ctx, item, opts, "snap", "set", "system", "refresh.retain=2")
@@ -108,7 +108,7 @@ func cleanSDKMAN(ctx context.Context, item *model.Item, opts Options) *Result {
 		return &Result{Item: item, Success: false, Error: fmt.Sprintf("cannot parse SDKMAN item: %s", item.Name)}
 	}
 	candidate, major := parts[0], parts[1]
-	verDir := filepath.Join(os.Getenv("HOME"), ".sdkman", "candidates", candidate)
+	verDir := filepath.Join(os.Getenv(cleanerHome), ".sdkman", "candidates", candidate)
 	entries, err := os.ReadDir(verDir)
 	if err != nil {
 		return &Result{Item: item, Success: false, Error: err.Error()}
@@ -170,7 +170,7 @@ func sdkUninstallOne(ctx context.Context, candidate, ver string, opts Options, o
 // CLI args come from config.Docker*PruneArgs (pure policy, unit-tested).
 // Builder mode (age|all): see UPDASH_DOCKER_BUILDER_MODE — "all" for CI/homelab.
 func cleanDocker(ctx context.Context, item *model.Item, opts Options) *Result {
-	return runCmd(ctx, item, opts, "docker", dockerPruneArgsForItem(item.Name)...)
+	return runCmd(ctx, item, opts, cleanerDocker, dockerPruneArgsForItem(item.Name)...)
 }
 
 // dockerPruneArgsForItem maps a cleanup item name to docker subcommand args
@@ -201,7 +201,7 @@ func cleanHomelab(ctx context.Context, item *model.Item, opts Options) *Result {
 		return cleanContainerLogs(ctx, item, opts)
 	case item.Name == "disk-pressure":
 		// Aggressive prune: ignore long retention, drop unused aggressively.
-		return runCmd(ctx, item, opts, "docker", "system", "prune", "-af")
+		return runCmd(ctx, item, opts, cleanerDocker, "system", "prune", "-af")
 	default:
 		return &Result{Item: item, Success: true, Output: item.Name + ": nothing to do"}
 	}
@@ -257,7 +257,7 @@ func cleanAgePaths(item *model.Item, maxDays int) *Result {
 func cleanContainerLogs(ctx context.Context, item *model.Item, opts Options) *Result {
 	maxBytes := int64(config.ContainerLogMaxMB()) * 1024 * 1024
 	// List running+stopped container IDs; truncate oversized json-file logs when discoverable.
-	out, err := exec.CommandContext(ctx, "docker", "ps", "-aq").CombinedOutput()
+	out, err := exec.CommandContext(ctx, cleanerDocker, "ps", "-aq").CombinedOutput()
 	if err != nil {
 		// No docker or daemon down — not a hard failure for optional cleanup.
 		item.Status = model.StatusCleaned
@@ -290,7 +290,7 @@ func cleanContainerLogs(ctx context.Context, item *model.Item, opts Options) *Re
 }
 
 func containerLogPath(ctx context.Context, id string) (string, error) {
-	out, err := exec.CommandContext(ctx, "docker", "inspect",
+	out, err := exec.CommandContext(ctx, cleanerDocker, "inspect",
 		"--format", "{{.LogPath}}", id).CombinedOutput()
 	if err != nil {
 		return "", err
@@ -321,7 +321,7 @@ func cleanVSCodeExt(ctx context.Context, item *model.Item, opts Options) *Result
 }
 
 func vscodeExtDirs() []string {
-	home := os.Getenv("HOME")
+	home := os.Getenv(cleanerHome)
 	var candidates []string
 	for _, dir := range []string{
 		filepath.Join(home, ".antigravity", "extensions"),
@@ -422,10 +422,10 @@ func cleanNpm(ctx context.Context, item *model.Item, opts Options) *Result {
 	paths := cacheMeasurePaths(item)
 	before := measurePaths(ctx, paths)
 
-	result := executeCmd(ctx, item, exec.CommandContext(ctx, "npm", "cache", "clean", "--force"), opts)
+	result := executeCmd(ctx, item, exec.CommandContext(ctx, cleanerNpm, "cache", cleanCommand, "--force"), opts)
 	if result.Success {
 		var npxOut strings.Builder
-		npxDir := filepath.Join(os.Getenv("HOME"), ".npm", "_npx")
+		npxDir := filepath.Join(os.Getenv(cleanerHome), ".npm", "_npx")
 		entries, err := os.ReadDir(npxDir)
 		if err == nil {
 			for _, entry := range entries {
@@ -542,8 +542,8 @@ func cleanWindowsCache(ctx context.Context, item *model.Item, opts Options) *Res
 	switch {
 	case strings.Contains(item.Name, "temp") || strings.Contains(item.Name, "TEMP"):
 		return runCmd(ctx, item, opts, "cmd", "/c", "del /q /s %TEMP%\\* >nul 2>&1")
-	case strings.Contains(item.Name, "npm"):
-		return runCmd(ctx, item, opts, "npm", "cache", "clean", "--force")
+	case strings.Contains(item.Name, cleanerNpm):
+		return runCmd(ctx, item, opts, cleanerNpm, "cache", cleanCommand, "--force")
 	default:
 		return runCmd(ctx, item, opts, "cmd", "/c", "echo No Windows cleaner defined")
 	}

@@ -14,13 +14,13 @@ func Sudo(ctx context.Context, name string, args ...string) *exec.Cmd {
 	sudoArgs := append([]string{name}, args...)
 
 	if sess != nil && sess.passwordless {
-		return exec.CommandContext(ctx, "sudo", sudoArgs...)
+		return exec.CommandContext(ctx, sudoBin, sudoArgs...)
 	}
 	if sess != nil && sess.valid {
-		cmd := exec.CommandContext(ctx, "sudo", append([]string{"-S", "-p", ""}, sudoArgs...)...)
+		cmd := exec.CommandContext(ctx, sudoBin, append([]string{"-S", "-p", ""}, sudoArgs...)...)
 		cmd.Stdin = strings.NewReader(sess.password + "\n")
 		return cmd
 	}
 
-	return exec.CommandContext(ctx, "sudo", sudoArgs...)
+	return exec.CommandContext(ctx, sudoBin, sudoArgs...)
 }

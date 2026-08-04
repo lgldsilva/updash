@@ -43,11 +43,8 @@ func CollectOldPaths(root string, maxDays, maxDepth int, now time.Time) ([]PathC
 		return nil, 0, err
 	}
 	if maxDepth <= 0 {
-		if !IsOlderThan(info.ModTime(), maxDays, now) {
-			return nil, 0, nil
-		}
-		sz := dirSize(root)
-		return []PathCandidate{{Path: root, Size: sz}}, sz, nil
+		candidates, total := collectLeaf(root, info, maxDays, now)
+		return candidates, total, nil
 	}
 
 	entries, err := os.ReadDir(root)
@@ -77,8 +74,17 @@ func CollectOldPaths(root string, maxDays, maxDepth int, now time.Time) ([]PathC
 	return out, total, nil
 }
 
+func collectLeaf(root string, info fs.FileInfo, maxDays int, now time.Time) ([]PathCandidate, int64) {
+	if !IsOlderThan(info.ModTime(), maxDays, now) {
+		return nil, 0
+	}
+	sz := dirSize(root)
+	return []PathCandidate{{Path: root, Size: sz}}, sz
+}
+
 func dirSize(root string) int64 {
 	var total int64
+	// WalkDir is best effort: unreadable descendants are skipped while sizing.
 	_ = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil || d.IsDir() {
 			return nil

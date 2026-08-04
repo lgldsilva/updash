@@ -6,7 +6,6 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"sort"
 	"strconv"
 	"strings"
 
@@ -25,7 +24,7 @@ func (s *SDKMANSource) Scan(ctx context.Context, plat model.PlatformInfo) ([]*mo
 	entries, err := os.ReadDir(candidatesDir)
 	if err != nil {
 		return []*model.Item{
-			{Name: "sdkman", Category: model.CatSDKMAN, Status: model.StatusError, CurrentVer: "not found"},
+			{Name: binSDKMAN, Category: model.CatSDKMAN, Status: model.StatusError, CurrentVer: "not found"},
 		}, nil
 	}
 
@@ -39,7 +38,7 @@ func (s *SDKMANSource) Scan(ctx context.Context, plat model.PlatformInfo) ([]*mo
 
 	if len(items) == 0 {
 		items = append(items, &model.Item{
-			Name: "sdkman", Category: model.CatSDKMAN, Status: model.StatusOK, CurrentVer: "no candidates",
+			Name: binSDKMAN, Category: model.CatSDKMAN, Status: model.StatusOK, CurrentVer: "no candidates",
 		})
 	}
 	return items, nil
@@ -185,12 +184,8 @@ func (s *SDKMANCleanSource) Scan(ctx context.Context, plat model.PlatformInfo) (
 	}
 	if len(cleanItems) == 0 {
 		cleanItems = append(cleanItems, &model.Item{
-			Name: "sdkman", Category: model.CatSDKClean, Status: model.StatusOK, CurrentVer: "nothing to clean",
+			Name: binSDKMAN, Category: model.CatSDKClean, Status: model.StatusOK, CurrentVer: "nothing to clean",
 		})
 	}
 	return cleanItems, nil
-}
-
-func init() {
-	_ = sort.Ints
 }

@@ -21,10 +21,10 @@ func (s *GoSource) Scan(ctx context.Context, plat model.PlatformInfo) ([]*model.
 	}
 
 	// Otherwise, just list installed tools in GOPATH/bin
-	gopathBytes, err := execCommand(ctx, "go", "env", "GOPATH")
+	gopathBytes, err := execCommand(ctx, binGo, "env", "GOPATH")
 	if err != nil {
 		return []*model.Item{
-			{Name: "go", Category: model.CatGo, Status: model.StatusError, CurrentVer: "error"},
+			{Name: binGo, Category: model.CatGo, Status: model.StatusError, CurrentVer: "error"},
 		}, nil
 	}
 	gopath := strings.TrimSpace(string(gopathBytes))
@@ -32,12 +32,12 @@ func (s *GoSource) Scan(ctx context.Context, plat model.PlatformInfo) ([]*model.
 	// List Go binaries
 	out, err := execCommand(ctx, "ls", gopath+"/bin")
 	if err != nil {
-		return []*model.Item{okItem("go", model.CatGo)}, nil
+		return []*model.Item{okItem(binGo, model.CatGo)}, nil
 	}
 
 	names := strings.Fields(string(out))
 	if len(names) == 0 {
-		return []*model.Item{okItem("go", model.CatGo)}, nil
+		return []*model.Item{okItem(binGo, model.CatGo)}, nil
 	}
 
 	var items []*model.Item
@@ -53,14 +53,14 @@ func (s *GoSource) Scan(ctx context.Context, plat model.PlatformInfo) ([]*model.
 }
 
 func (s *GoSource) scanGup(ctx context.Context) ([]*model.Item, error) {
-	out, err := execCommand(ctx, "gup", "update", "--dry-run")
+	out, err := execCommand(ctx, "gup", cmdUpdate, "--dry-run")
 	if err != nil {
-		return []*model.Item{okItem("go", model.CatGo)}, nil
+		return []*model.Item{okItem(binGo, model.CatGo)}, nil
 	}
 
 	output := string(out)
 	if strings.Contains(output, statusUpToDate) || output == "" {
-		return []*model.Item{okItem("go", model.CatGo)}, nil
+		return []*model.Item{okItem(binGo, model.CatGo)}, nil
 	}
 
 	lines := strings.Split(strings.TrimSpace(output), "\n")
@@ -84,7 +84,7 @@ func (s *GoSource) scanGup(ctx context.Context) ([]*model.Item, error) {
 	}
 
 	if len(items) == 0 {
-		items = append(items, okItem("go", model.CatGo))
+		items = append(items, okItem(binGo, model.CatGo))
 	}
 
 	return items, nil

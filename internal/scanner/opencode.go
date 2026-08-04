@@ -19,7 +19,7 @@ func (s *OpenCodeSource) Icon() string             { return "🔌" }
 
 // OpenCodeConfigDir returns the OpenCode config directory (overridable in tests).
 var OpenCodeConfigDir = func() string {
-	return filepath.Join(os.Getenv("HOME"), ".config", "opencode")
+	return filepath.Join(os.Getenv("HOME"), ".config", binOpenCode)
 }
 
 func (s *OpenCodeSource) Scan(ctx context.Context, plat model.PlatformInfo) ([]*model.Item, error) {
@@ -31,7 +31,7 @@ func (s *OpenCodeSource) Scan(ctx context.Context, plat model.PlatformInfo) ([]*
 		}, nil
 	}
 
-	out, err := execCombined(ctx, "npm", "outdated", "--prefix", dir, "--json")
+	out, err := execCombined(ctx, binNpm, "outdated", "--prefix", dir, "--json")
 	if err != nil && len(out) == 0 {
 		return []*model.Item{
 			{Name: nameOpenCodePlugins, Category: model.CatOpenCodePlugins, Status: model.StatusError, CurrentVer: "npm outdated failed"},

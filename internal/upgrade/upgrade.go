@@ -32,6 +32,8 @@ import (
 const (
 	DefaultUpdateAPI = "https://api.github.com/repos/lgldsilva/updash"
 	DefaultUpdateDL  = "https://github.com/lgldsilva/updash/releases/download"
+	versionPrefix    = "v"
+	pathSeparator    = "/"
 )
 
 // Config holds upgrade configuration, sourced from env vars.
@@ -117,7 +119,7 @@ func resolveTag(ctx context.Context, cfg Config, want string) (string, error) {
 }
 
 func fetchLatestTag(ctx context.Context, hc *http.Client, apiURL, token string) (string, error) {
-	base := strings.TrimRight(apiURL, "/")
+	base := strings.TrimRight(apiURL, pathSeparator)
 
 	// Try /releases/latest (GitHub-compatible)
 	if tag, err := fetchLatestFromEndpoint(ctx, hc, base+"/releases/latest", token); err == nil {
@@ -180,7 +182,7 @@ func fetchLatestFromList(ctx context.Context, hc *http.Client, url, token string
 
 func downloadReleaseBinary(ctx context.Context, hc *http.Client, dlURL, tag, goos, goarch, token string) ([]byte, error) {
 	archName := archiveName(tag, goos, goarch)
-	archiveURL := fmt.Sprintf("%s/%s/%s", strings.TrimRight(dlURL, "/"), tag, archName)
+	archiveURL := fmt.Sprintf("%s/%s/%s", strings.TrimRight(dlURL, pathSeparator), tag, archName)
 	fmt.Printf("download: %s\n", archiveURL)
 
 	// Download archive
@@ -190,22 +192,25 @@ func downloadReleaseBinary(ctx context.Context, hc *http.Client, dlURL, tag, goo
 	}
 
 	// Download checksum
-	checksumsURL := fmt.Sprintf("%s/%s/checksums.txt", strings.TrimRight(dlURL, "/"), tag)
+	checksumsURL := fmt.Sprintf("%s/%s/checksums.txt", strings.TrimRight(dlURL, pathSeparator), tag)
 	checksumsData, err := httpGet(ctx, hc, checksumsURL, token)
 	if err != nil {
 		return nil, fmt.Errorf("download checksums: %w", err)
 	}
 
-	// Verify SHA-256
+	// Verify SHA-256. A missing entry must fail closed: installing an
+	// unverified release would turn a malformed checksum manifest into a
+	// supply-chain bypass.
 	expectedHash := findChecksum(checksumsData, archName)
-	if expectedHash != "" {
-		got := sha256.Sum256(archiveData)
-		gotHex := hex.EncodeToString(got[:])
-		if gotHex != expectedHash {
-			return nil, fmt.Errorf("sha256 mismatch: expected %s, got %s", expectedHash, gotHex)
-		}
-		fmt.Println("checksum: verified")
+	if expectedHash == "" {
+		return nil, fmt.Errorf("no checksum entry for %s", archName)
 	}
+	got := sha256.Sum256(archiveData)
+	gotHex := hex.EncodeToString(got[:])
+	if gotHex != expectedHash {
+		return nil, fmt.Errorf("sha256 mismatch: expected %s, got %s", expectedHash, gotHex)
+	}
+	fmt.Println("checksum: verified")
 
 	// Extract binary from archive
 	bin, err := extractBinary(archiveData, archName, goos)
@@ -217,7 +222,7 @@ func downloadReleaseBinary(ctx context.Context, hc *http.Client, dlURL, tag, goo
 
 func archiveName(tag, goos, goarch string) string {
 	// GoReleaser name_template uses .Version (no "v"); release tags keep the prefix.
-	ver := strings.TrimPrefix(tag, "v")
+	ver := strings.TrimPrefix(tag, versionPrefix)
 	switch goos {
 	case "windows":
 		return fmt.Sprintf("updash_%s_%s_%s.zip", ver, goos, goarch)
@@ -448,9 +453,9 @@ func sameVersion(current, tag string) bool {
 	if current == "" || tag == "" {
 		return false
 	}
-	// Strip leading 'v' from both for comparison
-	current = strings.TrimPrefix(current, "v")
-	tag = strings.TrimPrefix(tag, "v")
+	// Strip the leading version prefix from both for comparison.
+	current = strings.TrimPrefix(current, versionPrefix)
+	tag = strings.TrimPrefix(tag, versionPrefix)
 	return current == tag
 }
 
@@ -488,11 +493,19 @@ func tlsConfigFor(cfg Config) *tls.Config {
 	if err != nil {
 		return tlsCfg
 	}
-	pool, err := x509.SystemCertPool()
-	if err != nil {
+	pool, poolErr := x509.SystemCertPool()
+	systemPoolAvailable := poolErr == nil && pool != nil
+	if !systemPoolAvailable {
 		pool = x509.NewCertPool()
 	}
-	pool.AppendCertsFromPEM(pem)
+	if !pool.AppendCertsFromPEM(pem) {
+		fmt.Fprintln(os.Stderr, "warning: custom CA file contains no certificates; using system certificate pool")
+		// A nil RootCAs tells crypto/tls to use the platform's system pool.
+		if systemPoolAvailable {
+			tlsCfg.RootCAs = pool
+		}
+		return tlsCfg
+	}
 	tlsCfg.RootCAs = pool
 	return tlsCfg
 }

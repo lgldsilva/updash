@@ -131,7 +131,7 @@ func upgradeOneBrew(ctx context.Context, item *model.Item, opts Options) *Result
 	itemCtx, cancel := context.WithTimeout(ctx, BrewItemTimeout(item.Name))
 	defer cancel()
 
-	cmd := exec.CommandContext(itemCtx, "brew", "upgrade", "--greedy", item.Name)
+	cmd := exec.CommandContext(itemCtx, "brew", commandUpgrade, "--greedy", item.Name)
 	if scanner.BrewNeedsSudoPrime(item.Name) && !opts.Interactive {
 		cleanup, err := elevate.AttachSubprocessSudo(itemCtx, cmd)
 		if err != nil {
@@ -206,7 +206,7 @@ func batchMASUpgrade(ctx context.Context, items []*model.Item, opts Options) []*
 }
 
 func upgradeMASApp(ctx context.Context, item *model.Item, opts Options) *Result {
-	args := []string{"update"}
+	args := []string{commandUpdate}
 	if item.PackageID != "" {
 		args = append(args, item.PackageID)
 	}
@@ -360,8 +360,8 @@ func batchAptUpgrade(ctx context.Context, items []*model.Item, opts Options) []*
 	}
 
 	cmds := [][]string{
-		{"apt-get", "update"},
-		{"apt-get", "dist-upgrade", "-y"},
+		{"apt-get", commandUpdate},
+		{"apt-get", "dist-upgrade", flagYes},
 	}
 
 	var allOutput strings.Builder
@@ -412,9 +412,9 @@ func batchDnfUpgrade(ctx context.Context, items []*model.Item, opts Options) []*
 	var args []string
 	switch tool {
 	case "yum":
-		args = []string{"update", "-y"}
+		args = []string{commandUpdate, flagYes}
 	default:
-		args = []string{"upgrade", "--refresh", "-y"}
+		args = []string{commandUpgrade, "--refresh", flagYes}
 	}
 	cmd := elevate.Sudo(ctx, tool, args...)
 	return batchMarkAll(items, runCmdWithBuilder(ctx, items[0], cmd, opts))
@@ -425,7 +425,7 @@ func batchZypperUpgrade(ctx context.Context, items []*model.Item, opts Options) 
 	for _, it := range items {
 		it.Status = model.StatusUpdating
 	}
-	cmd := elevate.Sudo(ctx, "zypper", "--non-interactive", "update")
+	cmd := elevate.Sudo(ctx, "zypper", "--non-interactive", commandUpdate)
 	return batchMarkAll(items, runCmdWithBuilder(ctx, items[0], cmd, opts))
 }
 
@@ -437,9 +437,9 @@ func batchApkUpgrade(ctx context.Context, items []*model.Item, opts Options) []*
 	}
 	var cmd *exec.Cmd
 	if os.Geteuid() == 0 {
-		cmd = exec.CommandContext(ctx, "apk", "upgrade")
+		cmd = exec.CommandContext(ctx, "apk", commandUpgrade)
 	} else {
-		cmd = elevate.Sudo(ctx, "apk", "upgrade")
+		cmd = elevate.Sudo(ctx, "apk", commandUpgrade)
 	}
 	return batchMarkAll(items, runCmdWithBuilder(ctx, items[0], cmd, opts))
 }
@@ -492,7 +492,7 @@ func batchWingetUpgrade(ctx context.Context, items []*model.Item, opts Options) 
 	for _, it := range items {
 		it.Status = model.StatusUpdating
 	}
-	cmd := exec.CommandContext(ctx, "winget", "upgrade", "--all",
+	cmd := exec.CommandContext(ctx, "winget", commandUpgrade, "--all",
 		"--accept-package-agreements", "--accept-source-agreements")
 	return batchMarkAll(items, runCmdWithBuilder(ctx, items[0], cmd, opts))
 }
@@ -501,7 +501,7 @@ func batchChocoUpgrade(ctx context.Context, items []*model.Item, opts Options) [
 	for _, it := range items {
 		it.Status = model.StatusUpdating
 	}
-	cmd := exec.CommandContext(ctx, "choco", "upgrade", "all", "-y")
+	cmd := exec.CommandContext(ctx, "choco", commandUpgrade, "all", flagYes)
 	return batchMarkAll(items, runCmdWithBuilder(ctx, items[0], cmd, opts))
 }
 
@@ -509,7 +509,7 @@ func batchScoopUpgrade(ctx context.Context, items []*model.Item, opts Options) [
 	for _, it := range items {
 		it.Status = model.StatusUpdating
 	}
-	cmd := exec.CommandContext(ctx, "scoop", "update", "*")
+	cmd := exec.CommandContext(ctx, "scoop", commandUpdate, "*")
 	return batchMarkAll(items, runCmdWithBuilder(ctx, items[0], cmd, opts))
 }
 
@@ -524,14 +524,14 @@ func batchNpmUpgrade(ctx context.Context, items []*model.Item, opts Options) []*
 // npmUpdateCmd runs global npm update; uses sudo when prefix is system-wide (/usr).
 func npmUpdateCmd(ctx context.Context) *exec.Cmd {
 	if npmGlobalNeedsSudo(ctx) {
-		return elevate.Sudo(ctx, "npm", "update", "-g")
+		return elevate.Sudo(ctx, npmCommand, commandUpdate, flagGlobal)
 	}
-	return exec.CommandContext(ctx, "npm", "update", "-g")
+	return exec.CommandContext(ctx, npmCommand, commandUpdate, flagGlobal)
 }
 
 func npmGlobalNeedsSudo(ctx context.Context) bool {
 	if elevate.CanElevateWithoutPassword(ctx) || elevate.FromContext(ctx) != nil {
-		out, err := exec.CommandContext(ctx, "npm", "config", "get", "prefix").Output()
+		out, err := exec.CommandContext(ctx, npmCommand, "config", "get", "prefix").Output()
 		if err != nil {
 			return elevate.CanElevateWithoutPassword(ctx)
 		}
@@ -546,7 +546,7 @@ func batchPnpmUpgrade(ctx context.Context, items []*model.Item, opts Options) []
 	for _, it := range items {
 		it.Status = model.StatusUpdating
 	}
-	cmd := exec.CommandContext(ctx, "pnpm", "update", "-g")
+	cmd := exec.CommandContext(ctx, "pnpm", commandUpdate, flagGlobal)
 	return batchMarkAll(items, runCmdWithBuilder(ctx, items[0], cmd, opts))
 }
 
@@ -555,7 +555,7 @@ func batchBunUpgrade(ctx context.Context, items []*model.Item, opts Options) []*
 	for _, it := range items {
 		it.Status = model.StatusUpdating
 	}
-	cmd := exec.CommandContext(ctx, "bun", "update", "-g")
+	cmd := exec.CommandContext(ctx, "bun", commandUpdate, flagGlobal)
 	return batchMarkAll(items, runCmdWithBuilder(ctx, items[0], cmd, opts))
 }
 
@@ -591,13 +591,13 @@ func updateOne(ctx context.Context, item *model.Item, opts Options) *Result {
 
 	switch item.Category {
 	case model.CatFlatpak:
-		return runCmd(ctx, item, opts, "flatpak", "update", "-y")
+		return runCmd(ctx, item, opts, "flatpak", commandUpdate, flagYes)
 	case model.CatSnap:
 		return runElevatedCmd(ctx, item, opts, "snap", "refresh")
 	case model.CatGo:
-		return runCmd(ctx, item, opts, "gup", "update")
+		return runCmd(ctx, item, opts, "gup", commandUpdate)
 	case model.CatRustup:
-		return runCmd(ctx, item, opts, "rustup", "update")
+		return runCmd(ctx, item, opts, "rustup", commandUpdate)
 	case model.CatCargo:
 		return runCmd(ctx, item, opts, "cargo", "install-update", "-a")
 	case model.CatSDKMAN:
@@ -617,7 +617,7 @@ func updateOne(ctx context.Context, item *model.Item, opts Options) *Result {
 	case model.CatAgent:
 		return updateAgent(ctx, item, opts)
 	case model.CatGHExt:
-		return runCmd(ctx, item, opts, "gh", "extension", "upgrade", "--all")
+		return runCmd(ctx, item, opts, "gh", "extension", commandUpgrade, "--all")
 	case model.CatAI:
 		return updateAIInfra(ctx, item, opts)
 	default:
@@ -716,7 +716,7 @@ func batchOpenCodePlugins(ctx context.Context, items []*model.Item, opts Options
 	for _, it := range items {
 		it.Status = model.StatusUpdating
 	}
-	cmd := exec.CommandContext(ctx, "npm", "update", "--prefix", dir)
+	cmd := exec.CommandContext(ctx, npmCommand, commandUpdate, "--prefix", dir)
 	return batchMarkAll(items, runCmdWithBuilder(ctx, items[0], cmd, opts))
 }
 

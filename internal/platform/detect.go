@@ -35,8 +35,8 @@ func Detect() model.PlatformInfo {
 		p.HasSnap = has("snap")
 		p.HasBrew = has("brew")
 
-	case "windows":
-		p.Distro = "windows"
+	case windowsOS:
+		p.Distro = windowsOS
 		p.HasWinget = has("winget")
 		p.HasChoco = has("choco")
 		p.HasScoop = has("scoop")
@@ -58,7 +58,7 @@ func Detect() model.PlatformInfo {
 	}
 
 	// If HOME is not set, try USERPROFILE (Windows)
-	if p.OS == "windows" {
+	if p.OS == windowsOS {
 		home := os.Getenv("USERPROFILE")
 		if _, err := os.Stat(home + "\\.sdkman\\bin\\sdkman-init.sh"); err == nil {
 			p.HasSDKMAN = true
@@ -71,7 +71,7 @@ func Detect() model.PlatformInfo {
 	p.HasOmz = dirExists(os.ExpandEnv("$HOME/.oh-my-zsh"))
 
 	// Windows: also check USERPROFILE for nvm-windows
-	if p.OS == "windows" && !p.HasNvm {
+	if p.OS == windowsOS && !p.HasNvm {
 		home := os.Getenv("USERPROFILE")
 		p.HasNvm = dirExists(home + "\\AppData\\Roaming\\nvm")
 	}

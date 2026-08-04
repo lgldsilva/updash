@@ -20,34 +20,34 @@ func untilFilter(maxAge string) []string {
 //	mode=age → builder prune --filter until=<max> -f
 func DockerBuilderPruneArgs() []string {
 	if DockerBuilderMode() == DockerBuilderModeAll {
-		return []string{"builder", "prune", "-af"}
+		return []string{"builder", dockerPruneCommand, "-af"}
 	}
-	args := []string{"builder", "prune"}
+	args := []string{"builder", dockerPruneCommand}
 	args = append(args, untilFilter(DockerBuilderMaxAge())...)
-	return append(args, "-f")
+	return append(args, dockerForceFlag)
 }
 
 // DockerImagePruneArgs returns args for unused-image prune with age filter.
 func DockerImagePruneArgs() []string {
-	args := []string{"image", "prune", "-a"}
+	args := []string{"image", dockerPruneCommand, "-a"}
 	args = append(args, untilFilter(DockerImageMaxAge())...)
-	return append(args, "-f")
+	return append(args, dockerForceFlag)
 }
 
 // DockerContainerPruneArgs returns args for stopped-container prune with age filter.
 func DockerContainerPruneArgs() []string {
-	args := []string{"container", "prune", "-f"}
+	args := []string{"container", dockerPruneCommand, dockerForceFlag}
 	return append(args, untilFilter(DockerContainerMaxAge())...)
 }
 
 // DockerVolumePruneArgs returns args for unused volume prune (no age filter).
 func DockerVolumePruneArgs() []string {
-	return []string{"volume", "prune", "-f"}
+	return []string{"volume", dockerPruneCommand, dockerForceFlag}
 }
 
 // DockerSystemPruneArgs returns args for system prune with image age filter.
 func DockerSystemPruneArgs() []string {
-	args := []string{"system", "prune", "-af"}
+	args := []string{"system", dockerPruneCommand, "-af"}
 	return append(args, untilFilter(DockerImageMaxAge())...)
 }
 

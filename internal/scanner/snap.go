@@ -16,17 +16,17 @@ func (s *SnapSource) Icon() string             { return "📦" }
 
 func (s *SnapSource) Scan(ctx context.Context, plat model.PlatformInfo) ([]*model.Item, error) {
 	// snap refresh --list shows available updates
-	out, err := execCommand(ctx, "snap", "refresh", "--list")
+	out, err := execCommand(ctx, binSnap, "refresh", "--list")
 	if err != nil {
 		return []*model.Item{
-			{Name: "snap", Category: model.CatSnap, Status: model.StatusError, CurrentVer: "error"},
+			{Name: binSnap, Category: model.CatSnap, Status: model.StatusError, CurrentVer: "error"},
 		}, nil
 	}
 
 	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
 	if len(lines) <= 1 {
 		return []*model.Item{
-			{Name: "snap", Category: model.CatSnap, Status: model.StatusOK, CurrentVer: statusUpToDate},
+			{Name: binSnap, Category: model.CatSnap, Status: model.StatusOK, CurrentVer: statusUpToDate},
 		}, nil
 	}
 
@@ -56,7 +56,7 @@ func (s *SnapSource) Scan(ctx context.Context, plat model.PlatformInfo) ([]*mode
 
 	if len(items) == 0 {
 		items = append(items, &model.Item{
-			Name: "snap", Category: model.CatSnap, Status: model.StatusOK, CurrentVer: statusUpToDate,
+			Name: binSnap, Category: model.CatSnap, Status: model.StatusOK, CurrentVer: statusUpToDate,
 		})
 	}
 

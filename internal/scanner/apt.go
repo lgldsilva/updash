@@ -11,23 +11,23 @@ import (
 type AptSource struct{}
 
 func (s *AptSource) Category() model.Category { return model.CatApt }
-func (s *AptSource) Label() string            { return "apt" }
+func (s *AptSource) Label() string            { return binApt }
 func (s *AptSource) Icon() string             { return "🐧" }
 
 func (s *AptSource) Scan(ctx context.Context, plat model.PlatformInfo) ([]*model.Item, error) {
 	// Fast scan only — apt-get update is slow and may block on sudo.
 	// Package lists are refreshed during apt upgrade, not here.
-	out, err := execCommand(ctx, "apt", "list", "--upgradable", "-q")
+	out, err := execCommand(ctx, binApt, cmdList, "--upgradable", "-q")
 	if err != nil {
 		return []*model.Item{
-			{Name: "apt", Category: model.CatApt, Status: model.StatusError, CurrentVer: "error"},
+			{Name: binApt, Category: model.CatApt, Status: model.StatusError, CurrentVer: "error"},
 		}, nil
 	}
 
 	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
 	if len(lines) <= 1 { // first line is "Listing..."
 		return []*model.Item{
-			{Name: "apt", Category: model.CatApt, Status: model.StatusOK, CurrentVer: statusUpToDate},
+			{Name: binApt, Category: model.CatApt, Status: model.StatusOK, CurrentVer: statusUpToDate},
 		}, nil
 	}
 
@@ -66,7 +66,7 @@ func (s *AptSource) Scan(ctx context.Context, plat model.PlatformInfo) ([]*model
 
 	if len(items) == 0 {
 		items = append(items, &model.Item{
-			Name: "apt", Category: model.CatApt, Status: model.StatusOK, CurrentVer: statusUpToDate,
+			Name: binApt, Category: model.CatApt, Status: model.StatusOK, CurrentVer: statusUpToDate,
 		})
 	}
 

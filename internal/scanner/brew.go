@@ -48,24 +48,24 @@ type brewPkg struct {
 }
 
 func (s *BrewSource) Scan(ctx context.Context, plat model.PlatformInfo) ([]*model.Item, error) {
-	out, err := execCommand(ctx, "brew", "outdated", "--greedy", "--json=v2")
+	out, err := execCommand(ctx, binBrew, "outdated", "--greedy", "--json=v2")
 	if err != nil {
 		return []*model.Item{
-			{Name: "brew", Category: model.CatBrew, Status: model.StatusError, CurrentVer: "error checking"},
+			{Name: binBrew, Category: model.CatBrew, Status: model.StatusError, CurrentVer: "error checking"},
 		}, nil
 	}
 
 	var data brewOutdatedJSON
 	if err := json.Unmarshal(out, &data); err != nil {
 		return []*model.Item{
-			{Name: "brew", Category: model.CatBrew, Status: model.StatusError, CurrentVer: "parse error"},
+			{Name: binBrew, Category: model.CatBrew, Status: model.StatusError, CurrentVer: "parse error"},
 		}, nil
 	}
 
 	total := len(data.Formulae) + len(data.Casks)
 	if total == 0 {
 		return []*model.Item{
-			{Name: "brew", Category: model.CatBrew, Status: model.StatusOK, CurrentVer: statusUpToDate},
+			{Name: binBrew, Category: model.CatBrew, Status: model.StatusOK, CurrentVer: statusUpToDate},
 		}, nil
 	}
 
@@ -106,7 +106,7 @@ func (s *BrewSource) Scan(ctx context.Context, plat model.PlatformInfo) ([]*mode
 
 // BrewOutdatedSet returns outdated brew formula/cask names (same source as BrewSource scan).
 func BrewOutdatedSet(ctx context.Context) (map[string]struct{}, error) {
-	out, err := execCommand(ctx, "brew", "outdated", "--greedy", "--json=v2")
+	out, err := execCommand(ctx, binBrew, "outdated", "--greedy", "--json=v2")
 	if err != nil {
 		return nil, err
 	}

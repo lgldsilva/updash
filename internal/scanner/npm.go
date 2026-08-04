@@ -14,7 +14,7 @@ func (s *NpmSource) Label() string            { return "npm (global)" }
 func (s *NpmSource) Icon() string             { return "⬡" }
 
 func (s *NpmSource) Scan(ctx context.Context, plat model.PlatformInfo) ([]*model.Item, error) {
-	out, err := execCombined(ctx, "npm", "outdated", "-g", "--json")
+	out, err := execCombined(ctx, binNpm, "outdated", flagGlobal, "--json")
 	if err != nil {
 		// npm outdated returns exit code 1 when there are outdated packages
 		// but still outputs valid JSON
@@ -24,11 +24,11 @@ func (s *NpmSource) Scan(ctx context.Context, plat model.PlatformInfo) ([]*model
 				msg = msg[:120] + "…"
 			}
 			return []*model.Item{
-				{Name: "npm", Category: model.CatNpm, Status: model.StatusError, CurrentVer: msg},
+				{Name: binNpm, Category: model.CatNpm, Status: model.StatusError, CurrentVer: msg},
 			}, nil
 		}
 	}
 
 	items := ParseNpmOutdatedJSON(out, model.CatNpm)
-	return okOrOutdated("npm", model.CatNpm, items), nil
+	return okOrOutdated(binNpm, model.CatNpm, items), nil
 }

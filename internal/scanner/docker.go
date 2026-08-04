@@ -16,18 +16,18 @@ func (s *DockerSource) Icon() string             { return "🐳" }
 
 func (s *DockerSource) Scan(ctx context.Context, plat model.PlatformInfo) ([]*model.Item, error) {
 	// Check if docker daemon is running
-	_, err := execCommand(ctx, "docker", "info", "--format", "{{.ServerVersion}}")
+	_, err := execCommand(ctx, binDocker, "info", "--format", "{{.ServerVersion}}")
 	if err != nil {
 		return []*model.Item{
-			{Name: "docker", Category: model.CatDocker, Status: model.StatusOK, CurrentVer: "daemon not running"},
+			{Name: binDocker, Category: model.CatDocker, Status: model.StatusOK, CurrentVer: "daemon not running"},
 		}, nil
 	}
 
 	// Check disk usage
-	dfOut, err := execCommand(ctx, "docker", "system", "df")
+	dfOut, err := execCommand(ctx, binDocker, "system", "df")
 	if err != nil {
 		return []*model.Item{
-			{Name: "docker", Category: model.CatDocker, Status: model.StatusOK, CurrentVer: statusUpToDate},
+			{Name: binDocker, Category: model.CatDocker, Status: model.StatusOK, CurrentVer: statusUpToDate},
 		}, nil
 	}
 
@@ -51,7 +51,7 @@ func (s *DockerSource) Scan(ctx context.Context, plat model.PlatformInfo) ([]*mo
 
 	if len(items) == 0 {
 		items = append(items, &model.Item{
-			Name: "docker", Category: model.CatDocker, Status: model.StatusOK, CurrentVer: "running",
+			Name: binDocker, Category: model.CatDocker, Status: model.StatusOK, CurrentVer: "running",
 		})
 	}
 

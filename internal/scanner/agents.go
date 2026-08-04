@@ -18,7 +18,6 @@ func (s *AgentSource) Label() string            { return "AI Agents" }
 func (s *AgentSource) Icon() string             { return "🤖" }
 
 const (
-	flagVersion      = "--version"
 	toolAIMemory     = "ai-memory"
 	policyManual     = "manual reinstall / app update"
 	verNoneInstalled = "none installed"
@@ -29,7 +28,7 @@ var semverRE = regexp.MustCompile(`\d+\.\d+\.\d+[a-zA-Z0-9.-]*`)
 // parseAgentVersion extracts the first semver-like version from CLI output.
 // Handles multi-line, parenthetical comments, and varied formats.
 func parseAgentVersion(output string) string {
-	firstLine := strings.SplitN(strings.TrimSpace(output), "\n", 2)[0]
+	firstLine := strings.SplitN(strings.TrimSpace(output), scannerNL, 2)[0]
 	if m := semverRE.FindString(firstLine); m != "" {
 		return m
 	}
@@ -43,7 +42,7 @@ func parseAgentVersion(output string) string {
 			return parts[len(parts)-2]
 		}
 	}
-	last = strings.TrimSuffix(last, ".")
+	last = strings.TrimSuffix(last, versionDot)
 	last = strings.TrimSuffix(last, ",")
 	return last
 }
@@ -72,22 +71,22 @@ type agentDef struct {
 
 func agentCatalog() []agentDef {
 	return []agentDef{
-		{name: "Claude Code", binary: "claude", verCmd: []string{"claude", flagVersion}, mode: agentUpdateAuto, npmPackage: "@anthropic-ai/claude-code", updateCmd: []string{"claude", "update"}},
-		{name: "OpenCode", binary: "opencode", verCmd: []string{"opencode", flagVersion}, mode: agentUpdateAuto, updateCmd: []string{"opencode", "upgrade"}},
-		{name: "Grok", binary: "grok", verCmd: []string{"grok", flagVersion}, mode: agentUpdateAuto, updateCmd: []string{"grok", "update"}},
-		{name: "Antigravity", binary: "antigravity", verCmd: []string{"antigravity", flagVersion}, mode: agentUpdateManual},
+		{name: "Claude Code", binary: binClaude, verCmd: []string{binClaude, flagVersion}, mode: agentUpdateAuto, npmPackage: "@anthropic-ai/claude-code", updateCmd: []string{binClaude, cmdUpdate}},
+		{name: "OpenCode", binary: binOpenCode, verCmd: []string{binOpenCode, flagVersion}, mode: agentUpdateAuto, updateCmd: []string{binOpenCode, cmdUpgrade}},
+		{name: "Grok", binary: binGrok, verCmd: []string{binGrok, flagVersion}, mode: agentUpdateAuto, updateCmd: []string{binGrok, cmdUpdate}},
+		{name: "Antigravity", binary: binAntigravity, verCmd: []string{binAntigravity, flagVersion}, mode: agentUpdateManual},
 		{name: "Agy", binary: "agy", verCmd: []string{"agy", flagVersion}, mode: agentUpdateManual},
 		{name: "MimoCode", binary: "mimo", verCmd: []string{"mimo", flagVersion}, mode: agentUpdateManual},
-		{name: "Codex", binary: "codex", verCmd: []string{"codex", flagVersion}, mode: agentUpdateAuto, npmPackage: "@openai/codex", updateCmd: []string{"npm", "install", "-g", "@openai/codex@latest"}},
-		{name: "Gemini CLI", binary: "gemini", verCmd: []string{"gemini", flagVersion}, mode: agentUpdateAuto, npmPackage: "@google/gemini-cli", updateCmd: []string{"gemini", "update"}},
-		{name: "Copilot CLI", binary: "copilot", verCmd: []string{"copilot", flagVersion}, mode: agentUpdateAuto, updateCmd: []string{"copilot", "update"}},
+		{name: "Codex", binary: "codex", verCmd: []string{"codex", flagVersion}, mode: agentUpdateAuto, npmPackage: "@openai/codex", updateCmd: []string{binNpm, cmdInstall, flagGlobal, "@openai/codex@latest"}},
+		{name: "Gemini CLI", binary: binGemini, verCmd: []string{binGemini, flagVersion}, mode: agentUpdateAuto, npmPackage: "@google/gemini-cli", updateCmd: []string{binGemini, cmdUpdate}},
+		{name: "Copilot CLI", binary: binCopilot, verCmd: []string{binCopilot, flagVersion}, mode: agentUpdateAuto, updateCmd: []string{binCopilot, cmdUpdate}},
 		{name: "Crush", binary: "crush", verCmd: []string{"crush", flagVersion}, mode: agentUpdateManual},
-		{name: "Cursor", binary: "cursor", verCmd: []string{"cursor", flagVersion}, mode: agentUpdateManual},
-		{name: "pi", binary: "pi", verCmd: []string{"pi", flagVersion}, mode: agentUpdateAuto, npmPackage: "@earendil-works/pi-coding-agent", updateCmd: []string{"npm", "install", "-g", "@earendil-works/pi-coding-agent@latest"}},
-		{name: "Qwen Code", binary: "qwen", verCmd: []string{"qwen", flagVersion}, mode: agentUpdateAuto, npmPackage: "@qwen-code/qwen-code", updateCmd: []string{"npm", "install", "-g", "@qwen-code/qwen-code@latest"}},
+		{name: "Cursor", binary: binCursor, verCmd: []string{binCursor, flagVersion}, mode: agentUpdateManual},
+		{name: binPi, binary: binPi, verCmd: []string{binPi, flagVersion}, mode: agentUpdateAuto, npmPackage: "@earendil-works/pi-coding-agent", updateCmd: []string{binNpm, cmdInstall, flagGlobal, "@earendil-works/pi-coding-agent@latest"}},
+		{name: "Qwen Code", binary: "qwen", verCmd: []string{"qwen", flagVersion}, mode: agentUpdateAuto, npmPackage: "@qwen-code/qwen-code", updateCmd: []string{binNpm, cmdInstall, flagGlobal, "@qwen-code/qwen-code@latest"}},
 		{name: "Aider", binary: "aider", verCmd: []string{"aider", flagVersion}, mode: agentUpdateManual, keepPolicy: "pipx upgrade aider (or pip install -U aider)"},
 		{name: "Amazon Q", binary: "q", verCmd: []string{"q", flagVersion}, mode: agentUpdateManual, keepPolicy: "q doctor / installer re-run"},
-		{name: "Windsurf", binary: "windsurf", verCmd: []string{"windsurf", flagVersion}, mode: agentUpdateManual},
+		{name: "Windsurf", binary: binWindsurf, verCmd: []string{binWindsurf, flagVersion}, mode: agentUpdateManual},
 	}
 }
 
@@ -112,7 +111,7 @@ func AgentUpdateCommand(name string) []string {
 		return a.updateCmd
 	}
 	if a.npmPackage != "" {
-		return []string{"npm", "install", "-g", a.npmPackage + "@latest"}
+		return []string{binNpm, cmdInstall, flagGlobal, a.npmPackage + "@latest"}
 	}
 	return nil
 }
@@ -170,7 +169,7 @@ func probeAgentItem(ctx context.Context, plat model.PlatformInfo, a agentDef) *m
 		return it
 	}
 	if agentSkipVersionProbe(plat, a.binary) {
-		it.CurrentVer = "installed"
+		it.CurrentVer = statusInstalled
 		return it
 	}
 	it.CurrentVer = probeAgentVersion(ctx, a.verCmd)
@@ -179,7 +178,7 @@ func probeAgentItem(ctx context.Context, plat model.PlatformInfo, a agentDef) *m
 
 // npmInstalledPackages lists globally npm-installed package names (depth 0).
 func npmInstalledPackages(ctx context.Context) map[string]bool {
-	out, err := execCombined(ctx, "npm", "ls", "-g", "--json", "--depth=0")
+	out, err := execCombined(ctx, binNpm, "ls", flagGlobal, "--json", "--depth=0")
 	installed := ParseNpmLsGlobal(out)
 	if err != nil && len(installed) == 0 {
 		return nil
@@ -188,7 +187,7 @@ func npmInstalledPackages(ctx context.Context) map[string]bool {
 }
 
 func applyNpmOutdatedToAgents(ctx context.Context, items []*model.Item, catalog []agentDef) {
-	out, err := execCombined(ctx, "npm", "outdated", "-g", "--json")
+	out, err := execCombined(ctx, binNpm, "outdated", flagGlobal, "--json")
 	if err != nil && len(out) == 0 {
 		return
 	}
@@ -252,7 +251,7 @@ func registryLatest(ctx context.Context, a agentDef) string {
 		}
 		return ""
 	}
-	out, err := execCommandBudget(ctx, agentProbeTimeout, "npm", "view", a.npmPackage, "version")
+	out, err := execCommandBudget(ctx, agentProbeTimeout, binNpm, "view", a.npmPackage, "version")
 	if err != nil {
 		return ""
 	}
@@ -267,7 +266,7 @@ func ApplyAgentOutdated(it *model.Item, latest string) {
 	}
 	cur := normalizeAgentVer(it.CurrentVer)
 	lat := normalizeAgentVer(latest)
-	if cur == "" || cur == "installed" || cur == verNoneInstalled {
+	if cur == "" || cur == statusInstalled || cur == verNoneInstalled {
 		it.AvailableVer = lat
 		it.Status = model.StatusOutdated
 		return
@@ -284,7 +283,7 @@ func normalizeAgentVer(v string) string {
 	v = strings.TrimPrefix(v, "v")
 	v = strings.TrimSuffix(v, ".")
 	if m := semverRE.FindString(v); m != "" {
-		return strings.TrimSuffix(m, ".")
+		return strings.TrimSuffix(m, versionDot)
 	}
 	return v
 }
@@ -299,7 +298,7 @@ func probeAgentVersion(ctx context.Context, verCmd []string) string {
 			return v
 		}
 	}
-	return "installed"
+	return statusInstalled
 }
 
 // agentSkipVersionProbe avoids Electron/GUI CLIs that hang without a display (common over SSH).
@@ -311,7 +310,7 @@ func agentSkipVersionProbe(plat model.PlatformInfo, binary string) bool {
 		return false
 	}
 	switch binary {
-	case "antigravity", "cursor", "windsurf":
+	case binAntigravity, binCursor, binWindsurf:
 		return true
 	default:
 		return false
@@ -346,13 +345,13 @@ const (
 
 func aiInfraCatalog() []infraTool {
 	return []infraTool{
-		{name: toolAIMemory, binary: toolAIMemory, category: model.CatAI, verCmd: []string{toolAIMemory, "--version"}},
-		{name: "semidx", binary: "semidx", category: model.CatAI, verCmd: []string{"semidx", "--version"},
-			latestCmd: []string{"semidx", "upgrade", "--check"}, latest: infraLatestSemidx},
-		{name: "Gh Extensions", binary: "gh", category: model.CatGHExt, verCmd: []string{"gh", "extension", "list"},
-			latestCmd: []string{"gh", "extension", "list"}, latest: infraLatestGhExt},
-		{name: "gcloud", binary: "gcloud", category: model.CatAI, verCmd: []string{"gcloud", "version", "--format=json"},
-			latestCmd: []string{"gcloud", "components", "list", "--only-filter-updates-available", "--format=value(id)"}, latest: infraLatestNonEmpty},
+		{name: toolAIMemory, binary: toolAIMemory, category: model.CatAI, verCmd: []string{toolAIMemory, flagVersion}},
+		{name: binSemidx, binary: binSemidx, category: model.CatAI, verCmd: []string{binSemidx, flagVersion},
+			latestCmd: []string{binSemidx, cmdUpgrade, "--check"}, latest: infraLatestSemidx},
+		{name: "Gh Extensions", binary: binGh, category: model.CatGHExt, verCmd: []string{binGh, "extension", cmdList},
+			latestCmd: []string{binGh, "extension", cmdList}, latest: infraLatestGhExt},
+		{name: binGcloud, binary: binGcloud, category: model.CatAI, verCmd: []string{binGcloud, "version", "--format=json"},
+			latestCmd: []string{binGcloud, "components", cmdList, "--only-filter-updates-available", "--format=value(id)"}, latest: infraLatestNonEmpty},
 	}
 }
 
@@ -408,11 +407,11 @@ func applyInfraLatest(ctx context.Context, it *model.Item, t infraTool) {
 func InfraUpdateCommand(name string) []string {
 	switch name {
 	case toolAIMemory:
-		return []string{toolAIMemory, "upgrade"}
-	case "semidx":
-		return []string{"semidx", "upgrade"}
-	case "gcloud":
-		return []string{"gcloud", "components", "update", "--quiet"}
+		return []string{toolAIMemory, cmdUpgrade}
+	case binSemidx:
+		return []string{binSemidx, cmdUpgrade}
+	case binGcloud:
+		return []string{binGcloud, "components", cmdUpdate, "--quiet"}
 	default:
 		return nil
 	}
@@ -427,7 +426,7 @@ func parseInfraLatest(mode infraLatestMode, out string) (string, bool) {
 		if !strings.Contains(out, "update is available") {
 			return "", false
 		}
-		for _, line := range strings.Split(out, "\n") {
+		for _, line := range strings.Split(out, scannerNL) {
 			line = strings.TrimSpace(line)
 			if strings.HasPrefix(line, "latest:") {
 				return strings.TrimSpace(strings.TrimPrefix(line, "latest:")), true
@@ -436,7 +435,7 @@ func parseInfraLatest(mode infraLatestMode, out string) (string, bool) {
 		return "", true
 	case infraLatestGhExt:
 		// Newer gh adds an "Update available" column; older ones have none.
-		for _, line := range strings.Split(out, "\n") {
+		for _, line := range strings.Split(out, scannerNL) {
 			fields := strings.Fields(line)
 			if len(fields) >= 4 && strings.Contains(strings.Join(fields[3:], " "), "Update") {
 				return "", true
@@ -453,7 +452,7 @@ func truncateVersionOutput(v string) string {
 	if len(v) <= 60 {
 		return v
 	}
-	firstLine := strings.SplitN(v, "\n", 2)[0]
+	firstLine := strings.SplitN(v, scannerNL, 2)[0]
 	if len(firstLine) <= 60 {
 		return firstLine
 	}

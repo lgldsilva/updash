@@ -23,7 +23,7 @@ func (s *FlatpakSource) Label() string            { return "Flatpak" }
 func (s *FlatpakSource) Icon() string             { return "📦" }
 
 func (s *FlatpakSource) Scan(ctx context.Context, plat model.PlatformInfo) ([]*model.Item, error) {
-	out, err := execCommand(ctx, "flatpak", "remote-ls", "--app", "--updates", "--json")
+	out, err := execCommand(ctx, binFlatpak, "remote-ls", "--app", "--updates", "--json")
 	if err == nil {
 		return parseFlatpakJSONUpdates(ctx, out)
 	}
@@ -35,18 +35,18 @@ func (s *FlatpakSource) Scan(ctx context.Context, plat model.PlatformInfo) ([]*m
 func parseFlatpakJSONUpdates(ctx context.Context, out []byte) ([]*model.Item, error) {
 	trimmed := strings.TrimSpace(string(out))
 	if trimmed == "" || trimmed == "[]" {
-		return []*model.Item{okItem("flatpak", model.CatFlatpak)}, nil
+		return []*model.Item{okItem(binFlatpak, model.CatFlatpak)}, nil
 	}
 
 	var updates []flatpakRef
 	if err := json.Unmarshal(out, &updates); err != nil {
 		return []*model.Item{
-			{Name: "flatpak", Category: model.CatFlatpak, Status: model.StatusError, CurrentVer: "parse error"},
+			{Name: binFlatpak, Category: model.CatFlatpak, Status: model.StatusError, CurrentVer: "parse error"},
 		}, nil
 	}
 
 	if len(updates) == 0 {
-		return []*model.Item{okItem("flatpak", model.CatFlatpak)}, nil
+		return []*model.Item{okItem(binFlatpak, model.CatFlatpak)}, nil
 	}
 
 	installed := flatpakInstalledVersions(ctx)
@@ -58,7 +58,7 @@ func parseFlatpakJSONUpdates(ctx context.Context, out []byte) ([]*model.Item, er
 		}
 		cur := installed[id]
 		if cur == "" {
-			cur = "installed"
+			cur = statusInstalled
 		}
 		avail := upd.Version
 		if avail == "" {
@@ -74,14 +74,14 @@ func parseFlatpakJSONUpdates(ctx context.Context, out []byte) ([]*model.Item, er
 	}
 
 	if len(items) == 0 {
-		return []*model.Item{okItem("flatpak", model.CatFlatpak)}, nil
+		return []*model.Item{okItem(binFlatpak, model.CatFlatpak)}, nil
 	}
 
 	return items, nil
 }
 
 func flatpakInstalledVersions(ctx context.Context) map[string]string {
-	out, err := execCommand(ctx, "flatpak", "list", "--app", "--json")
+	out, err := execCommand(ctx, binFlatpak, cmdList, "--app", "--json")
 	if err != nil {
 		return nil
 	}
@@ -99,46 +99,26 @@ func flatpakInstalledVersions(ctx context.Context) map[string]string {
 }
 
 func scanFlatpakDryRun(ctx context.Context) ([]*model.Item, error) {
-	out, err := execCombined(ctx, "flatpak", "update", "--dry-run")
+	out, err := execCombined(ctx, binFlatpak, cmdUpdate, "--dry-run")
 	if err != nil {
-		msg := strings.TrimSpace(string(out))
-		if msg == "" {
-			msg = err.Error()
-		}
-		if len(msg) > 120 {
-			msg = msg[:120] + "…"
-		}
-		return []*model.Item{
-			{Name: "flatpak", Category: model.CatFlatpak, Status: model.StatusError, CurrentVer: msg},
-		}, nil
+		return dryRunErrorItem(out, err), nil
 	}
 
 	output := string(out)
-	if strings.Contains(output, "Nothing to do") || strings.Contains(output, "Nothing to update") || strings.Contains(output, "No updates") {
-		return []*model.Item{okItem("flatpak", model.CatFlatpak)}, nil
+	if flatpakNoUpdate(output) {
+		return []*model.Item{okItem(binFlatpak, model.CatFlatpak)}, nil
 	}
 
-	lines := strings.Split(output, "\n")
 	var items []*model.Item
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if strings.Contains(line, ".") && strings.Contains(line, "stable") && strings.Contains(line, "org.") {
-			fields := strings.Fields(line)
-			if len(fields) >= 5 {
-				items = append(items, &model.Item{
-					Name:         fields[1],
-					Category:     model.CatFlatpak,
-					CurrentVer:   fields[2],
-					AvailableVer: fields[3],
-					Status:       model.StatusOutdated,
-				})
-			}
+	for _, line := range strings.Split(output, scannerNL) {
+		if item := parseFlatpakUpdateLine(line); item != nil {
+			items = append(items, item)
 		}
 	}
 
 	if len(items) == 0 {
 		items = append(items, &model.Item{
-			Name:         "flatpak",
+			Name:         binFlatpak,
 			Category:     model.CatFlatpak,
 			Status:       model.StatusOutdated,
 			CurrentVer:   "updates pending",
@@ -147,4 +127,41 @@ func scanFlatpakDryRun(ctx context.Context) ([]*model.Item, error) {
 	}
 
 	return items, nil
+}
+
+func dryRunErrorItem(out []byte, err error) []*model.Item {
+	msg := strings.TrimSpace(string(out))
+	if msg == "" {
+		msg = err.Error()
+	}
+	if len(msg) > 120 {
+		msg = msg[:120] + "…"
+	}
+	return []*model.Item{{
+		Name: binFlatpak, Category: model.CatFlatpak, Status: model.StatusError, CurrentVer: msg,
+	}}
+}
+
+func flatpakNoUpdate(output string) bool {
+	return strings.Contains(output, "Nothing to do") ||
+		strings.Contains(output, "Nothing to update") ||
+		strings.Contains(output, "No updates")
+}
+
+func parseFlatpakUpdateLine(line string) *model.Item {
+	line = strings.TrimSpace(line)
+	if !strings.Contains(line, ".") || !strings.Contains(line, "stable") || !strings.Contains(line, "org.") {
+		return nil
+	}
+	fields := strings.Fields(line)
+	if len(fields) < 5 {
+		return nil
+	}
+	return &model.Item{
+		Name:         fields[1],
+		Category:     model.CatFlatpak,
+		CurrentVer:   fields[2],
+		AvailableVer: fields[3],
+		Status:       model.StatusOutdated,
+	}
 }

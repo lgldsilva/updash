@@ -11,7 +11,7 @@ import (
 // ShellUpdateCommand returns a shell-safe update command for an item.
 func ShellUpdateCommand(item *model.Item) string {
 	if item == nil {
-		return "false"
+		return falseCommand
 	}
 	switch item.Category {
 	case model.CatBrew:
@@ -20,13 +20,13 @@ func ShellUpdateCommand(item *model.Item) string {
 		if item.PackageID != "" {
 			return "mas update " + shellQuote(item.PackageID)
 		}
-		return "false"
+		return falseCommand
 	case model.CatApt:
 		return "sudo apt-get update && sudo apt-get upgrade -y"
 	case model.CatSnap:
 		return "sudo snap refresh --color=never"
 	default:
-		return "false"
+		return falseCommand
 	}
 }
 

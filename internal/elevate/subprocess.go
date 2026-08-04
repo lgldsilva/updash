@@ -46,6 +46,8 @@ func AttachSubprocessSudo(ctx context.Context, cmd *exec.Cmd) (func(), error) {
 	}, nil
 }
 
+// writeSudoPasswordFile keeps the password in a mode-0600 temporary file only
+// for the child-process window; callers remove it on every cleanup path.
 func writeSudoPasswordFile(password string) (string, error) {
 	pwFile, err := os.CreateTemp("", "updash-sudo-pw-*")
 	if err != nil {

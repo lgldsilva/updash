@@ -32,80 +32,82 @@ const (
 	KeyPasswordSubmit
 )
 
+var keyActions = map[string]KeyAction{
+	"up": KeyUp, "k": KeyUp,
+	"down": KeyDown, "j": KeyDown,
+	" ": KeySelect,
+	"u": KeyUpdateSelected, "U": KeyUpdateSelected,
+	"c": KeyCleanSelected, "C": KeyCleanSelected,
+	"r": KeyRefresh, "R": KeyRefresh,
+	"?": KeyHelp,
+	"q": KeyQuit, "Q": KeyQuit, "ctrl+c": KeyQuit,
+}
+
+var tabKeys = map[string]model.TabID{
+	"1": model.TabUpdates,
+	"2": model.TabCleanup,
+	"3": model.TabLogs,
+}
+
 // HandleKey processes a key press and returns an action.
 func (s *State) HandleKey(key string) KeyAction {
 	if s.ShowPassword {
-		switch key {
-		case "enter":
-			return KeyPasswordSubmit
-		case "esc":
-			s.CancelPassword()
-			return KeyCancel
-		case "backspace":
-			if len(s.PasswordInput) > 0 {
-				s.PasswordInput = s.PasswordInput[:len(s.PasswordInput)-1]
-			}
-			return KeyNone
-		default:
-			if len(key) == 1 {
-				s.PasswordInput += key
-			}
-			return KeyNone
-		}
+		return s.handlePasswordKey(key)
 	}
-
 	if s.ShowConfirm {
-		switch key {
-		case "y", "Y":
-			return KeyConfirm
-		case "n", "N", "esc":
-			s.ShowConfirm = false
-			s.ConfirmCmd = nil
-			s.PendingUpdateItems = nil
-			s.PendingCleanItems = nil
-			return KeyCancel
-		}
-		return KeyNone
+		return s.handleConfirmKey(key)
 	}
-
-	switch key {
-	case "up", "k":
-		return KeyUp
-	case "down", "j":
-		return KeyDown
-	case " ":
-		return KeySelect
-	case "u", "U":
-		return KeyUpdateSelected
-	case "a", "A":
-		// A = Update All on Updates tab, Clean All on Cleanup tab
+	if key == "a" || key == "A" {
+		// A = Update All on Updates tab, Clean All on Cleanup tab.
 		if s.ActiveTab == model.TabCleanup {
 			return KeyCleanAll
 		}
 		return KeyUpdateAll
-	case "c", "C":
-		return KeyCleanSelected
-	case "1":
-		s.ActiveTab = model.TabUpdates
-		s.ClampCursor()
-		return KeyTab
-	case "2":
-		s.ActiveTab = model.TabCleanup
-		s.ClampCursor()
-		return KeyTab
-	case "3":
-		s.ActiveTab = model.TabLogs
-		s.ClampCursor()
-		return KeyTab
-	case "r", "R":
-		return KeyRefresh
-	case "?":
-		return KeyHelp
-	case "q", "Q", "ctrl+c":
-		return KeyQuit
 	}
-
+	if tab, ok := tabKeys[key]; ok {
+		s.ActiveTab = tab
+		s.ClampCursor()
+		return KeyTab
+	}
+	if action, ok := keyActions[key]; ok {
+		return action
+	}
 	return KeyNone
+}
+
+func (s *State) handlePasswordKey(key string) KeyAction {
+	switch key {
+	case "enter":
+		return KeyPasswordSubmit
+	case "esc":
+		s.CancelPassword()
+		return KeyCancel
+	case "backspace":
+		if len(s.PasswordInput) > 0 {
+			s.PasswordInput = s.PasswordInput[:len(s.PasswordInput)-1]
+		}
+		return KeyNone
+	default:
+		if len(key) == 1 {
+			s.PasswordInput += key
+		}
+		return KeyNone
+	}
+}
+
+func (s *State) handleConfirmKey(key string) KeyAction {
+	switch key {
+	case "y", "Y":
+		return KeyConfirm
+	case "n", "N", "esc":
+		s.ShowConfirm = false
+		s.ConfirmCmd = nil
+		s.PendingUpdateItems = nil
+		s.PendingCleanItems = nil
+		return KeyCancel
+	default:
+		return KeyNone
+	}
 }
 
 // HandleAction executes a synchronous action and returns an optional async cmd.

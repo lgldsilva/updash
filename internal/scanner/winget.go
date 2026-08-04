@@ -12,7 +12,7 @@ import (
 type WingetSource struct{}
 
 func (s *WingetSource) Category() model.Category { return model.CatWinget }
-func (s *WingetSource) Label() string            { return "winget" }
+func (s *WingetSource) Label() string            { return binWinget }
 func (s *WingetSource) Icon() string             { return "🪟" }
 
 // wingetUpgradeJSON maps the `winget upgrade --json` output.
@@ -28,12 +28,12 @@ type wingetPkg struct {
 }
 
 func (s *WingetSource) Scan(ctx context.Context, plat model.PlatformInfo) ([]*model.Item, error) {
-	out, err := execCommand(ctx, "winget", "upgrade", "--json")
+	out, err := execCommand(ctx, binWinget, cmdUpgrade, "--json")
 	if err != nil {
 		// winget may exit non-zero when there are upgrades
 		if len(out) == 0 {
 			return []*model.Item{
-				{Name: "winget", Category: model.CatWinget, Status: model.StatusError, CurrentVer: "error"},
+				{Name: binWinget, Category: model.CatWinget, Status: model.StatusError, CurrentVer: "error"},
 			}, nil
 		}
 	}
@@ -70,7 +70,7 @@ func (s *WingetSource) Scan(ctx context.Context, plat model.PlatformInfo) ([]*mo
 
 	if len(items) == 0 {
 		items = append(items, &model.Item{
-			Name: "winget", Category: model.CatWinget, Status: model.StatusOK, CurrentVer: statusUpToDate,
+			Name: binWinget, Category: model.CatWinget, Status: model.StatusOK, CurrentVer: statusUpToDate,
 		})
 	}
 
@@ -79,10 +79,10 @@ func (s *WingetSource) Scan(ctx context.Context, plat model.PlatformInfo) ([]*mo
 
 // scanWingetText parses `winget upgrade` text output as fallback.
 func scanWingetText(ctx context.Context) ([]*model.Item, error) {
-	out, err := execCommand(ctx, "winget", "upgrade")
+	out, err := execCommand(ctx, binWinget, cmdUpgrade)
 	if err != nil {
 		return []*model.Item{
-			{Name: "winget", Category: model.CatWinget, Status: model.StatusOK, CurrentVer: statusUpToDate},
+			{Name: binWinget, Category: model.CatWinget, Status: model.StatusOK, CurrentVer: statusUpToDate},
 		}, nil
 	}
 
@@ -122,7 +122,7 @@ func scanWingetText(ctx context.Context) ([]*model.Item, error) {
 
 	if len(items) == 0 {
 		items = append(items, &model.Item{
-			Name: "winget", Category: model.CatWinget, Status: model.StatusOK, CurrentVer: statusUpToDate,
+			Name: binWinget, Category: model.CatWinget, Status: model.StatusOK, CurrentVer: statusUpToDate,
 		})
 	}
 

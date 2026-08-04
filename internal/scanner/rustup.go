@@ -12,18 +12,18 @@ import (
 type RustupSource struct{}
 
 func (s *RustupSource) Category() model.Category { return model.CatRustup }
-func (s *RustupSource) Label() string            { return "rustup" }
+func (s *RustupSource) Label() string            { return binRustup }
 func (s *RustupSource) Icon() string             { return "🦀" }
 
 func (s *RustupSource) Scan(ctx context.Context, plat model.PlatformInfo) ([]*model.Item, error) {
-	out, err := execCommand(ctx, "rustup", "check")
+	out, err := execCommand(ctx, binRustup, "check")
 	if err != nil {
-		return []*model.Item{errItem("rustup", model.CatRustup)}, nil
+		return []*model.Item{errItem(binRustup, model.CatRustup)}, nil
 	}
 	if items := parseRustupCheck(string(out)); len(items) > 0 {
 		return items, nil
 	}
-	return []*model.Item{okItem("rustup", model.CatRustup)}, nil
+	return []*model.Item{okItem(binRustup, model.CatRustup)}, nil
 }
 
 func parseRustupCheck(output string) []*model.Item {
@@ -61,16 +61,16 @@ func parseRustupCheckLine(line string) *model.Item {
 type CargoSource struct{}
 
 func (s *CargoSource) Category() model.Category { return model.CatCargo }
-func (s *CargoSource) Label() string            { return "cargo" }
+func (s *CargoSource) Label() string            { return binCargo }
 func (s *CargoSource) Icon() string             { return "🦀" }
 
 func (s *CargoSource) Scan(ctx context.Context, plat model.PlatformInfo) ([]*model.Item, error) {
 	if _, err := exec.LookPath("cargo-install-update"); err != nil {
 		return []*model.Item{
-			{Name: "cargo", Category: model.CatCargo, Status: model.StatusOK, CurrentVer: "not installed"},
+			{Name: binCargo, Category: model.CatCargo, Status: model.StatusOK, CurrentVer: "not installed"},
 		}, nil
 	}
 	return []*model.Item{
-		{Name: "cargo", Category: model.CatCargo, Status: model.StatusOK, CurrentVer: "cargo-install-update available"},
+		{Name: binCargo, Category: model.CatCargo, Status: model.StatusOK, CurrentVer: "cargo-install-update available"},
 	}, nil
 }
