@@ -77,13 +77,13 @@ func agentCatalog() []agentDef {
 		{name: "Antigravity", binary: binAntigravity, verCmd: []string{binAntigravity, flagVersion}, mode: agentUpdateManual},
 		{name: "Agy", binary: "agy", verCmd: []string{"agy", flagVersion}, mode: agentUpdateManual},
 		{name: "MimoCode", binary: "mimo", verCmd: []string{"mimo", flagVersion}, mode: agentUpdateManual},
-		{name: "Codex", binary: "codex", verCmd: []string{"codex", flagVersion}, mode: agentUpdateAuto, npmPackage: "@openai/codex", updateCmd: []string{binNpm, cmdInstall, flagGlobal, "@openai/codex@latest"}},
+		{name: "Codex", binary: "codex", verCmd: []string{"codex", flagVersion}, mode: agentUpdateAuto, npmPackage: "@openai/codex", updateCmd: npmGlobalInstallCmd("@openai/codex")},
 		{name: "Gemini CLI", binary: binGemini, verCmd: []string{binGemini, flagVersion}, mode: agentUpdateAuto, npmPackage: "@google/gemini-cli", updateCmd: []string{binGemini, cmdUpdate}},
 		{name: "Copilot CLI", binary: binCopilot, verCmd: []string{binCopilot, flagVersion}, mode: agentUpdateAuto, updateCmd: []string{binCopilot, cmdUpdate}},
 		{name: "Crush", binary: "crush", verCmd: []string{"crush", flagVersion}, mode: agentUpdateManual},
 		{name: "Cursor", binary: binCursor, verCmd: []string{binCursor, flagVersion}, mode: agentUpdateManual},
-		{name: binPi, binary: binPi, verCmd: []string{binPi, flagVersion}, mode: agentUpdateAuto, npmPackage: "@earendil-works/pi-coding-agent", updateCmd: []string{binNpm, cmdInstall, flagGlobal, "@earendil-works/pi-coding-agent@latest"}},
-		{name: "Qwen Code", binary: "qwen", verCmd: []string{"qwen", flagVersion}, mode: agentUpdateAuto, npmPackage: "@qwen-code/qwen-code", updateCmd: []string{binNpm, cmdInstall, flagGlobal, "@qwen-code/qwen-code@latest"}},
+		{name: binPi, binary: binPi, verCmd: []string{binPi, flagVersion}, mode: agentUpdateAuto, npmPackage: "@earendil-works/pi-coding-agent", updateCmd: npmGlobalInstallCmd("@earendil-works/pi-coding-agent")},
+		{name: "Qwen Code", binary: "qwen", verCmd: []string{"qwen", flagVersion}, mode: agentUpdateAuto, npmPackage: "@qwen-code/qwen-code", updateCmd: npmGlobalInstallCmd("@qwen-code/qwen-code")},
 		{name: "Aider", binary: "aider", verCmd: []string{"aider", flagVersion}, mode: agentUpdateManual, keepPolicy: "pipx upgrade aider (or pip install -U aider)"},
 		{name: "Amazon Q", binary: "q", verCmd: []string{"q", flagVersion}, mode: agentUpdateManual, keepPolicy: "q doctor / installer re-run"},
 		{name: "Windsurf", binary: binWindsurf, verCmd: []string{binWindsurf, flagVersion}, mode: agentUpdateManual},
@@ -111,9 +111,19 @@ func AgentUpdateCommand(name string) []string {
 		return a.updateCmd
 	}
 	if a.npmPackage != "" {
-		return []string{binNpm, cmdInstall, flagGlobal, a.npmPackage + "@latest"}
+		return npmGlobalInstallCmd(a.npmPackage)
 	}
 	return nil
+}
+
+// npmGlobalInstallCmd builds a global npm install for one agent package.
+// npm >= 12 blocks install scripts by default unless allowScripts covers
+// the package (RFC npm/rfcs#868), silently skipping postinstall — which
+// breaks wrapper packages such as @anthropic-ai/claude-code ("native binary
+// not installed"). Allow scripts explicitly for the package being
+// installed; older npm versions ignore the unknown config key.
+func npmGlobalInstallCmd(pkg string) []string {
+	return []string{binNpm, cmdInstall, flagGlobal, "--allow-scripts=" + pkg, pkg + "@latest"}
 }
 
 // AgentKeepPolicy returns the manual-mode reason for an agent ("" = auto).

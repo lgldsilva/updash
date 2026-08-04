@@ -517,16 +517,45 @@ func batchNpmUpgrade(ctx context.Context, items []*model.Item, opts Options) []*
 	for _, it := range items {
 		it.Status = model.StatusUpdating
 	}
-	cmd := npmUpdateCmd(ctx)
+	cmd := npmUpdateCmd(ctx, npmAllowScriptsFlag(items))
 	return batchMarkAll(items, runCmdWithBuilder(ctx, items[0], cmd, opts))
 }
 
 // npmUpdateCmd runs global npm update; uses sudo when prefix is system-wide (/usr).
-func npmUpdateCmd(ctx context.Context) *exec.Cmd {
+//
+// npm >= 12 blocks dependency install scripts by default unless the package
+// is covered by an allowScripts policy (RFC npm/rfcs#868): the install
+// "succeeds" while postinstall is silently skipped. For wrapper packages
+// such as @anthropic-ai/claude-code that leaves a placeholder stub instead
+// of the native binary ("Error: claude native binary not installed").
+// Pass the extra args (typically npmAllowScriptsFlag) so lifecycle scripts
+// of the packages being updated are still allowed to run. Older npm
+// versions ignore the unknown config key.
+func npmUpdateCmd(ctx context.Context, extraArgs ...string) *exec.Cmd {
+	args := append([]string{commandUpdate, flagGlobal}, extraArgs...)
 	if npmGlobalNeedsSudo(ctx) {
-		return elevate.Sudo(ctx, npmCommand, commandUpdate, flagGlobal)
+		return elevate.Sudo(ctx, npmCommand, args...)
 	}
-	return exec.CommandContext(ctx, npmCommand, commandUpdate, flagGlobal)
+	return exec.CommandContext(ctx, npmCommand, args...)
+}
+
+// npmAllowScriptsFlag builds the --allow-scripts flag covering every
+// package name in the batch (deduplicated, empties dropped). Returns ""
+// when there is nothing to allow.
+func npmAllowScriptsFlag(items []*model.Item) string {
+	seen := make(map[string]bool, len(items))
+	names := make([]string, 0, len(items))
+	for _, it := range items {
+		if it == nil || it.Name == "" || seen[it.Name] {
+			continue
+		}
+		seen[it.Name] = true
+		names = append(names, it.Name)
+	}
+	if len(names) == 0 {
+		return ""
+	}
+	return "--allow-scripts=" + strings.Join(names, ",")
 }
 
 func npmGlobalNeedsSudo(ctx context.Context) bool {
