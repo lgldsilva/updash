@@ -724,7 +724,11 @@ func manualAgentResult(item *model.Item, reason string) *Result {
 
 func updateAgent(ctx context.Context, item *model.Item, opts Options) *Result {
 	if cmd := scanner.AgentUpdateCommand(item.Name); len(cmd) > 0 {
-		return runCmd(ctx, item, opts, cmd[0], cmd[1:]...)
+		res := runCmd(ctx, item, opts, cmd[0], cmd[1:]...)
+		if item.Name == agentClaudeCode {
+			return ensureClaudeNativeBinary(ctx, item, res, cmd, opts)
+		}
+		return res
 	}
 	reason := item.KeepPolicy
 	if reason == "" {
