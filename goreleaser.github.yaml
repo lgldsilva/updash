@@ -80,6 +80,10 @@ release:
     name: updash
   draft: false
   prerelease: auto
+  # Re-dispatches of release.yml for an existing tag (the recovery path)
+  # must overwrite the partial artifacts from a failed run instead of
+  # dying on 422 already_exists.
+  replace_existing_artifacts: true
 
 # ── Homebrew ──────────────────────────────────────────────────────────────
 brews:
