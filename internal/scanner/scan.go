@@ -52,15 +52,32 @@ func ScanSource(ctx context.Context, src Source, plat model.PlatformInfo) *model
 		err   error
 	}
 	ch := make(chan scanResult, 1)
+	done := make(chan struct{})
 	go func() {
+		defer close(done)
 		items, err := src.Scan(scanCtx, plat)
-		ch <- scanResult{items: items, err: err}
+		select {
+		case ch <- scanResult{items: items, err: err}:
+		case <-scanCtx.Done():
+		}
 	}()
 
 	select {
 	case r := <-ch:
 		return buildSummary(src, r.items, r.err)
 	case <-scanCtx.Done():
+		// Cancel the context and wait a short grace period so the worker
+		// goroutine observes cancellation before the next test swaps the
+		// global exec mocks. This avoids data-race reports in tests that
+		// exercise ScanSource with tight budgets.
+		cancel()
+		const grace = 250 * time.Millisecond
+		graceCtx, graceCancel := context.WithTimeout(ctx, grace)
+		defer graceCancel()
+		select {
+		case <-done:
+		case <-graceCtx.Done():
+		}
 		return buildSummary(src, []*model.Item{{
 			Name:       src.Label(),
 			Category:   src.Category(),
