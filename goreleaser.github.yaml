@@ -113,6 +113,9 @@ scoops:
     license: MIT
 
 # ── Linux packages ───────────────────────────────────────────────────────
+# Native Linux packages are attached to every GitHub release alongside the
+# archives. They let users install through their distribution tooling without
+# granting the application ownership of /usr/bin for self-updates.
 nfpms:
   - id: updash-packages
     package_name: updash
@@ -123,7 +126,7 @@ nfpms:
       System Update Dashboard for macOS, Linux, and Windows —
       one binary for package updates, AI tools, and smart cleanup.
     license: MIT
-    formats: [deb, rpm, apk]
+    formats: [deb, rpm, apk, archlinux]
     bindir: /usr/bin
     contents:
       - src: LICENSE
