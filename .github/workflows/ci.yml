@@ -164,7 +164,7 @@ jobs:
       - name: Upload gosec results
         if: always()
         continue-on-error: true
-        uses: github/codeql-action/upload-sarif@v4.37.4
+        uses: github/codeql-action/upload-sarif@v4.37.6
         with:
           sarif_file: gosec-results.sarif
 
@@ -205,7 +205,7 @@ jobs:
       - name: Upload Trivy results
         if: always()
         continue-on-error: true
-        uses: github/codeql-action/upload-sarif@v4.37.4
+        uses: github/codeql-action/upload-sarif@v4.37.6
         with:
           sarif_file: trivy-fs-results.sarif
 
