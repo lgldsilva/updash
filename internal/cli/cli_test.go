@@ -331,21 +331,33 @@ func TestIndexResultsAndClassify(t *testing.T) {
 	it := &model.Item{Name: "x", Status: model.StatusOutdated, Category: model.CatBrew}
 	r := &updater.Result{Item: it, Success: false, Error: "boom"}
 	m := indexResults([]*updater.Result{r, nil, {Item: nil}})
-	if m[it] != r {
+	if m[keyOf(it)] != r {
 		t.Fatal("index miss")
 	}
+
+	// classifyRemaining always sees a FRESH set of *model.Item (a second,
+	// independent Scan() pass) — a distinct pointer with the same
+	// Category+Name must still resolve to r, not fall back to the generic
+	// "ainda desatualizado após update" message.
+	rescanned := &model.Item{Name: "x", Status: model.StatusOutdated, Category: model.CatBrew}
 	stats := &verifyStats{}
 	need, man, fail, other := classifyRemaining(
-		[]*model.SourceSummary{{Items: []*model.Item{it, {Name: "ok", Status: model.StatusOK}}}},
+		[]*model.SourceSummary{{Items: []*model.Item{rescanned, {Name: "ok", Status: model.StatusOK}}}},
 		m,
 		stats,
 	)
 	if stats.remaining != 1 {
 		t.Fatalf("remaining=%d", stats.remaining)
 	}
+	if len(fail) != 1 || fail[0] != rescanned {
+		t.Fatalf("fail=%+v", fail)
+	}
+	kind, reason := updater.ClassifyItem(rescanned, m[keyOf(rescanned)])
+	if kind != updater.KindFailed || reason != "boom" {
+		t.Fatalf("kind=%v reason=%q, want KindFailed/boom (cross-scan result lookup regressed)", kind, reason)
+	}
 	_ = need
 	_ = man
-	_ = fail
 	_ = other
 }
 

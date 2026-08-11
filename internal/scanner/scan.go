@@ -11,6 +11,13 @@ const (
 	defaultSourceTimeout = 45 * time.Second
 	brewSourceTimeout    = 90 * time.Second
 	aptSourceTimeout     = 20 * time.Second
+	// AI Agents (~10 CLI probes, several Node.js cold-starts) and OpenCode
+	// Plugins (full npm dependency-tree registry check) are cheap on an
+	// idle machine but RunAll fires every source concurrently — on a
+	// busy multi-service host (e.g. a homelab box also running backups,
+	// a media server, queue workers) that contention alone can push a
+	// normally-sub-5s probe well past 45s.
+	agentSourceTimeout = 90 * time.Second
 )
 
 // EnabledSources returns scanners for the current platform (exported for TUI orchestration).
@@ -36,6 +43,8 @@ func SourceTimeout(cat model.Category) time.Duration {
 		return brewSourceTimeout
 	case model.CatApt:
 		return aptSourceTimeout
+	case model.CatAgent, model.CatOpenCodePlugins:
+		return agentSourceTimeout
 	default:
 		return defaultSourceTimeout
 	}

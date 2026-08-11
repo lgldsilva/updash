@@ -36,6 +36,12 @@ func TestSourceTimeout(t *testing.T) {
 	if SourceTimeout(model.CatBrew) < SourceTimeout(model.CatApt) {
 		t.Fatal("brew should allow longer than apt")
 	}
+	if SourceTimeout(model.CatAgent) <= SourceTimeout(model.CatNpm) {
+		t.Fatal("agent probing (many concurrent CLI spawns) should allow longer than the default budget")
+	}
+	if SourceTimeout(model.CatOpenCodePlugins) <= SourceTimeout(model.CatNpm) {
+		t.Fatal("opencode plugins (full npm dependency-tree check) should allow longer than the default budget")
+	}
 }
 
 func TestIsCleanupCategory_All(t *testing.T) {

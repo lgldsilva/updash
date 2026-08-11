@@ -31,7 +31,7 @@ func (s *OpenCodeSource) Scan(ctx context.Context, plat model.PlatformInfo) ([]*
 		}, nil
 	}
 
-	out, err := execCombined(ctx, binNpm, "outdated", "--prefix", dir, "--json")
+	out, err := execCommand(ctx, binNpm, "outdated", "--prefix", dir, "--json")
 	if err != nil && len(out) == 0 {
 		return []*model.Item{
 			{Name: nameOpenCodePlugins, Category: model.CatOpenCodePlugins, Status: model.StatusError, CurrentVer: "npm outdated failed"},

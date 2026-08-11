@@ -43,11 +43,11 @@ func TestOpenCodeSource_Scan_outdated(t *testing.T) {
 	OpenCodeConfigDir = func() string { return dir }
 	t.Cleanup(func() { OpenCodeConfigDir = oldDir })
 
-	oldExec := execCombined
-	execCombined = func(ctx context.Context, name string, args ...string) ([]byte, error) {
+	oldExec := execCommand
+	execCommand = func(ctx context.Context, name string, args ...string) ([]byte, error) {
 		return []byte(`{"plugin-a":{"current":"1.0.0","wanted":"1.1.0","latest":"1.2.0"}}`), nil
 	}
-	t.Cleanup(func() { execCombined = oldExec })
+	t.Cleanup(func() { execCommand = oldExec })
 
 	items, err := (&OpenCodeSource{}).Scan(context.Background(), model.PlatformInfo{HasNpm: true})
 	if err != nil {
@@ -70,11 +70,11 @@ func TestOpenCodeSource_Scan_upToDate(t *testing.T) {
 	OpenCodeConfigDir = func() string { return dir }
 	t.Cleanup(func() { OpenCodeConfigDir = oldDir })
 
-	oldExec := execCombined
-	execCombined = func(ctx context.Context, name string, args ...string) ([]byte, error) {
+	oldExec := execCommand
+	execCommand = func(ctx context.Context, name string, args ...string) ([]byte, error) {
 		return []byte(`{}`), nil
 	}
-	t.Cleanup(func() { execCombined = oldExec })
+	t.Cleanup(func() { execCommand = oldExec })
 
 	items, err := (&OpenCodeSource{}).Scan(context.Background(), model.PlatformInfo{})
 	if err != nil {

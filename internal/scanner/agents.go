@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"regexp"
 	"strings"
+	"sync"
 
 	"github.com/lgldsilva/updash/internal/model"
 )
@@ -139,24 +140,44 @@ func AgentKeepPolicy(name string) string {
 }
 
 func (s *AgentSource) Scan(ctx context.Context, plat model.PlatformInfo) ([]*model.Item, error) {
-	var items []*model.Item
 	catalog := agentCatalog()
+	var installed []agentDef
 	for _, a := range catalog {
-		if _, err := exec.LookPath(a.binary); err != nil {
-			continue
+		if _, err := exec.LookPath(a.binary); err == nil {
+			installed = append(installed, a)
 		}
-		items = append(items, probeAgentItem(ctx, plat, a))
 	}
-	if len(items) == 0 {
+	if len(installed) == 0 {
 		return []*model.Item{
 			{Name: "agents", Category: model.CatAgent, Status: model.StatusOK, CurrentVer: verNoneInstalled},
 		}, nil
 	}
+	items := probeAgentsConcurrently(ctx, plat, installed)
 	if plat.HasNpm {
 		applyNpmOutdatedToAgents(ctx, items, catalog)
 		resolveRegistryLatest(ctx, items, catalog)
 	}
 	return items, nil
+}
+
+// probeAgentsConcurrently probes every installed agent's version in
+// parallel. Each probe already has its own budget (agentProbeTimeout); a
+// serial loop over ~10 CLIs — several of them Node-based with a slow cold
+// start — sums well past the 45s per-source scan timeout on modest
+// hardware. Probing is independent per tool, so there's nothing to
+// serialize for.
+func probeAgentsConcurrently(ctx context.Context, plat model.PlatformInfo, installed []agentDef) []*model.Item {
+	items := make([]*model.Item, len(installed))
+	var wg sync.WaitGroup
+	for i, a := range installed {
+		wg.Add(1)
+		go func(i int, a agentDef) {
+			defer wg.Done()
+			items[i] = probeAgentItem(ctx, plat, a)
+		}(i, a)
+	}
+	wg.Wait()
+	return items
 }
 
 func probeAgentItem(ctx context.Context, plat model.PlatformInfo, a agentDef) *model.Item {
@@ -197,7 +218,7 @@ func npmInstalledPackages(ctx context.Context) map[string]bool {
 }
 
 func applyNpmOutdatedToAgents(ctx context.Context, items []*model.Item, catalog []agentDef) {
-	out, err := execCombined(ctx, binNpm, "outdated", flagGlobal, "--json")
+	out, err := execCommand(ctx, binNpm, "outdated", flagGlobal, "--json")
 	if err != nil && len(out) == 0 {
 		return
 	}
