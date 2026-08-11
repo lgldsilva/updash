@@ -14,6 +14,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -894,7 +895,10 @@ func TestInstall_downloadOK(t *testing.T) {
 	elfBin := []byte{0x7f, 'E', 'L', 'F', 1, 2, 3, 4}
 	archive := makeTarGz(t, map[string][]byte{"updash": elfBin})
 	h := sha256.Sum256(archive)
-	checksum := hex.EncodeToString(h[:]) + "  updash_1.0.0_linux_amd64.tar.gz\n"
+	// install() always resolves the archive name from runtime.GOOS/GOARCH
+	// (downloadReleaseBinary's call site), not a hardcoded platform — the
+	// fixture must match whatever host this test actually runs on.
+	checksum := hex.EncodeToString(h[:]) + "  " + archiveName("v1.0.0", runtime.GOOS, runtime.GOARCH) + "\n"
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasSuffix(r.URL.Path, "checksums.txt") {
@@ -935,7 +939,8 @@ func TestRun_autoUpgrade_success(t *testing.T) {
 	elfBin := []byte{0x7f, 'E', 'L', 'F', 1, 2, 3, 4}
 	archive := makeTarGz(t, map[string][]byte{"updash": elfBin})
 	h := sha256.Sum256(archive)
-	checksum := hex.EncodeToString(h[:]) + "  updash_2.0.0_linux_amd64.tar.gz\n"
+	// Same runtime.GOOS/GOARCH portability fix as TestInstall_downloadOK.
+	checksum := hex.EncodeToString(h[:]) + "  " + archiveName("v2.0.0", runtime.GOOS, runtime.GOARCH) + "\n"
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/releases/latest", func(w http.ResponseWriter, _ *http.Request) {
