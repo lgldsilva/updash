@@ -162,11 +162,22 @@ func PrintVerifyReport(
 	return stats
 }
 
-func indexResults(results []*updater.Result) map[*model.Item]*updater.Result {
-	m := make(map[*model.Item]*updater.Result, len(results))
+// itemKey identifies an item across two independent scan passes, whose
+// *model.Item pointers never match (each Scan() allocates fresh objects).
+type itemKey struct {
+	category model.Category
+	name     string
+}
+
+func keyOf(it *model.Item) itemKey {
+	return itemKey{category: it.Category, name: it.Name}
+}
+
+func indexResults(results []*updater.Result) map[itemKey]*updater.Result {
+	m := make(map[itemKey]*updater.Result, len(results))
 	for _, r := range results {
 		if r != nil && r.Item != nil {
-			m[r.Item] = r
+			m[keyOf(r.Item)] = r
 		}
 	}
 	return m
@@ -186,7 +197,7 @@ func printVerifyHeader(ok, fail, skipped int) {
 
 func classifyRemaining(
 	updates []*model.SourceSummary,
-	resultByItem map[*model.Item]*updater.Result,
+	resultByItem map[itemKey]*updater.Result,
 	stats *verifyStats,
 ) (needPass, manual, failed, other []*model.Item) {
 	for _, s := range updates {
@@ -195,7 +206,7 @@ func classifyRemaining(
 				continue
 			}
 			stats.remaining++
-			kind, _ := updater.ClassifyItem(it, resultByItem[it])
+			kind, _ := updater.ClassifyItem(it, resultByItem[keyOf(it)])
 			switch kind {
 			case updater.KindNeedsPassword:
 				needPass = append(needPass, it)
@@ -211,15 +222,16 @@ func classifyRemaining(
 	return needPass, manual, failed, other
 }
 
-func printVerifyGroup(title string, items []*model.Item, results map[*model.Item]*updater.Result) {
+func printVerifyGroup(title string, items []*model.Item, results map[itemKey]*updater.Result) {
 	if len(items) == 0 {
 		return
 	}
 	fmt.Printf("\n  %s:\n", title)
 	for _, it := range items {
-		_, reason := updater.ClassifyItem(it, results[it])
-		if reason == "" && results[it] != nil {
-			reason = results[it].Error
+		res := results[keyOf(it)]
+		_, reason := updater.ClassifyItem(it, res)
+		if reason == "" && res != nil {
+			reason = res.Error
 		}
 		if reason == "" && it.KeepPolicy != "" {
 			reason = it.KeepPolicy
