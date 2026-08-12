@@ -513,26 +513,76 @@ func batchScoopUpgrade(ctx context.Context, items []*model.Item, opts Options) [
 	return batchMarkAll(items, runCmdWithBuilder(ctx, items[0], cmd, opts))
 }
 
+// npmManagedElsewhereNote explains why a protected npm item is skipped here.
+const npmManagedElsewhereNote = "managed by opencode upgrade (single owner)"
+
 func batchNpmUpgrade(ctx context.Context, items []*model.Item, opts Options) []*Result {
 	for _, it := range items {
 		it.Status = model.StatusUpdating
 	}
-	cmd := npmUpdateCmd(ctx, npmAllowScriptsFlag(items))
-	return batchMarkAll(items, runCmdWithBuilder(ctx, items[0], cmd, opts))
+	updatable, protected := partitionNpmItems(items)
+	results := make([]*Result, 0, len(items))
+	// Protected packages are owned by another path (opencode upgrade); never
+	// let the generic npm batch touch them.
+	for _, it := range protected {
+		it.Status = model.StatusOK
+		it.Log = npmManagedElsewhereNote
+		results = append(results, &Result{Item: it, Success: true, Output: npmManagedElsewhereNote})
+	}
+	if len(updatable) == 0 {
+		return results
+	}
+	cmd := npmUpdateCmd(ctx, updatable)
+	return append(results, batchMarkAll(updatable, runCmdWithBuilder(ctx, updatable[0], cmd, opts))...)
 }
 
-// npmUpdateCmd runs global npm update; uses sudo when prefix is system-wide (/usr).
+// partitionNpmItems splits a batch into packages the generic npm update may
+// touch and protected ones owned by another update path. Pure (no I/O).
+func partitionNpmItems(items []*model.Item) (updatable, protected []*model.Item) {
+	for _, it := range items {
+		if it == nil {
+			continue
+		}
+		if scanner.IsProtectedNpmPackage(it.Name) {
+			protected = append(protected, it)
+		} else {
+			updatable = append(updatable, it)
+		}
+	}
+	return updatable, protected
+}
+
+// npmGlobalUpdateArgs builds the explicit package list for `npm update -g`:
+// only the non-protected, deduplicated names. Targeting names instead of a bare
+// `npm update -g` is what keeps protected packages out and matches the
+// per-package model used by brew. Pure (no I/O).
+func npmGlobalUpdateArgs(items []*model.Item) []string {
+	seen := make(map[string]bool, len(items))
+	names := make([]string, 0, len(items))
+	for _, it := range items {
+		if it == nil || it.Name == "" || seen[it.Name] {
+			continue
+		}
+		seen[it.Name] = true
+		names = append(names, it.Name)
+	}
+	return append([]string{commandUpdate, flagGlobal}, names...)
+}
+
+// npmUpdateCmd builds the global npm update command for the given (already
+// filtered, non-protected) items: `npm update -g <names...> --allow-scripts=…`
+// (with sudo when the global prefix is system-wide).
 //
-// npm >= 12 blocks dependency install scripts by default unless the package
-// is covered by an allowScripts policy (RFC npm/rfcs#868): the install
-// "succeeds" while postinstall is silently skipped. For wrapper packages
-// such as @anthropic-ai/claude-code that leaves a placeholder stub instead
-// of the native binary ("Error: claude native binary not installed").
-// Pass the extra args (typically npmAllowScriptsFlag) so lifecycle scripts
-// of the packages being updated are still allowed to run. Older npm
-// versions ignore the unknown config key.
-func npmUpdateCmd(ctx context.Context, extraArgs ...string) *exec.Cmd {
-	args := append([]string{commandUpdate, flagGlobal}, extraArgs...)
+// npm >= 12 blocks dependency install scripts by default unless the package is
+// covered by an allowScripts policy (RFC npm/rfcs#868): the install "succeeds"
+// while postinstall is silently skipped, leaving a placeholder stub instead of
+// the native binary. Pass --allow-scripts covering the names being updated so
+// their lifecycle scripts still run; older npm versions ignore the key.
+func npmUpdateCmd(ctx context.Context, items []*model.Item) *exec.Cmd {
+	args := npmGlobalUpdateArgs(items)
+	if allow := npmAllowScriptsFlag(items); allow != "" {
+		args = append(args, allow)
+	}
 	if npmGlobalNeedsSudo(ctx) {
 		return elevate.Sudo(ctx, npmCommand, args...)
 	}
@@ -663,7 +713,21 @@ func runElevatedCmd(ctx context.Context, item *model.Item, opts Options, name st
 }
 
 func runCmd(ctx context.Context, item *model.Item, opts Options, name string, args ...string) *Result {
-	return runCmdWithBuilder(ctx, item, exec.CommandContext(ctx, name, args...), opts)
+	stdout, stderr, err := runUpdateCmd(ctx, opts, name, args...)
+	result := &Result{Item: item}
+	if err != nil {
+		result.Success = false
+		result.Error = err.Error()
+		result.Output = stderr + stdout
+		item.Status = model.StatusError
+		item.Log = result.Output
+	} else {
+		result.Success = true
+		result.Output = stdout
+		item.Status = model.StatusDone
+		item.Log = result.Output
+	}
+	return result
 }
 
 func runCmdWithBuilder(ctx context.Context, item *model.Item, cmd *exec.Cmd, opts Options) *Result {
@@ -725,8 +789,11 @@ func manualAgentResult(item *model.Item, reason string) *Result {
 func updateAgent(ctx context.Context, item *model.Item, opts Options) *Result {
 	if cmd := scanner.AgentUpdateCommand(item.Name); len(cmd) > 0 {
 		res := runCmd(ctx, item, opts, cmd[0], cmd[1:]...)
-		if item.Name == agentClaudeCode {
+		switch item.Name {
+		case agentClaudeCode:
 			return ensureClaudeNativeBinary(ctx, item, res, cmd, opts)
+		case agentOpenCode:
+			return ensureOpenCodeHealthy(ctx, item, res)
 		}
 		return res
 	}
