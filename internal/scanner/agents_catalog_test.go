@@ -1,6 +1,7 @@
 package scanner
 
 import (
+	"context"
 	"testing"
 
 	"github.com/lgldsilva/updash/internal/model"
@@ -59,6 +60,37 @@ func TestAgentUpdateCommand(t *testing.T) {
 	}
 	if cmd := AgentUpdateCommand("no-such-agent"); cmd != nil {
 		t.Fatalf("unknown agent must have nil update cmd, got %v", cmd)
+	}
+}
+
+// OpenCode owns an npmPackage (opencode-ai) so the existing outdated-detection
+// machinery flags it, but its explicit updateCmd must still win so the upgrade
+// runs `opencode upgrade` (single owner) — never a generic npm install.
+func TestAgentUpdateCommand_OpenCode(t *testing.T) {
+	cmd := AgentUpdateCommand("OpenCode")
+	if len(cmd) != 2 || cmd[0] != "opencode" || cmd[1] != "upgrade" {
+		t.Fatalf("OpenCode update cmd = %v, want [opencode upgrade]", cmd)
+	}
+}
+
+// When opencode-ai shows up in `npm outdated -g`, the OpenCode agent item must
+// be flagged outdated — that is what makes `opencode upgrade` actually fire
+// under --update (single owner), instead of the npm path touching it.
+func TestOpenCodeFlaggedOutdatedViaNpm(t *testing.T) {
+	enableMocks()
+	defer disableMocks()
+
+	setMock("npm", []string{"outdated", "-g", "--json"},
+		`{"opencode-ai":{"current":"1.18.0","wanted":"1.18.16","latest":"1.18.16"}}`, nil)
+
+	items := []*model.Item{{
+		Name: "OpenCode", Category: model.CatAgent,
+		Status: model.StatusOK, PackageID: "opencode-ai", CurrentVer: "1.18.0",
+	}}
+	applyNpmOutdatedToAgents(context.Background(), items, agentCatalog())
+
+	if items[0].Status != model.StatusOutdated || items[0].AvailableVer != "1.18.16" {
+		t.Fatalf("OpenCode not flagged outdated via opencode-ai: %+v", items[0])
 	}
 }
 

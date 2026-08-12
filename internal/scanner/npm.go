@@ -30,5 +30,8 @@ func (s *NpmSource) Scan(ctx context.Context, plat model.PlatformInfo) ([]*model
 	}
 
 	items := ParseNpmOutdatedJSON(out, model.CatNpm)
+	// Drop packages owned by another update path (e.g. opencode-ai is owned by
+	// `opencode upgrade`); they must not appear as a second npm update target.
+	items = filterProtectedNpm(items)
 	return okOrOutdated(binNpm, model.CatNpm, items), nil
 }
