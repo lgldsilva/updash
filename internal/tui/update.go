@@ -300,20 +300,24 @@ func (s *State) pageSize() int {
 	return n
 }
 
+func isSelectableStatus(status model.Status) bool {
+	return status == model.StatusOutdated || status == model.StatusCleanCandidate
+}
+
 func (s *State) toggleSelection() {
 	items := s.CurrentItems()
 	if s.Cursor < 0 || s.Cursor >= len(items) {
 		return
 	}
 	item := items[s.Cursor]
-	if item.Status == model.StatusOutdated || item.Status == model.StatusCleanCandidate {
+	if isSelectableStatus(item.Status) {
 		item.Selected = !item.Selected
 	}
 }
 
 func (s *State) setSelectionAll(selected bool) {
 	for _, it := range s.CurrentItems() {
-		if it.Status == model.StatusOutdated || it.Status == model.StatusCleanCandidate {
+		if isSelectableStatus(it.Status) {
 			it.Selected = selected
 		}
 	}
@@ -326,7 +330,7 @@ func (s *State) setSelectionCategory(selected bool) {
 	}
 	cat := items[s.Cursor].Category
 	for _, it := range items {
-		if it.Category == cat && (it.Status == model.StatusOutdated || it.Status == model.StatusCleanCandidate) {
+		if it.Category == cat && isSelectableStatus(it.Status) {
 			it.Selected = selected
 		}
 	}
@@ -378,51 +382,50 @@ func (s *State) runRefresh() tea.Cmd {
 // Update (selected + all)
 // ---------------------------------------------------------------------------
 
+// collectOutdatedItems returns all outdated items, or only selected ones when selectedOnly is true.
+func (s *State) collectOutdatedItems(selectedOnly bool) []*model.Item {
+	var out []*model.Item
+	for _, it := range s.FlattenItems() {
+		if it.Status != model.StatusOutdated {
+			continue
+		}
+		if selectedOnly && !it.Selected {
+			continue
+		}
+		out = append(out, it)
+	}
+	return out
+}
+
+// showUpdateConfirm prepares the confirmation dialog for an update batch.
+func (s *State) showUpdateConfirm(items []*model.Item) {
+	s.ShowConfirm = true
+	s.ConfirmMsg = confirmMessage("Update", items)
+	s.PendingUpdateItems = items
+	s.ConfirmCmd = func(program *tea.Program) tea.Cmd {
+		return s.startUpdateAll(items, program)
+	}
+}
+
 // runUpdateSelected prepares selected items for async update and shows confirm.
 func (s *State) runUpdateSelected() {
-	items := s.FlattenItems()
-	var selected []*model.Item
-	for _, it := range items {
-		if it.Selected && it.Status == model.StatusOutdated {
-			selected = append(selected, it)
-		}
-	}
-
+	selected := s.collectOutdatedItems(true)
 	if len(selected) == 0 {
 		s.LastSummary = "No items selected — press Space on outdated items first"
 		s.AddLog("No items selected for update", false)
 		return
 	}
-
-	s.ShowConfirm = true
-	s.ConfirmMsg = confirmMessage("Update", selected)
-	s.PendingUpdateItems = selected
-	s.ConfirmCmd = func(program *tea.Program) tea.Cmd {
-		return s.startUpdateAll(selected, program)
-	}
+	s.showUpdateConfirm(selected)
 }
 
 // runUpdateAll prepares all outdated items for async update and shows confirm.
 func (s *State) runUpdateAll() {
-	items := s.FlattenItems()
-	var outdated []*model.Item
-	for _, it := range items {
-		if it.Status == model.StatusOutdated {
-			outdated = append(outdated, it)
-		}
-	}
-
+	outdated := s.collectOutdatedItems(false)
 	if len(outdated) == 0 {
 		s.AddLog("Nothing to update", false)
 		return
 	}
-
-	s.ShowConfirm = true
-	s.ConfirmMsg = confirmMessage("Update", outdated)
-	s.PendingUpdateItems = outdated
-	s.ConfirmCmd = func(program *tea.Program) tea.Cmd {
-		return s.startUpdateAll(outdated, program)
-	}
+	s.showUpdateConfirm(outdated)
 }
 
 // startUpdateAll returns a tea.Cmd that runs updates async.
@@ -593,52 +596,56 @@ func confirmMessage(verb string, items []*model.Item) string {
 // Cleanup (selected)
 // ---------------------------------------------------------------------------
 
+// collectCleanCandidates returns all cleanable items, selecting them when selectAll is true.
+func (s *State) collectCleanCandidates(selectAll bool) []*model.Item {
+	var out []*model.Item
+	for _, it := range s.FlattenCleanItems() {
+		if it.Status != model.StatusCleanCandidate {
+			continue
+		}
+		if selectAll {
+			it.Selected = true
+		}
+		out = append(out, it)
+	}
+	return out
+}
+
+// showCleanConfirm prepares the confirmation dialog for a cleanup batch.
+func (s *State) showCleanConfirm(items []*model.Item) {
+	s.ShowConfirm = true
+	s.ConfirmMsg = confirmMessage("Clean", items)
+	s.PendingCleanItems = items
+	s.ConfirmCmd = func(program *tea.Program) tea.Cmd {
+		return s.startCleanSelected(items, program)
+	}
+}
+
 // runCleanSelected prepares selected cleanup items and shows confirm.
 func (s *State) runCleanSelected() {
-	items := s.FlattenCleanItems()
-	var selected []*model.Item
-	for _, it := range items {
-		if it.Selected && it.Status == model.StatusCleanCandidate {
-			selected = append(selected, it)
+	selected := s.collectCleanCandidates(false)
+	var matched []*model.Item
+	for _, it := range selected {
+		if it.Selected {
+			matched = append(matched, it)
 		}
 	}
-
-	if len(selected) == 0 {
+	if len(matched) == 0 {
 		s.LastSummary = "No items selected — press Space on cleanup items first"
 		s.AddLog("No items selected for cleanup", false)
 		return
 	}
-
-	s.ShowConfirm = true
-	s.ConfirmMsg = confirmMessage("Clean", selected)
-	s.PendingCleanItems = selected
-	s.ConfirmCmd = func(program *tea.Program) tea.Cmd {
-		return s.startCleanSelected(selected, program)
-	}
+	s.showCleanConfirm(matched)
 }
 
 // runCleanAll prepares ALL cleanable items and shows confirm.
 func (s *State) runCleanAll() {
-	items := s.FlattenCleanItems()
-	var all []*model.Item
-	for _, it := range items {
-		if it.Status == model.StatusCleanCandidate {
-			all = append(all, it)
-			it.Selected = true
-		}
-	}
-
+	all := s.collectCleanCandidates(true)
 	if len(all) == 0 {
 		s.AddLog("Nothing to clean", false)
 		return
 	}
-
-	s.ShowConfirm = true
-	s.ConfirmMsg = confirmMessage("Clean", all)
-	s.PendingCleanItems = all
-	s.ConfirmCmd = func(program *tea.Program) tea.Cmd {
-		return s.startCleanSelected(all, program)
-	}
+	s.showCleanConfirm(all)
 }
 
 // startCleanSelected returns a tea.Cmd that runs cleanup async.

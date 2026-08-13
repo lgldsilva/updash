@@ -688,11 +688,23 @@ func (s *State) renderStatusLine() string {
 }
 
 // renderPassword shows the sudo password prompt (reused across elevated commands).
-func (s *State) renderPassword() string {
+// renderDialogHeader returns the common top portion of a full-screen dialog.
+func renderDialogHeader(icon, title string) string {
 	var b strings.Builder
 	b.WriteString(tuiNewline)
-	b.WriteString(ConfirmStyle.Render(" 🔐 Administrator password required"))
+	b.WriteString(ConfirmStyle.Render(fmt.Sprintf(" %s %s", icon, title)))
 	b.WriteString(tuiBlankLine)
+	return b.String()
+}
+
+// renderDialogFooter renders a one-line footer hint with the standard style.
+func renderDialogFooter(hint string) string {
+	return FooterStyle.Render(hint)
+}
+
+func (s *State) renderPassword() string {
+	var b strings.Builder
+	b.WriteString(renderDialogHeader("🔐", "Administrator password required"))
 	b.WriteString(" Your Mac login password (for sudo). MAS uses the system sudo cache —\n")
 	b.WriteString(" asked right before App Store updates, not during long brew downloads.\n\n")
 	masked := strings.Repeat("•", len(s.PasswordInput))
@@ -706,20 +718,19 @@ func (s *State) renderPassword() string {
 }
 
 func (s *State) renderPasswordFooter() string {
-	return FooterStyle.Render("[Enter] submit  [Esc] cancel")
+	return renderDialogFooter("[Enter] submit  [Esc] cancel")
 }
 
 // renderConfirm shows the confirmation dialog for destructive actions.
 func (s *State) renderConfirm() string {
 	var b strings.Builder
-	b.WriteString(tuiNewline)
+	b.WriteString(renderDialogHeader("⚠", strings.SplitN(s.ConfirmMsg, "\n", 2)[0]))
 	lines := strings.Split(s.ConfirmMsg, "\n")
 	for i, line := range lines {
 		if i == 0 {
-			b.WriteString(ConfirmStyle.Render(" ⚠ " + line))
-		} else {
-			b.WriteString(VerCurrentStyle.Render(truncatePlain(line, s.contentWidth()-4)))
+			continue // rendered in header
 		}
+		b.WriteString(VerCurrentStyle.Render(truncatePlain(line, s.contentWidth()-4)))
 		b.WriteString(tuiNewline)
 	}
 	b.WriteString(tuiNewline)
@@ -731,7 +742,7 @@ func (s *State) renderConfirm() string {
 
 // renderConfirmFooter shows key hints during confirmation.
 func (s *State) renderConfirmFooter() string {
-	return FooterStyle.Render("[Y] yes  [N] no  [Esc] cancel")
+	return renderDialogFooter("[Y] yes  [N] no  [Esc] cancel")
 }
 
 // hasCleanupItems checks if a summary has any cleanup candidates.
@@ -783,9 +794,7 @@ func helpSections() [][]helpBinding {
 
 func (s *State) renderHelp() string {
 	var b strings.Builder
-	b.WriteString(tuiNewline)
-	b.WriteString(ConfirmStyle.Render(" ⌨  Keyboard shortcuts"))
-	b.WriteString(tuiBlankLine)
+	b.WriteString(renderDialogHeader("⌨", "Keyboard shortcuts"))
 
 	cw := s.contentWidth()
 	for _, section := range helpSections() {
@@ -801,7 +810,7 @@ func (s *State) renderHelp() string {
 }
 
 func (s *State) renderHelpFooter() string {
-	return FooterStyle.Render("[Esc] close help")
+	return renderDialogFooter("[Esc] close help")
 }
 
 func (s *State) renderFilter() string {
@@ -815,9 +824,7 @@ func (s *State) renderDetail() string {
 	}
 	it := s.DetailItem
 	var b strings.Builder
-	b.WriteString(tuiNewline)
-	b.WriteString(ConfirmStyle.Render(" 📋 " + it.Name))
-	b.WriteString(tuiBlankLine)
+	b.WriteString(renderDialogHeader("📋", it.Name))
 
 	cw := s.contentWidth() - 4
 	rows := []struct{ label, value string }{
@@ -861,5 +868,5 @@ func (s *State) renderDetail() string {
 }
 
 func (s *State) renderDetailFooter() string {
-	return FooterStyle.Render("[Enter/Esc] close details")
+	return renderDialogFooter("[Enter/Esc] close details")
 }
