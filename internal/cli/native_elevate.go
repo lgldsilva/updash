@@ -51,17 +51,17 @@ func runNativeElevatedItems(
 	sess **elevate.Session,
 ) []*updater.Result {
 	if !stdinIsTTYFn() {
-		fmt.Fprintln(os.Stderr, "⚠ Rode no Terminal.app (não em pipe/CI) para o diálogo nativo do macOS aparecer")
+		fmt.Fprintln(os.Stderr, "⚠ Run in Terminal.app (not a pipe/CI) for the native macOS dialog to appear")
 	}
-	fmt.Println("ℹ O macOS vai pedir autorização no diálogo nativo do sistema (ícone de cadeado)")
-	fmt.Println("ℹ Depois disso, brew/mas rodam como seu usuário com sudo em cache")
+	fmt.Println("ℹ macOS will ask for authorization in the native system dialog (lock icon)")
+	fmt.Println("ℹ After that, brew/mas run as your user with cached sudo")
 
 	if err := primeMacSudo(ctx); err != nil {
 		if errors.Is(err, elevate.ErrDialogCancelled) {
-			fmt.Fprintln(os.Stderr, "⊘ Autorização cancelada — pacotes privilegiados ignorados")
-			return skipBatchResults(items, "autorização cancelada no diálogo do macOS")
+			fmt.Fprintln(os.Stderr, "⊘ Authorization cancelled — privileged packages skipped")
+			return skipBatchResults(items, "authorization cancelled in the macOS dialog")
 		}
-		fmt.Fprintf(os.Stderr, "⊘ Falha na autorização nativa: %v\n", err)
+		fmt.Fprintf(os.Stderr, "⊘ Native authorization failed: %v\n", err)
 		return nativeElevatedFailAll(items, "", err)
 	}
 

@@ -358,7 +358,7 @@ func TestRunNativeUpdateSection_withItems(t *testing.T) {
 			t.Fatalf("skipped=%d", skipped)
 		}
 	})
-	if !strings.Contains(out, "privilegiadas") {
+	if !strings.Contains(out, "Authorization cancelled") && !strings.Contains(out, "macOS dialog") {
 		t.Fatalf("%q", out)
 	}
 }

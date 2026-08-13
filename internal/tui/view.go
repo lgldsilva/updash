@@ -37,6 +37,28 @@ func (s *State) Render() string {
 		return s.frame(b.String())
 	}
 
+	// Help screen overlay
+	if s.ShowHelp {
+		b.WriteString(s.renderHelp())
+		b.WriteString(tuiNewline)
+		b.WriteString(s.renderHelpFooter())
+		return s.frame(b.String())
+	}
+
+	// Filter input bar
+	if s.ShowFilter {
+		b.WriteString(s.renderFilter())
+		b.WriteString(tuiNewline)
+	}
+
+	// Detail view overlay
+	if s.ShowDetail {
+		b.WriteString(s.renderDetail())
+		b.WriteString(tuiNewline)
+		b.WriteString(s.renderDetailFooter())
+		return s.frame(b.String())
+	}
+
 	// Tabs (space-separated without MarginRight)
 	b.WriteString(s.renderTabs())
 	b.WriteString(tuiBlankLine)
@@ -133,36 +155,92 @@ func (s *State) renderContent() string {
 	}
 }
 
-func (s *State) renderUpdatesTab() string {
+// itemTabConfig parameterizes the shared update/cleanup tab rendering.
+type itemTabConfig struct {
+	summaries   []*model.SourceSummary
+	scanEmpty   bool
+	opActive    bool
+	opVerb      string
+	opTotal     int
+	opDone      int
+	hasItems    func(*model.SourceSummary) bool
+	renderEmpty func() string
+	header      func(*model.SourceSummary) string
+	writeItems  func(*strings.Builder, *model.SourceSummary, int) int
+}
+
+func (s *State) renderItemTab(cfg itemTabConfig) string {
 	var b strings.Builder
-	s.writeScanWait(&b, len(s.Summaries) == 0)
-	s.writeOpProgress(&b, s.Updating && s.UpdateTotal > 0, "Updating", s.UpdateTotal, s.UpdateDone)
+	s.writeScanWait(&b, cfg.scanEmpty)
+	s.writeOpProgress(&b, cfg.opActive, cfg.opVerb, cfg.opTotal, cfg.opDone)
 
 	flatIdx := 0
 	firstCat := true
-	for _, summary := range s.Summaries {
+	for _, summary := range cfg.summaries {
 		if len(summary.Items) == 0 {
+			continue
+		}
+		if cfg.hasItems != nil && !cfg.hasItems(summary) {
 			continue
 		}
 		if !firstCat {
 			b.WriteString(tuiNewline)
 		}
 		firstCat = false
-		b.WriteString(s.renderCategoryHeader(summary))
+		b.WriteString(cfg.header(summary))
 		b.WriteString(tuiNewline)
-		if !hasUpdateItems(summary) {
-			s.writeAgentUpToDate(&b, summary)
-			continue
-		}
-		flatIdx = s.writeUpdateItems(&b, summary, flatIdx)
+		flatIdx = cfg.writeItems(&b, summary, flatIdx)
 	}
 
-	if s.TotalOutdated() == 0 && !s.Scanning {
-		b.WriteString(tuiNewlineIndent)
-		b.WriteString(ItemOKStyle.Render("✓ All packages are up to date"))
-		b.WriteString(tuiNewline)
+	if cfg.renderEmpty != nil {
+		b.WriteString(cfg.renderEmpty())
 	}
 	return b.String()
+}
+
+func (s *State) renderUpdatesTab() string {
+	empty := ""
+	if s.TotalOutdated() == 0 && !s.Scanning {
+		empty = tuiNewlineIndent + ItemOKStyle.Render("✓ All packages are up to date") + tuiNewline
+	}
+	return s.renderItemTab(itemTabConfig{
+		summaries:   s.Summaries,
+		scanEmpty:   len(s.Summaries) == 0,
+		opActive:    s.Updating && s.UpdateTotal > 0,
+		opVerb:      "Updating",
+		opTotal:     s.UpdateTotal,
+		opDone:      s.UpdateDone,
+		renderEmpty: func() string { return empty },
+		header:      s.renderCategoryHeader,
+		writeItems: func(b *strings.Builder, summary *model.SourceSummary, flatIdx int) int {
+			if !hasUpdateItems(summary) {
+				s.writeAgentUpToDate(b, summary)
+				return flatIdx
+			}
+			return s.writeUpdateItems(b, summary, flatIdx)
+		},
+	})
+}
+
+func (s *State) renderCleanupTab() string {
+	empty := ""
+	if s.TotalCleanable() == 0 && !s.Scanning {
+		empty = tuiNewlineIndent + ItemOKStyle.Render("✓ Nothing to clean") + tuiNewline
+	}
+	return s.renderItemTab(itemTabConfig{
+		summaries:   s.CleanItems,
+		scanEmpty:   len(s.CleanItems) == 0,
+		opActive:    s.Cleaning && s.CleanTotal > 0,
+		opVerb:      "Cleaning",
+		opTotal:     s.CleanTotal,
+		opDone:      s.CleanDone,
+		hasItems:    hasCleanupItems,
+		renderEmpty: func() string { return empty },
+		header:      s.renderCleanupCategoryHeader,
+		writeItems: func(b *strings.Builder, summary *model.SourceSummary, flatIdx int) int {
+			return s.writeCleanupItems(b, summary, flatIdx)
+		},
+	})
 }
 
 func (s *State) writeScanWait(b *strings.Builder, waiting bool) {
@@ -213,12 +291,24 @@ func (s *State) writeAgentUpToDate(b *strings.Builder, summary *model.SourceSumm
 }
 
 func (s *State) writeUpdateItems(b *strings.Builder, summary *model.SourceSummary, flatIdx int) int {
+	return s.writeItems(b, summary, flatIdx, model.TabUpdates, isUpdateNavigable, s.updateCheckbox, s.renderItemStyled)
+}
+
+func (s *State) writeItems(
+	b *strings.Builder,
+	summary *model.SourceSummary,
+	flatIdx int,
+	tab model.TabID,
+	isNavigable func(model.Status) bool,
+	checkbox func(*model.Item) string,
+	renderItem func(*model.Item) string,
+) int {
 	for _, item := range summary.Items {
-		if !isUpdateNavigable(item.Status) {
+		if !isNavigable(item.Status) {
 			continue
 		}
-		gutter := fmt.Sprintf("%s %s ", s.rowCursor(flatIdx, model.TabUpdates), s.updateCheckbox(item))
-		row := joinRow(lipgloss.NewStyle().Render(gutter), s.renderItemStyled(item))
+		gutter := fmt.Sprintf("%s %s ", s.rowCursor(flatIdx, tab), checkbox(item))
+		row := joinRow(lipgloss.NewStyle().Render(gutter), renderItem(item))
 		b.WriteString(s.formatRow(row, flatIdx))
 		b.WriteString(tuiNewline)
 		flatIdx++
@@ -226,18 +316,22 @@ func (s *State) writeUpdateItems(b *strings.Builder, summary *model.SourceSummar
 	return flatIdx
 }
 
-func (s *State) updateCheckbox(item *model.Item) string {
-	if s.ActiveTab != model.TabUpdates {
-		return tuiSpace
-	}
+func checkboxSymbol(selected, selectable bool) string {
 	switch {
-	case item.Selected:
+	case selected:
 		return CheckboxStyle.Render("◉")
-	case item.Status == model.StatusOutdated:
+	case selectable:
 		return "○"
 	default:
 		return tuiSpace
 	}
+}
+
+func (s *State) updateCheckbox(item *model.Item) string {
+	if s.ActiveTab != model.TabUpdates {
+		return tuiSpace
+	}
+	return checkboxSymbol(item.Selected, item.Status == model.StatusOutdated)
 }
 
 func (s *State) rowCursor(flatIdx int, tab model.TabID) string {
@@ -245,34 +339,6 @@ func (s *State) rowCursor(flatIdx int, tab model.TabID) string {
 		return "▸"
 	}
 	return tuiSpace
-}
-
-func (s *State) renderCleanupTab() string {
-	var b strings.Builder
-	s.writeScanWait(&b, len(s.CleanItems) == 0)
-	s.writeOpProgress(&b, s.Cleaning && s.CleanTotal > 0, "Cleaning", s.CleanTotal, s.CleanDone)
-
-	flatIdx := 0
-	firstCat := true
-	for _, summary := range s.CleanItems {
-		if len(summary.Items) == 0 || !hasCleanupItems(summary) {
-			continue
-		}
-		if !firstCat {
-			b.WriteString(tuiNewline)
-		}
-		firstCat = false
-		b.WriteString(s.renderCleanupCategoryHeader(summary))
-		b.WriteString(tuiNewline)
-		flatIdx = s.writeCleanupItems(&b, summary, flatIdx)
-	}
-
-	if s.TotalCleanable() == 0 && !s.Scanning {
-		b.WriteString(tuiNewlineIndent)
-		b.WriteString(ItemOKStyle.Render("✓ Nothing to clean"))
-		b.WriteString(tuiNewline)
-	}
-	return b.String()
 }
 
 func (s *State) renderCleanupCategoryHeader(summary *model.SourceSummary) string {
@@ -295,28 +361,11 @@ func sumReclaimable(summary *model.SourceSummary) string {
 }
 
 func (s *State) writeCleanupItems(b *strings.Builder, summary *model.SourceSummary, flatIdx int) int {
-	for _, item := range summary.Items {
-		if !isCleanupNavigable(item.Status) {
-			continue
-		}
-		gutter := fmt.Sprintf("%s %s ", s.rowCursor(flatIdx, model.TabCleanup), s.cleanupCheckbox(item))
-		row := joinRow(lipgloss.NewStyle().Render(gutter), s.renderCleanupItemStyled(item))
-		b.WriteString(s.formatRow(row, flatIdx))
-		b.WriteString(tuiNewline)
-		flatIdx++
-	}
-	return flatIdx
+	return s.writeItems(b, summary, flatIdx, model.TabCleanup, isCleanupNavigable, s.cleanupCheckbox, s.renderCleanupItemStyled)
 }
 
 func (s *State) cleanupCheckbox(item *model.Item) string {
-	switch {
-	case item.Selected:
-		return CheckboxStyle.Render("◉")
-	case item.Status == model.StatusCleanCandidate:
-		return "○"
-	default:
-		return tuiSpace
-	}
+	return checkboxSymbol(item.Selected, item.Status == model.StatusCleanCandidate)
 }
 
 func (s *State) renderLogsTab() string {
@@ -607,6 +656,10 @@ func (s *State) renderFooter() string {
 		hints = append(hints, fmt.Sprintf("[%d selected]", sel))
 	}
 
+	if s.AppliedFilter != "" {
+		hints = append(hints, fmt.Sprintf("[filter: %s]", s.AppliedFilter))
+	}
+
 	hints = append(hints, "[1/2/3] tab", "[Q] quit")
 	return wrapFooter(hints, s.contentWidth())
 }
@@ -662,11 +715,23 @@ func (s *State) renderStatusLine() string {
 }
 
 // renderPassword shows the sudo password prompt (reused across elevated commands).
-func (s *State) renderPassword() string {
+// renderDialogHeader returns the common top portion of a full-screen dialog.
+func renderDialogHeader(icon, title string) string {
 	var b strings.Builder
 	b.WriteString(tuiNewline)
-	b.WriteString(ConfirmStyle.Render(" 🔐 Administrator password required"))
+	b.WriteString(ConfirmStyle.Render(fmt.Sprintf(" %s %s", icon, title)))
 	b.WriteString(tuiBlankLine)
+	return b.String()
+}
+
+// renderDialogFooter renders a one-line footer hint with the standard style.
+func renderDialogFooter(hint string) string {
+	return FooterStyle.Render(hint)
+}
+
+func (s *State) renderPassword() string {
+	var b strings.Builder
+	b.WriteString(renderDialogHeader("🔐", "Administrator password required"))
 	b.WriteString(" Your Mac login password (for sudo). MAS uses the system sudo cache —\n")
 	b.WriteString(" asked right before App Store updates, not during long brew downloads.\n\n")
 	masked := strings.Repeat("•", len(s.PasswordInput))
@@ -680,15 +745,22 @@ func (s *State) renderPassword() string {
 }
 
 func (s *State) renderPasswordFooter() string {
-	return FooterStyle.Render("[Enter] submit  [Esc] cancel")
+	return renderDialogFooter("[Enter] submit  [Esc] cancel")
 }
 
 // renderConfirm shows the confirmation dialog for destructive actions.
 func (s *State) renderConfirm() string {
 	var b strings.Builder
+	b.WriteString(renderDialogHeader("⚠", strings.SplitN(s.ConfirmMsg, "\n", 2)[0]))
+	lines := strings.Split(s.ConfirmMsg, "\n")
+	for i, line := range lines {
+		if i == 0 {
+			continue // rendered in header
+		}
+		b.WriteString(VerCurrentStyle.Render(truncatePlain(line, s.contentWidth()-4)))
+		b.WriteString(tuiNewline)
+	}
 	b.WriteString(tuiNewline)
-	b.WriteString(ConfirmStyle.Render(" ⚠ " + s.ConfirmMsg))
-	b.WriteString(tuiBlankLine)
 	b.WriteString(ButtonStyle.Render(" Y") + "  yes  ")
 	b.WriteString(ButtonStyle.Render(" N") + "  no")
 	b.WriteString(tuiNewline)
@@ -697,7 +769,7 @@ func (s *State) renderConfirm() string {
 
 // renderConfirmFooter shows key hints during confirmation.
 func (s *State) renderConfirmFooter() string {
-	return FooterStyle.Render("[Y] yes  [N] no  [Esc] cancel")
+	return renderDialogFooter("[Y] yes  [N] no  [Esc] cancel")
 }
 
 // hasCleanupItems checks if a summary has any cleanup candidates.
@@ -708,4 +780,120 @@ func hasCleanupItems(s *model.SourceSummary) bool {
 		}
 	}
 	return false
+}
+
+// helpBinding is one keyboard shortcut shown on the help screen.
+type helpBinding struct {
+	keys string
+	desc string
+}
+
+// helpSections returns the help content grouped by context.
+func helpSections() [][]helpBinding {
+	return [][]helpBinding{
+		{
+			{keys: "↑ / k, ↓ / j", desc: "Move cursor up/down"},
+			{keys: "PgUp / PgDown", desc: "Jump one page"},
+			{keys: "Home / End", desc: "Jump to first/last item"},
+		},
+		{
+			{keys: "1 / 2 / 3", desc: "Switch tab (Updates / Cleanup / Logs)"},
+			{keys: "Space", desc: "Toggle selection"},
+			{keys: "* / -", desc: "Select all / none in current tab"},
+			{keys: ".", desc: "Select all in current category"},
+		},
+		{
+			{keys: "U", desc: "Update selected items"},
+			{keys: "A", desc: "Update all (Updates tab) / Clean all (Cleanup tab)"},
+			{keys: "C", desc: "Clean selected items"},
+		},
+		{
+			{keys: "/", desc: "Filter items by name"},
+			{keys: "Enter", desc: "Show item details / output"},
+			{keys: "Esc", desc: "Cancel filter, dialog, or running operation"},
+			{keys: "R", desc: "Refresh scan"},
+		},
+		{
+			{keys: "Q / Ctrl+C", desc: "Quit updash"},
+		},
+	}
+}
+
+func (s *State) renderHelp() string {
+	var b strings.Builder
+	b.WriteString(renderDialogHeader("⌨", "Keyboard shortcuts"))
+
+	cw := s.contentWidth()
+	for _, section := range helpSections() {
+		for _, binding := range section {
+			keyLine := ButtonStyle.Render(padRight(binding.keys, 18))
+			descLine := VerCurrentStyle.Render(truncatePlain(binding.desc, cw-22))
+			b.WriteString(joinRow(lipgloss.NewStyle().Render(tuiIndent), keyLine, lipgloss.NewStyle().Render(tuiIndent), descLine))
+			b.WriteString(tuiNewline)
+		}
+		b.WriteString(tuiNewline)
+	}
+	return b.String()
+}
+
+func (s *State) renderHelpFooter() string {
+	return renderDialogFooter("[Esc] close help")
+}
+
+func (s *State) renderFilter() string {
+	prompt := "/ " + s.FilterInput + "_"
+	return ConfirmStyle.Render(truncatePlain(prompt, s.contentWidth()-2))
+}
+
+func (s *State) renderDetail() string {
+	if s.DetailItem == nil {
+		return ""
+	}
+	it := s.DetailItem
+	var b strings.Builder
+	b.WriteString(renderDialogHeader("📋", it.Name))
+
+	cw := s.contentWidth() - 4
+	rows := []struct{ label, value string }{
+		{"Category", string(it.Category)},
+		{"Status", it.Status.String()},
+		{"Current", it.CurrentVer},
+		{"Available", it.AvailableVer},
+	}
+	if it.Reclaimable != "" {
+		rows = append(rows, struct{ label, value string }{"Reclaimable", it.Reclaimable})
+	}
+	if it.KeepPolicy != "" {
+		rows = append(rows, struct{ label, value string }{"Policy", it.KeepPolicy})
+	}
+	if it.PackageID != "" {
+		rows = append(rows, struct{ label, value string }{"Package ID", it.PackageID})
+	}
+
+	for _, r := range rows {
+		if r.value == "" {
+			continue
+		}
+		line := fmt.Sprintf("  %s: %s", r.label, r.value)
+		b.WriteString(VerCurrentStyle.Render(truncatePlain(line, cw)))
+		b.WriteString(tuiNewline)
+	}
+
+	if it.Log != "" {
+		b.WriteString(tuiNewline)
+		b.WriteString(VerCurrentStyle.Render("  Last output:"))
+		b.WriteString(tuiNewline)
+		for _, line := range strings.Split(it.Log, "\n") {
+			if strings.TrimSpace(line) == "" {
+				continue
+			}
+			b.WriteString(VerCurrentStyle.Render(truncatePlain("    "+line, cw)))
+			b.WriteString(tuiNewline)
+		}
+	}
+	return b.String()
+}
+
+func (s *State) renderDetailFooter() string {
+	return renderDialogFooter("[Enter/Esc] close details")
 }

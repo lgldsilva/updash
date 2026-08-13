@@ -1,10 +1,10 @@
 package tui
 
 import (
+	"fmt"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/lgldsilva/updash/internal/elevate"
 	"github.com/lgldsilva/updash/internal/model"
 )
 
@@ -274,6 +274,38 @@ func TestState_HandleActions(t *testing.T) {
 	}
 }
 
+func TestState_PageAndEdgeNavigation(t *testing.T) {
+	s := New()
+	for i := 0; i < 20; i++ {
+		s.Summaries = append(s.Summaries, &model.SourceSummary{
+			Category: model.Category(fmt.Sprintf("cat%d", i)),
+			Items:    []*model.Item{{Name: fmt.Sprintf("pkg%d", i), Status: model.StatusOutdated}},
+		})
+	}
+
+	s.HandleAction(KeyEnd)
+	if s.Cursor != 19 {
+		t.Errorf("End cursor = %d, want 19", s.Cursor)
+	}
+
+	s.HandleAction(KeyHome)
+	if s.Cursor != 0 {
+		t.Errorf("Home cursor = %d, want 0", s.Cursor)
+	}
+
+	s.Cursor = 0
+	s.HandleAction(KeyPageDown)
+	if s.Cursor == 0 {
+		t.Error("PageDown should move cursor")
+	}
+
+	pos := s.Cursor
+	s.HandleAction(KeyPageUp)
+	if s.Cursor >= pos {
+		t.Errorf("PageUp should move before %d, got %d", pos, s.Cursor)
+	}
+}
+
 func TestState_SelectedCount(t *testing.T) {
 	s := New()
 	s.Summaries = []*model.SourceSummary{{
@@ -285,6 +317,48 @@ func TestState_SelectedCount(t *testing.T) {
 	}}
 	if got := s.SelectedCount(); got != 2 {
 		t.Fatalf("SelectedCount = %d, want 2", got)
+	}
+}
+
+func TestState_QuickSelection(t *testing.T) {
+	s := New()
+	s.Summaries = []*model.SourceSummary{
+		{
+			Category: model.CatBrew,
+			Items: []*model.Item{
+				{Name: "btop", Category: model.CatBrew, Status: model.StatusOutdated},
+				{Name: "git", Category: model.CatBrew, Status: model.StatusOutdated},
+			},
+		},
+		{
+			Category: model.CatNpm,
+			Items: []*model.Item{
+				{Name: "npm", Category: model.CatNpm, Status: model.StatusOutdated},
+			},
+		},
+	}
+
+	s.HandleAction(KeySelectAll)
+	if s.SelectedCount() != 3 {
+		t.Fatalf("select all = %d, want 3", s.SelectedCount())
+	}
+
+	s.HandleAction(KeySelectNone)
+	if s.SelectedCount() != 0 {
+		t.Fatalf("select none = %d, want 0", s.SelectedCount())
+	}
+
+	s.Cursor = 0
+	s.HandleAction(KeySelectCategory)
+	if s.SelectedCount() != 2 {
+		t.Fatalf("select category = %d, want 2", s.SelectedCount())
+	}
+
+	// Select-category is additive: npm stays selected when cursor moves to it.
+	s.Cursor = 2
+	s.HandleAction(KeySelectCategory)
+	if s.SelectedCount() != 3 {
+		t.Fatalf("select second category = %d, want 3", s.SelectedCount())
 	}
 }
 
@@ -308,13 +382,55 @@ func TestState_FlattenItems(t *testing.T) {
 	}
 }
 
-func TestState_CtxWithElev(t *testing.T) {
+func TestState_FilterItems(t *testing.T) {
+	items := []*model.Item{
+		{Name: "btop", Category: model.CatBrew},
+		{Name: "npm", Category: model.CatNpm},
+		{Name: "node", Category: model.CatNvm},
+	}
+
+	if got := filterItems(items, ""); len(got) != 3 {
+		t.Fatalf("empty filter should keep all, got %d", len(got))
+	}
+	if got := filterItems(items, "np"); len(got) != 1 || got[0].Name != "npm" {
+		t.Fatalf("filter 'np' should match npm, got %+v", got)
+	}
+	if got := filterItems(items, "brew"); len(got) != 1 || got[0].Name != "btop" {
+		t.Fatalf("filter 'brew' should match category, got %+v", got)
+	}
+	if got := filterItems(items, "xyz"); len(got) != 0 {
+		t.Fatalf("filter 'xyz' should match nothing, got %d", len(got))
+	}
+}
+
+func TestState_FilterApplied(t *testing.T) {
 	s := New()
-	s.ElevSession = elevate.NewSession()
-	s.ElevSession.SetPasswordless()
-	ctx := s.ctxWithElev()
-	if elevate.FromContext(ctx) == nil {
-		t.Fatal("expected session in context")
+	s.Summaries = []*model.SourceSummary{
+		{
+			Category: model.CatBrew,
+			Items: []*model.Item{
+				{Name: "btop", Status: model.StatusOutdated},
+				{Name: "git", Status: model.StatusOutdated},
+			},
+		},
+	}
+	s.AppliedFilter = "bt"
+	items := s.CurrentItems()
+	if len(items) != 1 || items[0].Name != "btop" {
+		t.Fatalf("applied filter should show btop only, got %+v", items)
+	}
+}
+
+func TestState_CancelOperation(t *testing.T) {
+	s := New()
+	s.Scanning = true
+	s.Updating = true
+	s.HandleAction(KeyCancel)
+	if s.Scanning || s.Updating {
+		t.Fatal("operation flags should be reset")
+	}
+	if s.LastSummary != "Cancelled" {
+		t.Fatalf("expected Cancelled summary, got %q", s.LastSummary)
 	}
 }
 
