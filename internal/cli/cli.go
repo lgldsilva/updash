@@ -130,7 +130,7 @@ func RunUpdate(ctx context.Context, cfg Config) (int, int, error) {
 		return 0, 0, nil
 	}
 	if len(manualOnly) > 0 {
-		fmt.Printf("ℹ %d item(s) só atualização manual — não serão tentados\n", len(manualOnly))
+		fmt.Printf("ℹ %d item(s) require manual update — skipping\n", len(manualOnly))
 	}
 
 	if cfg.DryRun {
@@ -370,7 +370,7 @@ func runNativeUpdateSection(
 	if len(nativeItems) == 0 {
 		return 0, 0, 0, nil
 	}
-	fmt.Printf("\n→ 🔐 Atualizações privilegiadas (%d item(s))\n", len(nativeItems))
+	fmt.Printf("\n→ 🔐 Privileged updates (%d item(s))\n", len(nativeItems))
 	for _, it := range nativeItems {
 		fmt.Printf("  • %s\n", it.Name)
 	}

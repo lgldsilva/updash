@@ -50,15 +50,15 @@ func primeElevationSession(
 	}
 
 	s, err := promptMacSess(ctx,
-		"O updash precisa da sua senha de administrador para concluir as atualizações")
+		"updash needs your administrator password to complete the updates")
 	if err != nil {
 		switch {
 		case errors.Is(err, elevate.ErrDialogCancelled):
-			fmt.Fprintln(os.Stderr, "⊘ Senha cancelada — pacotes que precisam de admin serão ignorados")
+			fmt.Fprintln(os.Stderr, "⊘ Password cancelled — admin-required packages will be skipped")
 		case errors.Is(err, elevate.ErrDialogUnavailable):
-			fmt.Fprintln(os.Stderr, "⊘ Diálogo de senha indisponível — pacotes que precisam de admin serão ignorados")
+			fmt.Fprintln(os.Stderr, "⊘ Password dialog unavailable — admin-required packages will be skipped")
 		default:
-			fmt.Fprintf(os.Stderr, "⊘ Senha inválida: %v — pacotes que precisam de admin serão ignorados\n", err)
+			fmt.Fprintf(os.Stderr, "⊘ Invalid password: %v — admin-required packages will be skipped\n", err)
 		}
 		return ctx
 	}
@@ -97,7 +97,7 @@ func ensureCategoryElevation(
 
 	if *sess != nil && (*sess).Ready() {
 		if err := (*sess).Refresh(ctx); err != nil {
-			return ctx, true, fmt.Sprintf("sudo expirou: %v", err)
+			return ctx, true, fmt.Sprintf("sudo expired: %v", err)
 		}
 		return elevate.WithSession(ctx, *sess), false, ""
 	}
@@ -117,7 +117,7 @@ func ensureBrewPassword(
 	}
 	if *sess != nil && (*sess).Ready() {
 		if err := (*sess).Refresh(ctx); err != nil {
-			return ctx, true, fmt.Sprintf("sudo expirou: %v", err)
+			return ctx, true, fmt.Sprintf("sudo expired: %v", err)
 		}
 		return elevate.WithSession(ctx, *sess), false, ""
 	}
@@ -126,9 +126,9 @@ func ensureBrewPassword(
 
 func elevationSkipReason(cfg Config) string {
 	if cfg.SkipPassword {
-		return "precisa de senha de administrador — remova --skip-password para abrir o diálogo do macOS"
+		return "needs administrator password — remove --skip-password to open the macOS dialog"
 	}
-	return "atualização cancelada — senha não informada"
+	return "update cancelled — password not provided"
 }
 
 func brewItemNeedsPassword(it *model.Item) bool {
@@ -199,7 +199,7 @@ func manualOnlyResults(items []*model.Item) []*updater.Result {
 	for i, it := range items {
 		reason := it.KeepPolicy
 		if reason == "" {
-			reason = "só atualização manual"
+			reason = "manual update only"
 		}
 		results[i] = &updater.Result{
 			Item:    it,

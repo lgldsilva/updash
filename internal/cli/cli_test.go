@@ -231,7 +231,7 @@ func TestSkipAndManualResults(t *testing.T) {
 	if !strings.Contains(manual[0].Error, "manual policy") {
 		t.Fatalf("%+v", manual[0])
 	}
-	if !strings.Contains(manual[1].Error, "só atualização manual") {
+	if !strings.Contains(manual[1].Error, "manual update only") {
 		t.Fatalf("%+v", manual[1])
 	}
 }
@@ -308,7 +308,7 @@ func TestPrintCheckAndVerifyReport(t *testing.T) {
 			t.Fatalf("stats=%+v", stats)
 		}
 	})
-	if !strings.Contains(out, "Relatório") {
+	if !strings.Contains(out, "Report") {
 		t.Fatalf("verify: %q", out)
 	}
 
@@ -322,7 +322,7 @@ func TestPrintCheckAndVerifyReport(t *testing.T) {
 			t.Fatalf("want 0 remaining, got %d", stats.remaining)
 		}
 	})
-	if !strings.Contains(out, "nada outdated") {
+	if !strings.Contains(out, "nothing outdated") {
 		t.Fatalf("clear verify: %q", out)
 	}
 }
@@ -481,7 +481,7 @@ func TestElevationSkipReason(t *testing.T) {
 	if !strings.Contains(elevationSkipReason(Config{SkipPassword: true}), "skip-password") {
 		t.Fatal("expected skip-password reason")
 	}
-	if !strings.Contains(elevationSkipReason(Config{}), "senha") {
+	if !strings.Contains(elevationSkipReason(Config{}), "password") {
 		t.Fatal("expected password reason")
 	}
 }
@@ -627,7 +627,7 @@ func TestPrintCheckFooterHints(t *testing.T) {
 	out := captureStdout(t, func() {
 		printCheckFooter(3, 2, 1, 1)
 	})
-	if !strings.Contains(out, "outdated") || !strings.Contains(out, "senha") || !strings.Contains(out, "manual") || !strings.Contains(out, "cleanable") {
+	if !strings.Contains(out, "outdated") || !strings.Contains(out, "password") || !strings.Contains(out, "manual-only") || !strings.Contains(out, "cleanable") {
 		t.Fatalf("%q", out)
 	}
 }

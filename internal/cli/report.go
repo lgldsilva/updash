@@ -99,10 +99,10 @@ func printCheckFooter(outdated, cleanable, needsPassword, manualOnly int) {
 	}
 	fmt.Printf("\n%d outdated", outdated)
 	if needsPassword > 0 {
-		fmt.Printf(" · %d precisam senha", needsPassword)
+		fmt.Printf(" · %d need password", needsPassword)
 	}
 	if manualOnly > 0 {
-		fmt.Printf(" · %d só manual", manualOnly)
+		fmt.Printf(" · %d manual-only", manualOnly)
 	}
 	if cleanable > 0 {
 		fmt.Printf(" · %d cleanable", cleanable)
@@ -149,16 +149,16 @@ func PrintVerifyReport(
 
 	needPass, manual, failed, other := classifyRemaining(updates, resultByItem, &stats)
 	if stats.remaining == 0 {
-		fmt.Println("\n✓ Tudo verificado — nada outdated restante")
+		fmt.Println("\n✓ Verified — nothing outdated remains")
 		return stats
 	}
 	stats.manual = len(manual)
 
-	fmt.Printf("\n⚠ %d item(s) ainda outdated:\n", stats.remaining)
-	printVerifyGroup("Precisam senha / Terminal", needPass, resultByItem)
-	printVerifyGroup("Só atualização manual", manual, resultByItem)
-	printVerifyGroup("Falharam", failed, resultByItem)
-	printVerifyGroup("Outros", other, resultByItem)
+	fmt.Printf("\n⚠ %d item(s) still outdated:\n", stats.remaining)
+	printVerifyGroup("Need password / Terminal", needPass, resultByItem)
+	printVerifyGroup("Manual update only", manual, resultByItem)
+	printVerifyGroup("Failed", failed, resultByItem)
+	printVerifyGroup("Others", other, resultByItem)
 	return stats
 }
 
@@ -184,13 +184,13 @@ func indexResults(results []*updater.Result) map[itemKey]*updater.Result {
 }
 
 func printVerifyHeader(ok, fail, skipped int) {
-	fmt.Println("\n📋 Relatório:")
-	fmt.Printf("  ✓ %d atualizados", ok)
+	fmt.Println("\n📋 Report:")
+	fmt.Printf("  ✓ %d updated", ok)
 	if skipped > 0 {
-		fmt.Printf(" · ⊘ %d ignorados (senha/cancelado)", skipped)
+		fmt.Printf(" · ⊘ %d skipped (password/cancelled)", skipped)
 	}
 	if fail > 0 {
-		fmt.Printf(" · ✘ %d falharam", fail)
+		fmt.Printf(" · ✘ %d failed", fail)
 	}
 	fmt.Println()
 }

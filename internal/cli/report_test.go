@@ -8,7 +8,7 @@ import (
 )
 
 func TestIsSkippedResult(t *testing.T) {
-	if !isSkippedResult(&updater.Result{Error: "⊘ senha cancelada"}) {
+	if !isSkippedResult(&updater.Result{Error: "⊘ password cancelled"}) {
 		t.Fatal("expected skip")
 	}
 	if isSkippedResult(&updater.Result{Error: "failed"}) {
