@@ -162,20 +162,31 @@ func (s *State) FlattenItems() []*model.Item {
 	return items
 }
 
-// FlattenUpdateItems returns update-tab navigable items (hides up-to-date noise like agent inventory).
-func (s *State) FlattenUpdateItems() []*model.Item {
+// flattenSummaries returns navigable items from a slice of summaries using the
+// supplied predicates. Extracted to keep update and cleanup flatteners in sync.
+func flattenSummaries(
+	summaries []*model.SourceSummary,
+	has func(*model.SourceSummary) bool,
+	navigable func(model.Status) bool,
+	filter string,
+) []*model.Item {
 	var items []*model.Item
-	for _, summary := range s.Summaries {
-		if !hasUpdateItems(summary) {
+	for _, summary := range summaries {
+		if !has(summary) {
 			continue
 		}
 		for _, it := range summary.Items {
-			if isUpdateNavigable(it.Status) {
+			if navigable(it.Status) {
 				items = append(items, it)
 			}
 		}
 	}
-	return filterItems(items, s.AppliedFilter)
+	return filterItems(items, filter)
+}
+
+// FlattenUpdateItems returns update-tab navigable items (hides up-to-date noise like agent inventory).
+func (s *State) FlattenUpdateItems() []*model.Item {
+	return flattenSummaries(s.Summaries, hasUpdateItems, isUpdateNavigable, s.AppliedFilter)
 }
 
 // isCleanupNavigable reports items shown and selectable on the Cleanup tab.
@@ -190,18 +201,7 @@ func isCleanupNavigable(status model.Status) bool {
 
 // FlattenCleanItems returns cleanup items visible in the Cleanup tab (same order as render).
 func (s *State) FlattenCleanItems() []*model.Item {
-	var items []*model.Item
-	for _, summary := range s.CleanItems {
-		if !hasCleanupItems(summary) {
-			continue
-		}
-		for _, it := range summary.Items {
-			if isCleanupNavigable(it.Status) {
-				items = append(items, it)
-			}
-		}
-	}
-	return filterItems(items, s.AppliedFilter)
+	return flattenSummaries(s.CleanItems, hasCleanupItems, isCleanupNavigable, s.AppliedFilter)
 }
 
 // filterItems keeps items whose name or category matches the filter (case-insensitive).

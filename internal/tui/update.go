@@ -264,17 +264,7 @@ func (s *State) submitPassword() tea.Cmd {
 }
 
 func (s *State) moveCursor(delta int) {
-	items := s.CurrentItems()
-	if len(items) == 0 {
-		return
-	}
-	s.Cursor += delta
-	if s.Cursor < 0 {
-		s.Cursor = 0
-	}
-	if s.Cursor >= len(items) {
-		s.Cursor = len(items) - 1
-	}
+	s.moveCursorTo(s.Cursor + delta)
 }
 
 func (s *State) moveCursorTo(pos int) {

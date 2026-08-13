@@ -248,18 +248,22 @@ func (s *State) writeUpdateItems(b *strings.Builder, summary *model.SourceSummar
 	return flatIdx
 }
 
-func (s *State) updateCheckbox(item *model.Item) string {
-	if s.ActiveTab != model.TabUpdates {
-		return tuiSpace
-	}
+func checkboxSymbol(selected, selectable bool) string {
 	switch {
-	case item.Selected:
+	case selected:
 		return CheckboxStyle.Render("◉")
-	case item.Status == model.StatusOutdated:
+	case selectable:
 		return "○"
 	default:
 		return tuiSpace
 	}
+}
+
+func (s *State) updateCheckbox(item *model.Item) string {
+	if s.ActiveTab != model.TabUpdates {
+		return tuiSpace
+	}
+	return checkboxSymbol(item.Selected, item.Status == model.StatusOutdated)
 }
 
 func (s *State) rowCursor(flatIdx int, tab model.TabID) string {
@@ -331,14 +335,7 @@ func (s *State) writeCleanupItems(b *strings.Builder, summary *model.SourceSumma
 }
 
 func (s *State) cleanupCheckbox(item *model.Item) string {
-	switch {
-	case item.Selected:
-		return CheckboxStyle.Render("◉")
-	case item.Status == model.StatusCleanCandidate:
-		return "○"
-	default:
-		return tuiSpace
-	}
+	return checkboxSymbol(item.Selected, item.Status == model.StatusCleanCandidate)
 }
 
 func (s *State) renderLogsTab() string {

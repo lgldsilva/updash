@@ -194,6 +194,14 @@ func partitionUpdatable(items []*model.Item) (updatable, manual []*model.Item) {
 	return updatable, manual
 }
 
+func skipResult(it *model.Item, reason string) *updater.Result {
+	return &updater.Result{
+		Item:    it,
+		Success: false,
+		Error:   "⊘ " + reason,
+	}
+}
+
 func manualOnlyResults(items []*model.Item) []*updater.Result {
 	results := make([]*updater.Result, len(items))
 	for i, it := range items {
@@ -201,11 +209,7 @@ func manualOnlyResults(items []*model.Item) []*updater.Result {
 		if reason == "" {
 			reason = "manual update only"
 		}
-		results[i] = &updater.Result{
-			Item:    it,
-			Success: false,
-			Error:   "⊘ " + reason,
-		}
+		results[i] = skipResult(it, reason)
 	}
 	return results
 }
@@ -214,11 +218,7 @@ func skipBatchResults(items []*model.Item, reason string) []*updater.Result {
 	results := make([]*updater.Result, len(items))
 	for i, it := range items {
 		it.Status = model.StatusOutdated
-		results[i] = &updater.Result{
-			Item:    it,
-			Success: false,
-			Error:   "⊘ " + reason,
-		}
+		results[i] = skipResult(it, reason)
 	}
 	return results
 }
