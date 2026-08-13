@@ -627,7 +627,7 @@ func TestPrintCheckFooterHints(t *testing.T) {
 	out := captureStdout(t, func() {
 		printCheckFooter(3, 2, 1, 1)
 	})
-	if !strings.Contains(out, "outdated") || !strings.Contains(out, "password") || !strings.Contains(out, "manual-only") || !strings.Contains(out, "cleanable") {
+	if !strings.Contains(out, "outdated") || !strings.Contains(out, "sudo") || !strings.Contains(out, "manual-only") || !strings.Contains(out, "cleanable") {
 		t.Fatalf("%q", out)
 	}
 }
