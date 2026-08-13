@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/lgldsilva/updash/internal/cleaner"
@@ -18,7 +19,15 @@ const (
 	KeyNone KeyAction = iota
 	KeyUp
 	KeyDown
+	KeyPageUp
+	KeyPageDown
+	KeyHome
+	KeyEnd
 	KeySelect
+	KeySelectAll
+	KeySelectNone
+	KeySelectCategory
+	KeyDetail
 	KeyUpdateSelected
 	KeyUpdateAll
 	KeyCleanSelected
@@ -26,6 +35,9 @@ const (
 	KeyTab
 	KeyRefresh
 	KeyHelp
+	KeyFilter
+	KeyFilterSubmit
+	KeyFilterCancel
 	KeyQuit
 	KeyConfirm
 	KeyCancel
@@ -35,11 +47,20 @@ const (
 var keyActions = map[string]KeyAction{
 	"up": KeyUp, "k": KeyUp,
 	"down": KeyDown, "j": KeyDown,
-	" ": KeySelect,
-	"u": KeyUpdateSelected, "U": KeyUpdateSelected,
+	"pgup":   KeyPageUp,
+	"pgdown": KeyPageDown,
+	"home":   KeyHome,
+	"end":    KeyEnd,
+	" ":      KeySelect,
+	"*":      KeySelectAll,
+	"-":      KeySelectNone,
+	".":      KeySelectCategory,
+	"enter":  KeyDetail,
+	"u":      KeyUpdateSelected, "U": KeyUpdateSelected,
 	"c": KeyCleanSelected, "C": KeyCleanSelected,
 	"r": KeyRefresh, "R": KeyRefresh,
 	"?": KeyHelp,
+	"/": KeyFilter,
 	"q": KeyQuit, "Q": KeyQuit, "ctrl+c": KeyQuit,
 }
 
@@ -51,11 +72,37 @@ var tabKeys = map[string]model.TabID{
 
 // HandleKey processes a key press and returns an action.
 func (s *State) HandleKey(key string) KeyAction {
+	if s.ShowHelp {
+		// Any key dismisses the help overlay; Esc is the explicit close.
+		return KeyHelp
+	}
+	if s.ShowDetail {
+		// Enter/Esc close the detail view; other keys are ignored.
+		if key == "enter" || key == "esc" {
+			return KeyDetail
+		}
+		return KeyNone
+	}
+	if s.ShowFilter {
+		return s.handleFilterKey(key)
+	}
 	if s.ShowPassword {
 		return s.handlePasswordKey(key)
 	}
 	if s.ShowConfirm {
 		return s.handleConfirmKey(key)
+	}
+	if key == "esc" && (s.Scanning || s.Updating || s.Cleaning) {
+		return KeyCancel
+	}
+	if key == "esc" && s.AppliedFilter != "" {
+		return KeyFilterCancel
+	}
+	if key == "?" {
+		return KeyHelp
+	}
+	if key == "/" {
+		return KeyFilter
 	}
 	if key == "a" || key == "A" {
 		// A = Update All on Updates tab, Clean All on Cleanup tab.
@@ -88,7 +135,7 @@ func (s *State) handlePasswordKey(key string) KeyAction {
 		}
 		return KeyNone
 	default:
-		if len(key) == 1 {
+		if len(key) == 1 && key != "?" {
 			s.PasswordInput += key
 		}
 		return KeyNone
@@ -110,6 +157,25 @@ func (s *State) handleConfirmKey(key string) KeyAction {
 	}
 }
 
+func (s *State) handleFilterKey(key string) KeyAction {
+	switch key {
+	case "enter":
+		return KeyFilterSubmit
+	case "esc":
+		return KeyFilterCancel
+	case "backspace":
+		if len(s.FilterInput) > 0 {
+			s.FilterInput = s.FilterInput[:len(s.FilterInput)-1]
+		}
+		return KeyNone
+	default:
+		if len(key) == 1 && key != "/" && key != "?" {
+			s.FilterInput += key
+		}
+		return KeyNone
+	}
+}
+
 // HandleAction executes a synchronous action and returns an optional async cmd.
 // The returned tea.Cmd should be returned from the Bubble Tea Update function.
 func (s *State) HandleAction(action KeyAction) tea.Cmd {
@@ -118,8 +184,24 @@ func (s *State) HandleAction(action KeyAction) tea.Cmd {
 		s.moveCursor(-1)
 	case KeyDown:
 		s.moveCursor(1)
+	case KeyPageUp:
+		s.moveCursor(-s.pageSize())
+	case KeyPageDown:
+		s.moveCursor(s.pageSize())
+	case KeyHome:
+		s.moveCursorTo(0)
+	case KeyEnd:
+		s.moveCursorTo(len(s.CurrentItems()) - 1)
 	case KeySelect:
 		s.toggleSelection()
+	case KeySelectAll:
+		s.setSelectionAll(true)
+	case KeySelectNone:
+		s.setSelectionAll(false)
+	case KeySelectCategory:
+		s.setSelectionCategory(true)
+	case KeyDetail:
+		s.toggleDetail()
 	case KeyUpdateSelected:
 		s.runUpdateSelected()
 	case KeyUpdateAll:
@@ -132,6 +214,26 @@ func (s *State) HandleAction(action KeyAction) tea.Cmd {
 		return s.runRefresh()
 	case KeyHelp:
 		s.ShowHelp = !s.ShowHelp
+	case KeyFilter:
+		s.ShowFilter = !s.ShowFilter
+		if s.ShowFilter {
+			s.FilterInput = s.AppliedFilter
+		}
+	case KeyFilterSubmit:
+		s.AppliedFilter = s.FilterInput
+		s.ShowFilter = false
+		s.Cursor = 0
+		s.ClampCursor()
+	case KeyFilterCancel:
+		s.FilterInput = ""
+		s.AppliedFilter = ""
+		s.ShowFilter = false
+		s.Cursor = 0
+		s.ClampCursor()
+	case KeyCancel:
+		if s.Scanning || s.Updating || s.Cleaning {
+			s.cancelOperation()
+		}
 	case KeyPasswordSubmit:
 		return s.submitPassword()
 	}
@@ -175,6 +277,29 @@ func (s *State) moveCursor(delta int) {
 	}
 }
 
+func (s *State) moveCursorTo(pos int) {
+	items := s.CurrentItems()
+	if len(items) == 0 {
+		s.Cursor = 0
+		return
+	}
+	if pos < 0 {
+		pos = 0
+	}
+	if pos >= len(items) {
+		pos = len(items) - 1
+	}
+	s.Cursor = pos
+}
+
+func (s *State) pageSize() int {
+	n := s.maxListLines() - 2
+	if n < 3 {
+		return 3
+	}
+	return n
+}
+
 func (s *State) toggleSelection() {
 	items := s.CurrentItems()
 	if s.Cursor < 0 || s.Cursor >= len(items) {
@@ -184,6 +309,60 @@ func (s *State) toggleSelection() {
 	if item.Status == model.StatusOutdated || item.Status == model.StatusCleanCandidate {
 		item.Selected = !item.Selected
 	}
+}
+
+func (s *State) setSelectionAll(selected bool) {
+	for _, it := range s.CurrentItems() {
+		if it.Status == model.StatusOutdated || it.Status == model.StatusCleanCandidate {
+			it.Selected = selected
+		}
+	}
+}
+
+func (s *State) setSelectionCategory(selected bool) {
+	items := s.CurrentItems()
+	if s.Cursor < 0 || s.Cursor >= len(items) {
+		return
+	}
+	cat := items[s.Cursor].Category
+	for _, it := range items {
+		if it.Category == cat && (it.Status == model.StatusOutdated || it.Status == model.StatusCleanCandidate) {
+			it.Selected = selected
+		}
+	}
+}
+
+func (s *State) toggleDetail() {
+	if s.ShowDetail {
+		s.ShowDetail = false
+		s.DetailItem = nil
+		return
+	}
+	items := s.CurrentItems()
+	if s.Cursor < 0 || s.Cursor >= len(items) {
+		return
+	}
+	s.DetailItem = items[s.Cursor]
+	s.ShowDetail = true
+}
+
+// cancelOperation cancels the current scan/update/clean context and resets
+// the running flags so the UI stops showing spinners.
+func (s *State) cancelOperation() {
+	if s.Cancel != nil {
+		s.Cancel()
+	}
+	s.Scanning = false
+	s.Updating = false
+	s.Cleaning = false
+	s.OperationLabel = ""
+	s.LastSummary = "Cancelled"
+	s.AddLog("Operation cancelled by user", false)
+
+	// Recreate context for subsequent operations.
+	ctx, cancel := context.WithCancel(context.Background())
+	s.Ctx = ctx
+	s.Cancel = cancel
 }
 
 // ---------------------------------------------------------------------------
@@ -216,7 +395,7 @@ func (s *State) runUpdateSelected() {
 	}
 
 	s.ShowConfirm = true
-	s.ConfirmMsg = fmt.Sprintf("Update %d selected items?", len(selected))
+	s.ConfirmMsg = confirmMessage("Update", selected)
 	s.PendingUpdateItems = selected
 	s.ConfirmCmd = func(program *tea.Program) tea.Cmd {
 		return s.startUpdateAll(selected, program)
@@ -239,7 +418,7 @@ func (s *State) runUpdateAll() {
 	}
 
 	s.ShowConfirm = true
-	s.ConfirmMsg = fmt.Sprintf("Update all %d items?", len(outdated))
+	s.ConfirmMsg = confirmMessage("Update", outdated)
 	s.PendingUpdateItems = outdated
 	s.ConfirmCmd = func(program *tea.Program) tea.Cmd {
 		return s.startUpdateAll(outdated, program)
@@ -391,6 +570,25 @@ func masElevFailResults(items []*model.Item, err error) []*updater.Result {
 	return results
 }
 
+// confirmMessage builds a confirmation dialog text that lists the first
+// few items so the user knows exactly what will be touched.
+func confirmMessage(verb string, items []*model.Item) string {
+	if len(items) == 0 {
+		return fmt.Sprintf("%s 0 items?", verb)
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "%s %d item(s)?\n\n", verb, len(items))
+	const maxVisible = 5
+	for i, it := range items {
+		if i >= maxVisible {
+			fmt.Fprintf(&b, "… and %d more\n", len(items)-maxVisible)
+			break
+		}
+		fmt.Fprintf(&b, "  • %s  (%s)\n", it.Name, it.Category)
+	}
+	return strings.TrimSpace(b.String())
+}
+
 // ---------------------------------------------------------------------------
 // Cleanup (selected)
 // ---------------------------------------------------------------------------
@@ -412,7 +610,7 @@ func (s *State) runCleanSelected() {
 	}
 
 	s.ShowConfirm = true
-	s.ConfirmMsg = fmt.Sprintf("Clean %d item(s)? This will remove old versions and cache data.", len(selected))
+	s.ConfirmMsg = confirmMessage("Clean", selected)
 	s.PendingCleanItems = selected
 	s.ConfirmCmd = func(program *tea.Program) tea.Cmd {
 		return s.startCleanSelected(selected, program)
@@ -436,7 +634,7 @@ func (s *State) runCleanAll() {
 	}
 
 	s.ShowConfirm = true
-	s.ConfirmMsg = fmt.Sprintf("Clean all %d items? This will remove old versions and cache data.", len(all))
+	s.ConfirmMsg = confirmMessage("Clean", all)
 	s.PendingCleanItems = all
 	s.ConfirmCmd = func(program *tea.Program) tea.Cmd {
 		return s.startCleanSelected(all, program)

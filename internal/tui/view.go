@@ -37,6 +37,28 @@ func (s *State) Render() string {
 		return s.frame(b.String())
 	}
 
+	// Help screen overlay
+	if s.ShowHelp {
+		b.WriteString(s.renderHelp())
+		b.WriteString(tuiNewline)
+		b.WriteString(s.renderHelpFooter())
+		return s.frame(b.String())
+	}
+
+	// Filter input bar
+	if s.ShowFilter {
+		b.WriteString(s.renderFilter())
+		b.WriteString(tuiNewline)
+	}
+
+	// Detail view overlay
+	if s.ShowDetail {
+		b.WriteString(s.renderDetail())
+		b.WriteString(tuiNewline)
+		b.WriteString(s.renderDetailFooter())
+		return s.frame(b.String())
+	}
+
 	// Tabs (space-separated without MarginRight)
 	b.WriteString(s.renderTabs())
 	b.WriteString(tuiBlankLine)
@@ -607,6 +629,10 @@ func (s *State) renderFooter() string {
 		hints = append(hints, fmt.Sprintf("[%d selected]", sel))
 	}
 
+	if s.AppliedFilter != "" {
+		hints = append(hints, fmt.Sprintf("[filter: %s]", s.AppliedFilter))
+	}
+
 	hints = append(hints, "[1/2/3] tab", "[Q] quit")
 	return wrapFooter(hints, s.contentWidth())
 }
@@ -687,8 +713,16 @@ func (s *State) renderPasswordFooter() string {
 func (s *State) renderConfirm() string {
 	var b strings.Builder
 	b.WriteString(tuiNewline)
-	b.WriteString(ConfirmStyle.Render(" ⚠ " + s.ConfirmMsg))
-	b.WriteString(tuiBlankLine)
+	lines := strings.Split(s.ConfirmMsg, "\n")
+	for i, line := range lines {
+		if i == 0 {
+			b.WriteString(ConfirmStyle.Render(" ⚠ " + line))
+		} else {
+			b.WriteString(VerCurrentStyle.Render(truncatePlain(line, s.contentWidth()-4)))
+		}
+		b.WriteString(tuiNewline)
+	}
+	b.WriteString(tuiNewline)
 	b.WriteString(ButtonStyle.Render(" Y") + "  yes  ")
 	b.WriteString(ButtonStyle.Render(" N") + "  no")
 	b.WriteString(tuiNewline)
@@ -708,4 +742,124 @@ func hasCleanupItems(s *model.SourceSummary) bool {
 		}
 	}
 	return false
+}
+
+// helpBinding is one keyboard shortcut shown on the help screen.
+type helpBinding struct {
+	keys string
+	desc string
+}
+
+// helpSections returns the help content grouped by context.
+func helpSections() [][]helpBinding {
+	return [][]helpBinding{
+		{
+			{keys: "↑ / k, ↓ / j", desc: "Move cursor up/down"},
+			{keys: "PgUp / PgDown", desc: "Jump one page"},
+			{keys: "Home / End", desc: "Jump to first/last item"},
+		},
+		{
+			{keys: "1 / 2 / 3", desc: "Switch tab (Updates / Cleanup / Logs)"},
+			{keys: "Space", desc: "Toggle selection"},
+			{keys: "* / -", desc: "Select all / none in current tab"},
+			{keys: ".", desc: "Select all in current category"},
+		},
+		{
+			{keys: "U", desc: "Update selected items"},
+			{keys: "A", desc: "Update all (Updates tab) / Clean all (Cleanup tab)"},
+			{keys: "C", desc: "Clean selected items"},
+		},
+		{
+			{keys: "/", desc: "Filter items by name"},
+			{keys: "Enter", desc: "Show item details / output"},
+			{keys: "Esc", desc: "Cancel filter, dialog, or running operation"},
+			{keys: "R", desc: "Refresh scan"},
+		},
+		{
+			{keys: "Q / Ctrl+C", desc: "Quit updash"},
+		},
+	}
+}
+
+func (s *State) renderHelp() string {
+	var b strings.Builder
+	b.WriteString(tuiNewline)
+	b.WriteString(ConfirmStyle.Render(" ⌨  Keyboard shortcuts"))
+	b.WriteString(tuiBlankLine)
+
+	cw := s.contentWidth()
+	for _, section := range helpSections() {
+		for _, binding := range section {
+			keyLine := ButtonStyle.Render(padRight(binding.keys, 18))
+			descLine := VerCurrentStyle.Render(truncatePlain(binding.desc, cw-22))
+			b.WriteString(joinRow(lipgloss.NewStyle().Render(tuiIndent), keyLine, lipgloss.NewStyle().Render(tuiIndent), descLine))
+			b.WriteString(tuiNewline)
+		}
+		b.WriteString(tuiNewline)
+	}
+	return b.String()
+}
+
+func (s *State) renderHelpFooter() string {
+	return FooterStyle.Render("[Esc] close help")
+}
+
+func (s *State) renderFilter() string {
+	prompt := "/ " + s.FilterInput + "_"
+	return ConfirmStyle.Render(truncatePlain(prompt, s.contentWidth()-2))
+}
+
+func (s *State) renderDetail() string {
+	if s.DetailItem == nil {
+		return ""
+	}
+	it := s.DetailItem
+	var b strings.Builder
+	b.WriteString(tuiNewline)
+	b.WriteString(ConfirmStyle.Render(" 📋 " + it.Name))
+	b.WriteString(tuiBlankLine)
+
+	cw := s.contentWidth() - 4
+	rows := []struct{ label, value string }{
+		{"Category", string(it.Category)},
+		{"Status", it.Status.String()},
+		{"Current", it.CurrentVer},
+		{"Available", it.AvailableVer},
+	}
+	if it.Reclaimable != "" {
+		rows = append(rows, struct{ label, value string }{"Reclaimable", it.Reclaimable})
+	}
+	if it.KeepPolicy != "" {
+		rows = append(rows, struct{ label, value string }{"Policy", it.KeepPolicy})
+	}
+	if it.PackageID != "" {
+		rows = append(rows, struct{ label, value string }{"Package ID", it.PackageID})
+	}
+
+	for _, r := range rows {
+		if r.value == "" {
+			continue
+		}
+		line := fmt.Sprintf("  %s: %s", r.label, r.value)
+		b.WriteString(VerCurrentStyle.Render(truncatePlain(line, cw)))
+		b.WriteString(tuiNewline)
+	}
+
+	if it.Log != "" {
+		b.WriteString(tuiNewline)
+		b.WriteString(VerCurrentStyle.Render("  Last output:"))
+		b.WriteString(tuiNewline)
+		for _, line := range strings.Split(it.Log, "\n") {
+			if strings.TrimSpace(line) == "" {
+				continue
+			}
+			b.WriteString(VerCurrentStyle.Render(truncatePlain("    "+line, cw)))
+			b.WriteString(tuiNewline)
+		}
+	}
+	return b.String()
+}
+
+func (s *State) renderDetailFooter() string {
+	return FooterStyle.Render("[Enter/Esc] close details")
 }

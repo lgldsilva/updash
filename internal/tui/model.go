@@ -4,6 +4,7 @@ package tui
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/lgldsilva/updash/internal/elevate"
@@ -40,6 +41,15 @@ type State struct {
 	ConfirmMsg    string
 	ConfirmAction func()
 	ConfirmCmd    func(program *tea.Program) tea.Cmd // replaces ConfirmAction for async ops
+
+	// Filter state
+	ShowFilter    bool
+	FilterInput   string
+	AppliedFilter string
+
+	// Detail view state
+	ShowDetail bool
+	DetailItem *model.Item
 
 	// Pending items for async operations (cleared after confirm/cancel)
 	PendingUpdateItems []*model.Item
@@ -165,7 +175,7 @@ func (s *State) FlattenUpdateItems() []*model.Item {
 			}
 		}
 	}
-	return items
+	return filterItems(items, s.AppliedFilter)
 }
 
 // isCleanupNavigable reports items shown and selectable on the Cleanup tab.
@@ -191,7 +201,24 @@ func (s *State) FlattenCleanItems() []*model.Item {
 			}
 		}
 	}
-	return items
+	return filterItems(items, s.AppliedFilter)
+}
+
+// filterItems keeps items whose name or category matches the filter (case-insensitive).
+// An empty filter keeps every item.
+func filterItems(items []*model.Item, filter string) []*model.Item {
+	if filter == "" {
+		return items
+	}
+	f := strings.ToLower(filter)
+	out := make([]*model.Item, 0, len(items))
+	for _, it := range items {
+		if strings.Contains(strings.ToLower(it.Name), f) ||
+			strings.Contains(strings.ToLower(string(it.Category)), f) {
+			out = append(out, it)
+		}
+	}
+	return out
 }
 
 // CurrentItems returns the flat navigable list for the active tab.

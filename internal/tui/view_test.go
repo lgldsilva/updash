@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -510,6 +511,129 @@ func TestRenderConfirmFooter(t *testing.T) {
 	s := New()
 	if !strings.Contains(s.renderConfirmFooter(), "yes") {
 		t.Fatal("missing yes hint")
+	}
+}
+
+func TestRenderHelp(t *testing.T) {
+	s := New()
+	s.ShowHelp = true
+	out := s.Render()
+	if !strings.Contains(out, "Keyboard shortcuts") {
+		t.Fatalf("expected help title: %s", out)
+	}
+	if !strings.Contains(out, "Space") {
+		t.Fatal("expected Space binding")
+	}
+	if !strings.Contains(out, "close help") {
+		t.Fatal("expected help footer")
+	}
+}
+
+func TestHandleKey_ToggleHelp(t *testing.T) {
+	s := New()
+	if s.HandleKey("?") != KeyHelp {
+		t.Fatal("? should open help")
+	}
+	s.HandleAction(KeyHelp)
+	if !s.ShowHelp {
+		t.Fatal("ShowHelp should be true")
+	}
+	if s.HandleKey("q") != KeyHelp {
+		t.Fatal("any key should close help")
+	}
+	s.HandleAction(KeyHelp)
+	if s.ShowHelp {
+		t.Fatal("ShowHelp should be false after dismiss")
+	}
+}
+
+func TestConfirmMessage(t *testing.T) {
+	items := []*model.Item{
+		{Name: "btop", Category: model.CatBrew},
+		{Name: "npm", Category: model.CatNpm},
+	}
+	msg := confirmMessage("Update", items)
+	if !strings.Contains(msg, "Update 2 item(s)?") {
+		t.Fatalf("missing header: %s", msg)
+	}
+	if !strings.Contains(msg, "btop") || !strings.Contains(msg, "npm") {
+		t.Fatalf("missing item list: %s", msg)
+	}
+
+	many := make([]*model.Item, 10)
+	for i := range many {
+		many[i] = &model.Item{Name: fmt.Sprintf("pkg%d", i), Category: model.CatBrew}
+	}
+	msg = confirmMessage("Clean", many)
+	if !strings.Contains(msg, "and 5 more") {
+		t.Fatalf("expected truncation note: %s", msg)
+	}
+}
+
+func TestFilterInput(t *testing.T) {
+	s := New()
+	if s.HandleKey("/") != KeyFilter {
+		t.Fatal("/ should open filter")
+	}
+	s.HandleAction(KeyFilter)
+	if !s.ShowFilter {
+		t.Fatal("ShowFilter should be true")
+	}
+
+	s.HandleKey("b")
+	s.HandleKey("t")
+	if s.FilterInput != "bt" {
+		t.Fatalf("filter input = %q, want bt", s.FilterInput)
+	}
+
+	s.HandleKey("backspace")
+	if s.FilterInput != "b" {
+		t.Fatalf("filter input after backspace = %q, want b", s.FilterInput)
+	}
+
+	s.HandleKey("enter")
+	s.HandleAction(KeyFilterSubmit)
+	if s.ShowFilter || s.AppliedFilter != "b" {
+		t.Fatalf("filter not applied: ShowFilter=%v AppliedFilter=%q", s.ShowFilter, s.AppliedFilter)
+	}
+
+	if s.HandleKey("esc") != KeyFilterCancel {
+		t.Fatal("esc should cancel filter")
+	}
+	s.HandleAction(KeyFilterCancel)
+	if s.AppliedFilter != "" {
+		t.Fatalf("filter should be cleared, got %q", s.AppliedFilter)
+	}
+}
+
+func TestDetailView(t *testing.T) {
+	s := New()
+	s.Summaries = []*model.SourceSummary{
+		{
+			Category: model.CatBrew,
+			Items: []*model.Item{
+				{Name: "btop", Category: model.CatBrew, CurrentVer: "1.3.0", AvailableVer: "1.5.0", Status: model.StatusOutdated, Log: "installed"},
+			},
+		},
+	}
+
+	if s.HandleKey("enter") != KeyDetail {
+		t.Fatal("enter should open detail")
+	}
+	s.HandleAction(KeyDetail)
+	if !s.ShowDetail || s.DetailItem == nil || s.DetailItem.Name != "btop" {
+		t.Fatalf("detail not opened: ShowDetail=%v DetailItem=%v", s.ShowDetail, s.DetailItem)
+	}
+
+	out := s.Render()
+	if !strings.Contains(out, "btop") || !strings.Contains(out, "1.5.0") {
+		t.Fatalf("detail missing data: %s", out)
+	}
+
+	s.HandleKey("esc")
+	s.HandleAction(KeyDetail)
+	if s.ShowDetail || s.DetailItem != nil {
+		t.Fatal("detail should be closed")
 	}
 }
 
