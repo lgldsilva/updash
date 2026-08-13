@@ -155,36 +155,92 @@ func (s *State) renderContent() string {
 	}
 }
 
-func (s *State) renderUpdatesTab() string {
+// itemTabConfig parameterizes the shared update/cleanup tab rendering.
+type itemTabConfig struct {
+	summaries   []*model.SourceSummary
+	scanEmpty   bool
+	opActive    bool
+	opVerb      string
+	opTotal     int
+	opDone      int
+	hasItems    func(*model.SourceSummary) bool
+	renderEmpty func() string
+	header      func(*model.SourceSummary) string
+	writeItems  func(*strings.Builder, *model.SourceSummary, int) int
+}
+
+func (s *State) renderItemTab(cfg itemTabConfig) string {
 	var b strings.Builder
-	s.writeScanWait(&b, len(s.Summaries) == 0)
-	s.writeOpProgress(&b, s.Updating && s.UpdateTotal > 0, "Updating", s.UpdateTotal, s.UpdateDone)
+	s.writeScanWait(&b, cfg.scanEmpty)
+	s.writeOpProgress(&b, cfg.opActive, cfg.opVerb, cfg.opTotal, cfg.opDone)
 
 	flatIdx := 0
 	firstCat := true
-	for _, summary := range s.Summaries {
+	for _, summary := range cfg.summaries {
 		if len(summary.Items) == 0 {
+			continue
+		}
+		if cfg.hasItems != nil && !cfg.hasItems(summary) {
 			continue
 		}
 		if !firstCat {
 			b.WriteString(tuiNewline)
 		}
 		firstCat = false
-		b.WriteString(s.renderCategoryHeader(summary))
+		b.WriteString(cfg.header(summary))
 		b.WriteString(tuiNewline)
-		if !hasUpdateItems(summary) {
-			s.writeAgentUpToDate(&b, summary)
-			continue
-		}
-		flatIdx = s.writeUpdateItems(&b, summary, flatIdx)
+		flatIdx = cfg.writeItems(&b, summary, flatIdx)
 	}
 
-	if s.TotalOutdated() == 0 && !s.Scanning {
-		b.WriteString(tuiNewlineIndent)
-		b.WriteString(ItemOKStyle.Render("✓ All packages are up to date"))
-		b.WriteString(tuiNewline)
+	if cfg.renderEmpty != nil {
+		b.WriteString(cfg.renderEmpty())
 	}
 	return b.String()
+}
+
+func (s *State) renderUpdatesTab() string {
+	empty := ""
+	if s.TotalOutdated() == 0 && !s.Scanning {
+		empty = tuiNewlineIndent + ItemOKStyle.Render("✓ All packages are up to date") + tuiNewline
+	}
+	return s.renderItemTab(itemTabConfig{
+		summaries:   s.Summaries,
+		scanEmpty:   len(s.Summaries) == 0,
+		opActive:    s.Updating && s.UpdateTotal > 0,
+		opVerb:      "Updating",
+		opTotal:     s.UpdateTotal,
+		opDone:      s.UpdateDone,
+		renderEmpty: func() string { return empty },
+		header:      s.renderCategoryHeader,
+		writeItems: func(b *strings.Builder, summary *model.SourceSummary, flatIdx int) int {
+			if !hasUpdateItems(summary) {
+				s.writeAgentUpToDate(b, summary)
+				return flatIdx
+			}
+			return s.writeUpdateItems(b, summary, flatIdx)
+		},
+	})
+}
+
+func (s *State) renderCleanupTab() string {
+	empty := ""
+	if s.TotalCleanable() == 0 && !s.Scanning {
+		empty = tuiNewlineIndent + ItemOKStyle.Render("✓ Nothing to clean") + tuiNewline
+	}
+	return s.renderItemTab(itemTabConfig{
+		summaries:   s.CleanItems,
+		scanEmpty:   len(s.CleanItems) == 0,
+		opActive:    s.Cleaning && s.CleanTotal > 0,
+		opVerb:      "Cleaning",
+		opTotal:     s.CleanTotal,
+		opDone:      s.CleanDone,
+		hasItems:    hasCleanupItems,
+		renderEmpty: func() string { return empty },
+		header:      s.renderCleanupCategoryHeader,
+		writeItems: func(b *strings.Builder, summary *model.SourceSummary, flatIdx int) int {
+			return s.writeCleanupItems(b, summary, flatIdx)
+		},
+	})
 }
 
 func (s *State) writeScanWait(b *strings.Builder, waiting bool) {
@@ -235,12 +291,24 @@ func (s *State) writeAgentUpToDate(b *strings.Builder, summary *model.SourceSumm
 }
 
 func (s *State) writeUpdateItems(b *strings.Builder, summary *model.SourceSummary, flatIdx int) int {
+	return s.writeItems(b, summary, flatIdx, model.TabUpdates, isUpdateNavigable, s.updateCheckbox, s.renderItemStyled)
+}
+
+func (s *State) writeItems(
+	b *strings.Builder,
+	summary *model.SourceSummary,
+	flatIdx int,
+	tab model.TabID,
+	isNavigable func(model.Status) bool,
+	checkbox func(*model.Item) string,
+	renderItem func(*model.Item) string,
+) int {
 	for _, item := range summary.Items {
-		if !isUpdateNavigable(item.Status) {
+		if !isNavigable(item.Status) {
 			continue
 		}
-		gutter := fmt.Sprintf("%s %s ", s.rowCursor(flatIdx, model.TabUpdates), s.updateCheckbox(item))
-		row := joinRow(lipgloss.NewStyle().Render(gutter), s.renderItemStyled(item))
+		gutter := fmt.Sprintf("%s %s ", s.rowCursor(flatIdx, tab), checkbox(item))
+		row := joinRow(lipgloss.NewStyle().Render(gutter), renderItem(item))
 		b.WriteString(s.formatRow(row, flatIdx))
 		b.WriteString(tuiNewline)
 		flatIdx++
@@ -273,34 +341,6 @@ func (s *State) rowCursor(flatIdx int, tab model.TabID) string {
 	return tuiSpace
 }
 
-func (s *State) renderCleanupTab() string {
-	var b strings.Builder
-	s.writeScanWait(&b, len(s.CleanItems) == 0)
-	s.writeOpProgress(&b, s.Cleaning && s.CleanTotal > 0, "Cleaning", s.CleanTotal, s.CleanDone)
-
-	flatIdx := 0
-	firstCat := true
-	for _, summary := range s.CleanItems {
-		if len(summary.Items) == 0 || !hasCleanupItems(summary) {
-			continue
-		}
-		if !firstCat {
-			b.WriteString(tuiNewline)
-		}
-		firstCat = false
-		b.WriteString(s.renderCleanupCategoryHeader(summary))
-		b.WriteString(tuiNewline)
-		flatIdx = s.writeCleanupItems(&b, summary, flatIdx)
-	}
-
-	if s.TotalCleanable() == 0 && !s.Scanning {
-		b.WriteString(tuiNewlineIndent)
-		b.WriteString(ItemOKStyle.Render("✓ Nothing to clean"))
-		b.WriteString(tuiNewline)
-	}
-	return b.String()
-}
-
 func (s *State) renderCleanupCategoryHeader(summary *model.SourceSummary) string {
 	label := padRight(iconCell(summary.Icon)+tuiSpace+summary.Label, s.metrics().catLabel)
 	header := CatLabelStyle.Render(label)
@@ -321,17 +361,7 @@ func sumReclaimable(summary *model.SourceSummary) string {
 }
 
 func (s *State) writeCleanupItems(b *strings.Builder, summary *model.SourceSummary, flatIdx int) int {
-	for _, item := range summary.Items {
-		if !isCleanupNavigable(item.Status) {
-			continue
-		}
-		gutter := fmt.Sprintf("%s %s ", s.rowCursor(flatIdx, model.TabCleanup), s.cleanupCheckbox(item))
-		row := joinRow(lipgloss.NewStyle().Render(gutter), s.renderCleanupItemStyled(item))
-		b.WriteString(s.formatRow(row, flatIdx))
-		b.WriteString(tuiNewline)
-		flatIdx++
-	}
-	return flatIdx
+	return s.writeItems(b, summary, flatIdx, model.TabCleanup, isCleanupNavigable, s.cleanupCheckbox, s.renderCleanupItemStyled)
 }
 
 func (s *State) cleanupCheckbox(item *model.Item) string {
