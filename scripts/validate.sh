@@ -43,11 +43,11 @@ step "Tests I/O (race)" go test -race -count=1 \
 step "Tests gate+cover" go test -race -count=1 -coverprofile=/tmp/updash-cov.out \
                          ./internal/model/... ./internal/config/... \
                          ./internal/sizefmt/... ./internal/cli/... \
-                         ./internal/retention/... 2>&1 | tail -1
+                         ./internal/retention/... ./internal/upgrade/... 2>&1 | tail -1
 step "Coverage ≥90%"   bash -c 'pct=$(go tool cover -func=/tmp/updash-cov.out | awk '\''/^total:/ {gsub("%","",$3); print $3}'\''); echo "  coverage=${pct}%"; awk -v p="$pct" -v min=90 "BEGIN{ exit (p+0 < min+0) }"'
-step "Lint (0 issues)" go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.12.2 run ./...
-step "gosec"           go run github.com/securego/gosec/v2/cmd/gosec@v2.27.1 -quiet -exclude=G204,G306,G703,G118 ./...
-step "Vulncheck"       bash -c 'go run golang.org/x/vuln/cmd/govulncheck@latest ./... 2>&1 | grep -q "Your code is affected by 0 vulnerabilities"'
+step "Lint (0 issues)" bash -c 'GOTOOLCHAIN=go1.26.5 go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.12.2 run ./...'
+step "gosec"           bash -c 'GOTOOLCHAIN=go1.26.5 go run github.com/securego/gosec/v2/cmd/gosec@v2.27.1 -quiet -exclude=G204,G306,G703,G118 ./...'
+step "Vulncheck"       bash -c 'GOTOOLCHAIN=go1.26.5 go run golang.org/x/vuln/cmd/govulncheck@latest ./... 2>&1 | grep -q "No vulnerabilities found"'
 
 echo ""
 if [ "$FAIL" -eq 0 ]; then
