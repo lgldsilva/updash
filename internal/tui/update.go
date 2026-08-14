@@ -378,8 +378,12 @@ func (s *State) runRefresh() tea.Cmd {
 // ---------------------------------------------------------------------------
 
 // collectOutdatedItems returns all outdated items, or only selected ones when selectedOnly is true.
+// Manual-only items (KeepPolicy-driven, e.g. WhatsApp or JetBrains casks) are
+// skipped, mirroring the CLI's partitionUpdatable — the TUI must not run
+// updates the project defines as manual.
 func (s *State) collectOutdatedItems(selectedOnly bool) []*model.Item {
 	var out []*model.Item
+	skipped := 0
 	for _, it := range s.FlattenItems() {
 		if it.Status != model.StatusOutdated {
 			continue
@@ -387,9 +391,61 @@ func (s *State) collectOutdatedItems(selectedOnly bool) []*model.Item {
 		if selectedOnly && !it.Selected {
 			continue
 		}
+		if IsManualOnlyItem(it) {
+			skipped++
+			continue
+		}
 		out = append(out, it)
 	}
+	if skipped > 0 {
+		s.AddLog(fmt.Sprintf("⊘ %d manual-only item(s) skipped — update them by hand (see detail)", skipped), false)
+	}
 	return out
+}
+
+// IsManualOnlyItem reports whether an item must be updated manually
+// (KeepPolicy or brew note marks it as manual reinstall / licensed app).
+func IsManualOnlyItem(it *model.Item) bool {
+	if it == nil {
+		return false
+	}
+	if it.KeepPolicy != "" {
+		if kind, _ := updater.ClassifyItem(it, nil); kind == updater.KindManualOnly {
+			return true
+		}
+	}
+	return false
+}
+
+// LogUpdateResults writes per-item update outcomes to the Logs tab.
+// Manual-only results log as ⊘ with the suggested command, not as failures.
+func (s *State) LogUpdateResults(results []*updater.Result) {
+	for _, r := range results {
+		switch {
+		case r.Success:
+			s.AddLog(fmt.Sprintf("✓ %s: updated", r.Item.Name), true)
+		case IsManualOnlyItem(r.Item):
+			s.AddLog(fmt.Sprintf("⊘ %s: manual only — %s", r.Item.Name, updater.SuggestCommand(r.Item)), false)
+		default:
+			s.AddLog(fmt.Sprintf("✘ %s: %s", r.Item.Name, truncatePlain(r.Error, 120)), false)
+		}
+	}
+}
+
+// countResults tallies batch outcomes. Manual-only items count as skipped,
+// not failed — nothing was actually attempted for them.
+func countResults(results []*updater.Result) (ok, fail int) {
+	for _, r := range results {
+		switch {
+		case r.Success:
+			ok++
+		case IsManualOnlyItem(r.Item):
+			// skipped, not failed
+		default:
+			fail++
+		}
+	}
+	return ok, fail
 }
 
 // showUpdateConfirm prepares the confirmation dialog for an update batch.
@@ -474,13 +530,7 @@ func (s *State) runUpdateGroup(group categoryGroup, done, total int, program *te
 	}
 
 	results := s.execUpdateBatch(group, cmdCtx, program)
-	for _, r := range results {
-		if r.Success {
-			ok++
-		} else {
-			fail++
-		}
-	}
+	ok, fail = countResults(results)
 	program.Send(UpdateBatchDoneMsg{Results: results, Done: done + len(results), Total: total})
 	return ok, fail, len(results)
 }

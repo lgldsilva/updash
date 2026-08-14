@@ -312,13 +312,7 @@ func (m *bubbleModel) onUpdateBatch(msg tui.UpdateBatchDoneMsg) (tea.Model, tea.
 		m.state.AddLog(fmt.Sprintf("⟳ %s: updating...", msg.Category), true)
 		return m, tui.TickCmd()
 	}
-	for _, r := range msg.Results {
-		if r.Success {
-			m.state.AddLog(fmt.Sprintf("✓ %s: updated", r.Item.Name), true)
-			continue
-		}
-		m.state.AddLog(fmt.Sprintf("✘ %s: %s", r.Item.Name, truncateErr(r.Error)), false)
-	}
+	m.state.LogUpdateResults(msg.Results)
 	return m, nil
 }
 

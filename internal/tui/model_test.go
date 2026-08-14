@@ -2,10 +2,12 @@ package tui
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/lgldsilva/updash/internal/model"
+	"github.com/lgldsilva/updash/internal/updater"
 )
 
 func TestNew(t *testing.T) {
@@ -523,4 +525,83 @@ func TestState_ClampCursorAndLogScanErrors(t *testing.T) {
 		{Category: model.CatBrew, ErrorCount: 1, Items: []*model.Item{{Name: "x", Status: model.StatusError, CurrentVer: "fail"}}},
 	}
 	s.LogScanErrors()
+}
+
+func TestCollectOutdatedItems_SkipsManualOnly(t *testing.T) {
+	// The TUI must mirror the CLI's partitionUpdatable: manual-only items
+	// (KeepPolicy "manual"/jetbrains/app-store-preferred) never enter an
+	// update batch — they used to be updated or counted as failures here.
+	s := New()
+	s.Summaries = []*model.SourceSummary{
+		{Category: model.CatBrew, Label: "Homebrew", Items: []*model.Item{
+			{Name: "btop", Status: model.StatusOutdated},
+			{Name: "whatsapp", Status: model.StatusOutdated, KeepPolicy: "manual reinstall via Mac App Store"},
+			{Name: "up-to-date", Status: model.StatusOK},
+		}},
+		{Category: model.CatAgent, Label: "Agents", Items: []*model.Item{
+			{Name: "Cursor", Status: model.StatusOutdated, KeepPolicy: "⊘ manual reinstall / app update"},
+		}},
+	}
+
+	got := s.collectOutdatedItems(false)
+	if len(got) != 1 || got[0].Name != "btop" {
+		t.Fatalf("expected only btop (manual-only skipped), got %+v", got)
+	}
+	if n := len(s.Logs); n == 0 || !strings.Contains(s.Logs[n-1].Message, "manual-only") {
+		t.Fatalf("expected manual-only skip log, got %+v", s.Logs)
+	}
+}
+
+func TestIsManualOnlyItem(t *testing.T) {
+	cases := []struct {
+		name string
+		item *model.Item
+		want bool
+	}{
+		{"nil", nil, false},
+		{"no policy", &model.Item{Name: "btop"}, false},
+		{"retention policy", &model.Item{Name: "npm-cache", KeepPolicy: "cache + npx extractions"}, false},
+		{"manual agent", &model.Item{Name: "Cursor", KeepPolicy: "⊘ manual reinstall / app update"}, true},
+		{"jetbrains cask", &model.Item{Name: "intellij-idea", KeepPolicy: "JetBrains Toolbox manages updates"}, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := IsManualOnlyItem(tc.item); got != tc.want {
+				t.Errorf("IsManualOnlyItem(%s) = %v, want %v", tc.name, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestCountResults_ManualOnlyIsNotFailure(t *testing.T) {
+	results := []*updater.Result{
+		{Item: &model.Item{Name: "ok"}, Success: true},
+		{Item: &model.Item{Name: "cursor", KeepPolicy: "⊘ manual reinstall"}, Success: false, Error: "manual reinstall"},
+		{Item: &model.Item{Name: "boom"}, Success: false, Error: "exit 1"},
+	}
+	ok, fail := countResults(results)
+	if ok != 1 || fail != 1 {
+		t.Fatalf("expected 1 ok / 1 fail (manual-only skipped), got %d ok / %d fail", ok, fail)
+	}
+}
+
+func TestLogUpdateResults_ManualOnlyLogsHint(t *testing.T) {
+	s := New()
+	s.LogUpdateResults([]*updater.Result{
+		{Item: &model.Item{Name: "ok"}, Success: true},
+		{Item: &model.Item{Name: "cursor", Category: model.CatAgent, KeepPolicy: "⊘ manual reinstall"}, Success: false},
+		{Item: &model.Item{Name: "boom"}, Success: false, Error: "kaboom"},
+	})
+	if len(s.Logs) != 3 {
+		t.Fatalf("expected 3 log entries, got %d", len(s.Logs))
+	}
+	if !strings.Contains(s.Logs[0].Message, "✓ ok: updated") {
+		t.Errorf("unexpected first log: %q", s.Logs[0].Message)
+	}
+	if !strings.Contains(s.Logs[1].Message, "⊘ cursor: manual only") {
+		t.Errorf("expected manual hint log, got %q", s.Logs[1].Message)
+	}
+	if !strings.Contains(s.Logs[2].Message, "✘ boom: kaboom") {
+		t.Errorf("unexpected failure log: %q", s.Logs[2].Message)
+	}
 }
