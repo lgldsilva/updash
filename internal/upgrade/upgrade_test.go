@@ -9,6 +9,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -740,27 +741,139 @@ func TestExtractBinary_dispatch(t *testing.T) {
 
 // ── replaceRunningBinary ──────────────────────────────────────────────────
 
-func TestReplaceRunningBinary(t *testing.T) {
-	// Create a fake "binary" in a temp dir
+func stubSelfUpdateDepsForReplace(t *testing.T, executable string) {
+	t.Helper()
+	oldExec, oldSymlink := osExecutable, evalSymlinks
+	t.Cleanup(func() { osExecutable, evalSymlinks = oldExec, oldSymlink })
+	osExecutable = func() (string, error) { return executable, nil }
+	evalSymlinks = func(p string) (string, error) { return p, nil }
+}
+
+func TestReplaceRunningBinaryWithOS_ResolveErrors(t *testing.T) {
+	oldExec, oldSymlink := osExecutable, evalSymlinks
+	t.Cleanup(func() { osExecutable, evalSymlinks = oldExec, oldSymlink })
+
+	osExecutable = func() (string, error) { return "", errors.New("no exe") }
+	if err := replaceRunningBinaryWithOS([]byte("x"), "linux"); err == nil {
+		t.Fatal("expected error from os.Executable failure")
+	}
+
+	osExecutable = func() (string, error) { return "/tmp/updash", nil }
+	evalSymlinks = func(p string) (string, error) { return "", errors.New("broken link") }
+	if err := replaceRunningBinaryWithOS([]byte("x"), "linux"); err == nil {
+		t.Fatal("expected error from EvalSymlinks failure")
+	}
+}
+
+func TestReplaceRunningBinaryWithOS(t *testing.T) {
 	dir := t.TempDir()
 	fakeBin := filepath.Join(dir, "fake-updash")
 	if err := os.WriteFile(fakeBin, []byte("old"), 0755); err != nil {
 		t.Fatal(err)
 	}
+	stubSelfUpdateDepsForReplace(t, fakeBin)
 
-	// We can't call replaceRunningBinary directly (it uses os.Executable),
-	// but we can test the write+rename logic by replicating it:
-	newBin := []byte("new-binary-content")
-	tmp := filepath.Join(dir, ".updash.upgrade.tmp")
-	if err := os.WriteFile(tmp, newBin, 0755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Rename(tmp, fakeBin); err != nil {
-		t.Fatal(err)
+	if err := replaceRunningBinaryWithOS([]byte("new-binary-content"), "linux"); err != nil {
+		t.Fatalf("replace failed: %v", err)
 	}
 	got, err := os.ReadFile(fakeBin)
 	if err != nil || string(got) != "new-binary-content" {
 		t.Fatalf("got %q err=%v", got, err)
+	}
+}
+
+func TestReplaceRunningBinaryWithOS_WindowsFallback(t *testing.T) {
+	dir := t.TempDir()
+	fakeBin := filepath.Join(dir, "fake-updash")
+	// Make the target a directory so the first rename fails and forces the
+	// Windows fallback path on a non-Windows test host.
+	if err := os.Mkdir(fakeBin, 0755); err != nil {
+		t.Fatal(err)
+	}
+	stubSelfUpdateDepsForReplace(t, fakeBin)
+
+	if err := replaceRunningBinaryWithOS([]byte("new-binary-content"), "windows"); err != nil {
+		t.Fatalf("windows fallback replace failed: %v", err)
+	}
+	got, err := os.ReadFile(fakeBin)
+	if err != nil || string(got) != "new-binary-content" {
+		t.Fatalf("got %q err=%v", got, err)
+	}
+	old := fakeBin + ".old"
+	if _, err := os.Stat(old); err != nil {
+		t.Fatalf("expected .old leftover: %v", err)
+	}
+}
+
+func TestPerformWindowsReplace(t *testing.T) {
+	dir := t.TempDir()
+	self := filepath.Join(dir, "updash")
+	old := self + ".old"
+	tmp := filepath.Join(dir, ".updash.upgrade.tmp")
+
+	if err := os.WriteFile(self, []byte("old"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(tmp, []byte("new"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := performWindowsReplace(tmp, self, old); err != nil {
+		t.Fatalf("performWindowsReplace failed: %v", err)
+	}
+	got, _ := os.ReadFile(self)
+	if string(got) != "new" {
+		t.Fatalf("self = %q, want new", got)
+	}
+	if _, err := os.Stat(old); err != nil {
+		t.Fatalf("expected .old: %v", err)
+	}
+
+	// Stage-old failure: self does not exist.
+	if err := performWindowsReplace(tmp, filepath.Join(dir, "missing"), old); err == nil {
+		t.Fatal("expected error when self is missing")
+	}
+}
+
+func TestRollbackWindowsReplace(t *testing.T) {
+	dir := t.TempDir()
+	self := filepath.Join(dir, "updash")
+	old := self + ".old"
+	tmp := filepath.Join(dir, ".updash.upgrade.tmp")
+
+	if err := os.WriteFile(old, []byte("old"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(tmp, []byte("tmp"), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	rollbackWindowsReplace(old, self, tmp)
+
+	got, err := os.ReadFile(self)
+	if err != nil || string(got) != "old" {
+		t.Fatalf("rollback did not restore self: %q err=%v", got, err)
+	}
+	if _, err := os.Stat(tmp); !os.IsNotExist(err) {
+		t.Fatalf("tmp should have been removed: %v", err)
+	}
+}
+
+func TestReplaceRunningBinaryWithOS_WriteError(t *testing.T) {
+	dir := t.TempDir()
+	fakeBin := filepath.Join(dir, "updash")
+	if err := os.WriteFile(fakeBin, []byte("old"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	stubSelfUpdateDepsForReplace(t, fakeBin)
+
+	// Make the parent directory read-only so writing the temp binary fails.
+	if err := os.Chmod(dir, 0555); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(dir, 0755) })
+
+	if err := replaceRunningBinaryWithOS([]byte("new"), "linux"); err == nil {
+		t.Fatal("expected error when temp binary cannot be written")
 	}
 }
 

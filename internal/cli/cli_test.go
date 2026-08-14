@@ -108,6 +108,16 @@ func TestItemMatchesFilter(t *testing.T) {
 			t.Errorf("only=%q got=%v want=%v", tc.only, got, tc.want)
 		}
 	}
+
+	// Child category must match even when the source summary is the parent.
+	ai := &model.SourceSummary{Category: model.CatAI, Label: "AI Infrastructure"}
+	ghExt := &model.Item{Name: "gh extensions", Category: model.CatGHExt}
+	if !itemMatchesFilter(ai, ghExt, "gh-ext") {
+		t.Errorf("gh-ext item under AI summary should match --only gh-ext")
+	}
+	if !itemMatchesFilter(ai, ghExt, "GH-EXT") {
+		t.Errorf("gh-ext item should match case-insensitive filter")
+	}
 }
 
 func TestGroupByCategoryAndSorted(t *testing.T) {

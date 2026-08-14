@@ -14,7 +14,7 @@ func CategoryNeedsElevation(cat model.Category, plat model.PlatformInfo) bool {
 		return false
 	}
 	switch cat {
-	case model.CatMAS, model.CatApt, model.CatSnap, model.CatDnf, model.CatZypper:
+	case model.CatMAS, model.CatApt, model.CatSnap, model.CatDnf, model.CatZypper, model.CatApk:
 		return true
 	case model.CatPacman:
 		// yay runs without sudo; plain pacman needs it.

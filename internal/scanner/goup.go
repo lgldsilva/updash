@@ -2,6 +2,9 @@ package scanner
 
 import (
 	"context"
+	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
 
 	"github.com/lgldsilva/updash/internal/model"
@@ -29,19 +32,25 @@ func (s *GoSource) Scan(ctx context.Context, plat model.PlatformInfo) ([]*model.
 	}
 	gopath := strings.TrimSpace(string(gopathBytes))
 
-	// List Go binaries
-	out, err := execCommand(ctx, "ls", gopath+"/bin")
+	// List Go binaries using native Go APIs so this works on Windows too.
+	entries, err := os.ReadDir(filepath.Join(gopath, "bin"))
 	if err != nil {
 		return []*model.Item{okItem(binGo, model.CatGo)}, nil
 	}
 
-	names := strings.Fields(string(out))
-	if len(names) == 0 {
+	if len(entries) == 0 {
 		return []*model.Item{okItem(binGo, model.CatGo)}, nil
 	}
 
 	var items []*model.Item
-	for _, name := range names {
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		name := e.Name()
+		if runtime.GOOS == "windows" && strings.HasSuffix(name, ".exe") {
+			name = strings.TrimSuffix(name, ".exe")
+		}
 		items = append(items, &model.Item{
 			Name:     name,
 			Category: model.CatGo,

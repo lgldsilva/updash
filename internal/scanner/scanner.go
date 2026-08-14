@@ -75,7 +75,6 @@ func appendPlatformSources(src []Source, plat model.PlatformInfo) []Source {
 		{plat.HasZypper, &ZypperSource{}},
 		{plat.HasApk, &ApkSource{}},
 		{plat.HasPacman || plat.HasYay, &PacmanSource{}},
-		{plat.HasPacman || plat.HasYay, &PacmanSource{}},
 		{plat.HasFlatpak, &FlatpakSource{}},
 		{plat.HasSnap, &SnapSource{}},
 		{plat.HasWinget, &WingetSource{}},

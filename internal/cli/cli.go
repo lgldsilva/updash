@@ -437,6 +437,9 @@ func itemMatchesFilter(s *model.SourceSummary, it *model.Item, only string) bool
 	if strings.EqualFold(string(s.Category), o) {
 		return true
 	}
+	if strings.EqualFold(string(it.Category), o) {
+		return true
+	}
 	if strings.Contains(strings.ToLower(s.Label), o) {
 		return true
 	}
