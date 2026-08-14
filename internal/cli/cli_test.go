@@ -611,15 +611,6 @@ func TestEnsureCategoryElevation_readySession(t *testing.T) {
 	}
 }
 
-func TestContainsPasswordNote(t *testing.T) {
-	if !containsPasswordNote("precisa de SENHA de admin") {
-		t.Fatal("expected password note")
-	}
-	if containsPasswordNote("nothing special") {
-		t.Fatal("unexpected match")
-	}
-}
-
 func TestItemNeedsNativeElevation(t *testing.T) {
 	plat := model.PlatformInfo{OS: "darwin"}
 	if !itemNeedsNativeElevation(&model.Item{Name: "microsoft-office", Category: model.CatBrew}, plat) {

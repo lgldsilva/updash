@@ -29,6 +29,20 @@ func TestCanDeferMASElevation(t *testing.T) {
 	}
 }
 
+func TestCanDeferMASElevation_BrewPkgCaskForcesPrompt(t *testing.T) {
+	// Brew PKG casks (Microsoft) sudo-prompt mid-run — they must be primed
+	// up-front like apt, not deferred until the MAS batch.
+	s := New()
+	s.Platform = model.PlatformInfo{OS: "darwin"}
+	items := []*model.Item{
+		{Name: "microsoft-teams", Category: model.CatBrew, Status: model.StatusOutdated},
+		{Name: "WhatsApp", Category: model.CatMAS, Status: model.StatusOutdated},
+	}
+	if s.canDeferMASElevation(items) {
+		t.Fatal("brew PKG cask must force an up-front password prompt")
+	}
+}
+
 func TestNeedsElevationPrompt_DeferredMAS(t *testing.T) {
 	s := New()
 	s.Platform = model.PlatformInfo{OS: "darwin"}
