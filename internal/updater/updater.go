@@ -181,16 +181,8 @@ func upgradeOneBrew(ctx context.Context, item *model.Item, opts Options) *Result
 	result.Success = false
 	result.Error = explainBrewUpgradeFailure(item.Name, output, runErr, timedOut)
 	item.Status = model.StatusError
-	item.CurrentVer = truncatePlainDiagnosis(result.Error)
 	item.Log = output
 	return result
-}
-
-func truncatePlainDiagnosis(msg string) string {
-	if len(msg) <= 72 {
-		return msg
-	}
-	return msg[:72] + "…"
 }
 
 // batchMASUpgrade updates each MAS app individually and verifies via mas outdated.
@@ -253,9 +245,6 @@ func upgradeMASApp(ctx context.Context, item *model.Item, opts Options) *Result 
 	}
 	result.Success = false
 	result.Error = explainMasFailure(item.Name, item.PackageID, output, err)
-	if err != nil {
-		item.CurrentVer = truncatePlainDiagnosis(result.Error)
-	}
 	return result
 }
 
@@ -492,25 +481,70 @@ func batchWingetUpgrade(ctx context.Context, items []*model.Item, opts Options) 
 	for _, it := range items {
 		it.Status = model.StatusUpdating
 	}
-	cmd := exec.CommandContext(ctx, "winget", commandUpgrade, "--all",
-		"--accept-package-agreements", "--accept-source-agreements")
+	args := append([]string{commandUpgrade}, wingetUpgradeArgs(items)...)
+	args = append(args, "--accept-package-agreements", "--accept-source-agreements")
+	cmd := exec.CommandContext(ctx, "winget", args...)
 	return batchMarkAll(items, runCmdWithBuilder(ctx, items[0], cmd, opts))
+}
+
+func wingetUpgradeArgs(items []*model.Item) []string {
+	if len(items) == 0 {
+		return []string{"--all"}
+	}
+	args := make([]string, 0, len(items)*2)
+	for _, it := range items {
+		id := it.PackageID
+		if id == "" {
+			id = it.Name
+		}
+		args = append(args, "--exact", "--id", id)
+	}
+	return args
 }
 
 func batchChocoUpgrade(ctx context.Context, items []*model.Item, opts Options) []*Result {
 	for _, it := range items {
 		it.Status = model.StatusUpdating
 	}
-	cmd := exec.CommandContext(ctx, "choco", commandUpgrade, "all", flagYes)
+	args := append([]string{commandUpgrade}, chocoPackageNames(items)...)
+	args = append(args, flagYes)
+	cmd := exec.CommandContext(ctx, "choco", args...)
 	return batchMarkAll(items, runCmdWithBuilder(ctx, items[0], cmd, opts))
+}
+
+func chocoPackageNames(items []*model.Item) []string {
+	if len(items) == 0 {
+		return []string{"all"}
+	}
+	names := make([]string, 0, len(items))
+	for _, it := range items {
+		name := it.Name
+		if it.PackageID != "" {
+			name = it.PackageID
+		}
+		names = append(names, name)
+	}
+	return names
 }
 
 func batchScoopUpgrade(ctx context.Context, items []*model.Item, opts Options) []*Result {
 	for _, it := range items {
 		it.Status = model.StatusUpdating
 	}
-	cmd := exec.CommandContext(ctx, "scoop", commandUpdate, "*")
+	args := append([]string{commandUpdate}, scoopPackageNames(items)...)
+	cmd := exec.CommandContext(ctx, "scoop", args...)
 	return batchMarkAll(items, runCmdWithBuilder(ctx, items[0], cmd, opts))
+}
+
+func scoopPackageNames(items []*model.Item) []string {
+	if len(items) == 0 {
+		return []string{"*"}
+	}
+	names := make([]string, 0, len(items))
+	for _, it := range items {
+		names = append(names, it.Name)
+	}
+	return names
 }
 
 // npmManagedElsewhereNote explains why a protected npm item is skipped here.

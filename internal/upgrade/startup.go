@@ -38,13 +38,46 @@ func ShouldAutoUpgrade(version string, skipFlag bool) bool {
 	return true
 }
 
-// selfUpdateAllowed reports whether the binary lives in the user-owned install
-// location used by install.sh. System and package-manager installs must remain
-// immutable so that their manager owns updates and integrity metadata.
+// selfUpdateAllowed reports whether the binary lives in a user-owned install
+// location. System and package-manager installs must remain immutable so that
+// their manager owns updates and integrity metadata.
 func selfUpdateAllowed(executable, home string) bool {
 	userBin := filepath.Join(home, ".local", "bin")
 	rel, err := filepath.Rel(userBin, executable)
-	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+	if err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return true
+	}
+	if runtime.GOOS == "windows" {
+		return selfUpdateAllowedWindows(executable)
+	}
+	return false
+}
+
+func selfUpdateAllowedWindows(executable string) bool {
+	localAppData := os.Getenv("LOCALAPPDATA")
+	userProfile := os.Getenv("USERPROFILE")
+	programData := os.Getenv("ProgramData")
+	candidates := []string{
+		filepath.Join(localAppData, "updash"),
+		filepath.Join(userProfile, "scoop", "shims"),
+		filepath.Join(userProfile, "bin"),
+		filepath.Join(programData, "chocolatey", "bin"),
+	}
+	execNorm := normalizeWindowsPath(executable)
+	for _, dir := range candidates {
+		if dir == "" {
+			continue
+		}
+		dirNorm := normalizeWindowsPath(dir)
+		if execNorm == dirNorm || strings.HasPrefix(execNorm, dirNorm+"\\") {
+			return true
+		}
+	}
+	return false
+}
+
+func normalizeWindowsPath(p string) string {
+	return strings.ToLower(strings.ReplaceAll(filepath.Clean(p), "/", "\\"))
 }
 
 // osExecutable and osUserHomeDir are variables so tests can replace them with
@@ -72,8 +105,23 @@ func canSelfUpdate() bool {
 	return selfUpdateAllowed(executable, home)
 }
 
+// CleanupOldBinary removes stale .old files left by a previous Windows self-update.
+func CleanupOldBinary() {
+	self, err := osExecutable()
+	if err != nil {
+		return
+	}
+	self, err = evalSymlinks(self)
+	if err != nil {
+		return
+	}
+	_ = os.Remove(self + ".old")
+}
+
 // Startup prints the build line, optionally upgrades, and may re-exec the binary.
 func Startup(ctx context.Context, cfg Config, current string, auto bool) (StartupResult, error) {
+	CleanupOldBinary()
+
 	res := StartupResult{Current: current}
 
 	checkCtx, cancel := context.WithTimeout(ctx, 15*time.Second)

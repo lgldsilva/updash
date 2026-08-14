@@ -223,9 +223,6 @@ install_binary() {
   log "  Try:  updash version    # shows build/arch"
   log "        updash --check    # headless scan"
   log ""
-  warn "Note: internal/upgrade defaults still point at the old Gitea host."
-  warn "      Run with UPDASH_SKIP_AUTO_UPGRADE=1 to silence the startup"
-  warn "      upgrade-check until that migration lands."
 }
 
 # ── Dispatch ──────────────────────────────────────────────────────────────

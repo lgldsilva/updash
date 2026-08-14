@@ -70,7 +70,66 @@ func (s *CargoSource) Scan(ctx context.Context, plat model.PlatformInfo) ([]*mod
 			{Name: binCargo, Category: model.CatCargo, Status: model.StatusOK, CurrentVer: "not installed"},
 		}, nil
 	}
-	return []*model.Item{
-		{Name: binCargo, Category: model.CatCargo, Status: model.StatusOK, CurrentVer: "cargo-install-update available"},
-	}, nil
+
+	out, err := execCommand(ctx, "cargo-install-update", "-l")
+	if err != nil {
+		return []*model.Item{errItem(binCargo, model.CatCargo)}, nil
+	}
+
+	items := parseCargoInstallUpdate(string(out))
+	if len(items) == 0 {
+		return []*model.Item{okItem(binCargo, model.CatCargo)}, nil
+	}
+	return items, nil
+}
+
+// parseCargoInstallUpdate parses the output of `cargo-install-update -l`.
+// Typical output:
+//
+//	Package       Installed  Latest  Needs update
+//	cargo-edit    0.11.0     0.11.1  Yes
+//	cargo-watch   0.18.0     0.18.0  No
+func parseCargoInstallUpdate(output string) []*model.Item {
+	var items []*model.Item
+	for _, line := range strings.Split(output, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(strings.ToLower(line), "package") {
+			continue
+		}
+		if it := parseCargoInstallUpdateLine(line); it != nil {
+			items = append(items, it)
+		}
+	}
+	return items
+}
+
+func parseCargoInstallUpdateLine(line string) *model.Item {
+	parts := strings.Fields(line)
+	if len(parts) < 3 {
+		return nil
+	}
+	name := parts[0]
+	current := parts[1]
+	latest := parts[2]
+	needsUpdate := false
+	if len(parts) >= 4 {
+		needsUpdate = strings.EqualFold(parts[3], "yes") || strings.EqualFold(parts[3], "true")
+	} else {
+		needsUpdate = current != latest
+	}
+	if needsUpdate {
+		return &model.Item{
+			Name:         name,
+			Category:     model.CatCargo,
+			CurrentVer:   current,
+			AvailableVer: latest,
+			Status:       model.StatusOutdated,
+		}
+	}
+	return &model.Item{
+		Name:       name,
+		Category:   model.CatCargo,
+		CurrentVer: current,
+		Status:     model.StatusOK,
+	}
 }

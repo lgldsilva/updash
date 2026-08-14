@@ -388,26 +388,59 @@ func looksLikeExecutable(data []byte) bool {
 // --- Binary replacement ---
 
 func replaceRunningBinary(newBin []byte) error {
-	self, err := os.Executable()
+	return replaceRunningBinaryWithOS(newBin, runtime.GOOS)
+}
+
+func replaceRunningBinaryWithOS(newBin []byte, goos string) error {
+	self, err := osExecutable()
 	if err != nil {
 		return fmt.Errorf("resolve self path: %w", err)
 	}
-	self, err = filepath.EvalSymlinks(self)
+	self, err = evalSymlinks(self)
 	if err != nil {
 		return fmt.Errorf("resolve symlink: %w", err)
 	}
 	dir := filepath.Dir(self)
 	tmp := filepath.Join(dir, ".updash.upgrade.tmp")
+	old := self + ".old"
 
 	// #nosec G306 — binary needs executable permission
 	if err := os.WriteFile(tmp, newBin, 0755); err != nil {
 		return fmt.Errorf("write temp binary: %w", err)
 	}
+
 	if err := os.Rename(tmp, self); err != nil {
-		_ = os.Remove(tmp) // clean up
-		return fmt.Errorf("replace binary: %w", err)
+		if goos != "windows" {
+			_ = os.Remove(tmp)
+			return fmt.Errorf("replace binary: %w", err)
+		}
+		// On Windows the running executable is locked. Rename it out of the
+		// way and move the new binary into place. The .old file is left for
+		// CleanupOldBinary() to remove on the next startup.
+		if err := performWindowsReplace(tmp, self, old); err != nil {
+			return err
+		}
 	}
 	return nil
+}
+
+func performWindowsReplace(tmp, self, old string) error {
+	_ = os.Remove(old)
+	if renErr := os.Rename(self, old); renErr != nil {
+		_ = os.Remove(tmp)
+		return fmt.Errorf("replace binary (stage old): %w", renErr)
+	}
+	if mvErr := os.Rename(tmp, self); mvErr != nil {
+		// Best-effort rollback.
+		rollbackWindowsReplace(old, self, tmp)
+		return fmt.Errorf("replace binary (stage new): %w", mvErr)
+	}
+	return nil
+}
+
+func rollbackWindowsReplace(old, self, tmp string) {
+	_ = os.Rename(old, self)
+	_ = os.Remove(tmp)
 }
 
 // --- Version comparison ---

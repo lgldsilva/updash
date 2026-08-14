@@ -2,6 +2,7 @@ package upgrade
 
 import (
 	"errors"
+	"os"
 	"path/filepath"
 	"testing"
 )
@@ -103,4 +104,53 @@ func TestCanSelfUpdate(t *testing.T) {
 			t.Fatal("must deny when UserHomeDir fails")
 		}
 	})
+}
+
+func TestSelfUpdateAllowedWindows(t *testing.T) {
+	if selfUpdateAllowedWindows(`C:\ProgramData\chocolatey\bin\updash.exe`) {
+		t.Fatal("must not allow without env vars set")
+	}
+
+	t.Setenv("LOCALAPPDATA", `C:\Users\Dev\AppData\Local`)
+	if !selfUpdateAllowedWindows(`C:\Users\Dev\AppData\Local\updash\updash.exe`) {
+		t.Fatal("LOCALAPPDATA\\updash should allow self-update")
+	}
+
+	t.Setenv("USERPROFILE", `C:\Users\Dev`)
+	if !selfUpdateAllowedWindows(`C:\Users\Dev\bin\updash.exe`) {
+		t.Fatal("USERPROFILE\\bin should allow self-update")
+	}
+	if !selfUpdateAllowedWindows(`C:\Users\Dev\scoop\shims\updash.exe`) {
+		t.Fatal("scoop shims should allow self-update")
+	}
+
+	t.Setenv("ProgramData", `C:\ProgramData`)
+	if !selfUpdateAllowedWindows(`C:\ProgramData\chocolatey\bin\updash.exe`) {
+		t.Fatal("chocolatey bin should allow self-update")
+	}
+}
+
+func TestCleanupOldBinary(t *testing.T) {
+	dir := t.TempDir()
+	self := filepath.Join(dir, "updash")
+	old := self + ".old"
+	if err := os.WriteFile(old, []byte("stale"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(self, []byte("current"), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	prevExec, prevSymlink := osExecutable, evalSymlinks
+	t.Cleanup(func() { osExecutable, evalSymlinks = prevExec, prevSymlink })
+	osExecutable = func() (string, error) { return self, nil }
+	evalSymlinks = func(p string) (string, error) { return p, nil }
+
+	CleanupOldBinary()
+	if _, err := os.Stat(old); !os.IsNotExist(err) {
+		t.Fatalf("expected .old to be removed, got err=%v", err)
+	}
+	if _, err := os.Stat(self); err != nil {
+		t.Fatalf("current binary should remain: %v", err)
+	}
 }

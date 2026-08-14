@@ -19,6 +19,7 @@ func TestCategoryNeedsElevation(t *testing.T) {
 	}{
 		{model.CatMAS, mac, true},
 		{model.CatApt, linuxPacman, true},
+		{model.CatApk, linuxPacman, true},
 		{model.CatPacman, linuxYay, false},
 		{model.CatPacman, linuxPacman, true},
 		{model.CatBrew, mac, false},

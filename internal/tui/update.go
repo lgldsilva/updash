@@ -135,7 +135,7 @@ func (s *State) handlePasswordKey(key string) KeyAction {
 		}
 		return KeyNone
 	default:
-		if len(key) == 1 && key != "?" {
+		if len(key) == 1 {
 			s.PasswordInput += key
 		}
 		return KeyNone
@@ -169,7 +169,7 @@ func (s *State) handleFilterKey(key string) KeyAction {
 		}
 		return KeyNone
 	default:
-		if len(key) == 1 && key != "/" && key != "?" {
+		if len(key) == 1 {
 			s.FilterInput += key
 		}
 		return KeyNone

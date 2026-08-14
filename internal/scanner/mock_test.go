@@ -791,10 +791,18 @@ func TestGoScan_NoGup(t *testing.T) {
 	enableMocks()
 	defer disableMocks()
 
+	dir := t.TempDir()
+	binDir := filepath.Join(dir, "bin")
+	if err := os.MkdirAll(binDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"gopls", "gocognit", "lefthook"} {
+		if err := os.WriteFile(filepath.Join(binDir, name), []byte(""), 0755); err != nil {
+			t.Fatal(err)
+		}
+	}
 	// Mock go env GOPATH
-	setMock("go", []string{"env", "GOPATH"}, "/tmp/test-gopath", nil)
-	// Mock ls GOPATH/bin
-	setMock("ls", []string{"/tmp/test-gopath/bin"}, "gopls\ngocognit\nlefthook\n", nil)
+	setMock("go", []string{"env", "GOPATH"}, dir, nil)
 
 	src := &GoSource{}
 	items, err := src.Scan(context.Background(), model.PlatformInfo{HasGo: true, HasGup: false})
@@ -811,9 +819,12 @@ func TestGoScan_NoGup_Empty(t *testing.T) {
 	enableMocks()
 	defer disableMocks()
 
-	setMock("go", []string{"env", "GOPATH"}, "/tmp/test-gopath", nil)
-	// Empty ls output
-	setMock("ls", []string{"/tmp/test-gopath/bin"}, "", nil)
+	dir := t.TempDir()
+	binDir := filepath.Join(dir, "bin")
+	if err := os.MkdirAll(binDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	setMock("go", []string{"env", "GOPATH"}, dir, nil)
 
 	src := &GoSource{}
 	items, _ := src.Scan(context.Background(), model.PlatformInfo{HasGo: true, HasGup: false})
