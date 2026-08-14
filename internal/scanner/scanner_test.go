@@ -154,3 +154,36 @@ func TestEnabledSources(t *testing.T) {
 		t.Error("expected AptSource for Ubuntu with HasApt=true")
 	}
 }
+
+func TestEnabledSources_NoDuplicateCategories(t *testing.T) {
+	// A pacman-capable host must register PacmanSource exactly once: a
+	// duplicated entry double-scans and double-counts items in --check
+	// --json (the TUI masks it via MergeSummary, the CLI does not).
+	// The invariant is the (Category, Label) pair — the two VSCode clean
+	// sources intentionally share a category with distinct labels.
+	plat := model.PlatformInfo{
+		OS:        "linux",
+		Distro:    "arch",
+		HasPacman: true,
+		HasYay:    true,
+		HasNpm:    true,
+	}
+
+	counts := map[string]int{}
+	pacman := 0
+	for _, s := range enabledSources(plat, true) {
+		key := string(s.Category()) + "/" + s.Label()
+		counts[key]++
+		if s.Category() == model.CatPacman {
+			pacman++
+		}
+	}
+	for key, n := range counts {
+		if n > 1 {
+			t.Errorf("source %s registered %d times, expected 1", key, n)
+		}
+	}
+	if pacman != 1 {
+		t.Errorf("expected exactly one pacman source, got %d", pacman)
+	}
+}

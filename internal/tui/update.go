@@ -61,7 +61,7 @@ var keyActions = map[string]KeyAction{
 	"r": KeyRefresh, "R": KeyRefresh,
 	"?": KeyHelp,
 	"/": KeyFilter,
-	"q": KeyQuit, "Q": KeyQuit, "ctrl+c": KeyQuit,
+	"q": KeyQuit, "Q": KeyQuit, // "ctrl+c" is handled at the top of HandleKey
 }
 
 var tabKeys = map[string]model.TabID{
@@ -72,6 +72,11 @@ var tabKeys = map[string]model.TabID{
 
 // HandleKey processes a key press and returns an action.
 func (s *State) HandleKey(key string) KeyAction {
+	// Ctrl+C always quits, even with a dialog/overlay open — otherwise the
+	// single-char handlers below would swallow it and trap the user.
+	if key == "ctrl+c" {
+		return KeyQuit
+	}
 	if s.ShowHelp {
 		// Any key dismisses the help overlay; Esc is the explicit close.
 		return KeyHelp

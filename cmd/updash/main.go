@@ -235,7 +235,13 @@ func (m *bubbleModel) onKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case tui.KeyConfirm:
 		return m, m.state.ConsumeConfirmCmd(m.program)
 	case tui.KeyCancel:
-		return m, nil
+		// Esc while an operation runs must cancel it (dialog/password Esc
+		// paths already resolved themselves inline in HandleKey).
+		cmd := m.state.HandleAction(tui.KeyCancel)
+		if cmd == nil && m.state.NeedsSpinner() {
+			return m, tui.TickCmd()
+		}
+		return m, cmd
 	default:
 		cmd := m.state.HandleAction(action)
 		if cmd == nil && m.state.NeedsSpinner() {

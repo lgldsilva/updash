@@ -434,6 +434,45 @@ func TestState_CancelOperation(t *testing.T) {
 	}
 }
 
+func TestState_EscCancelsRunningOperation(t *testing.T) {
+	// The full keyboard chain: HandleKey must surface KeyCancel while an
+	// operation runs, and HandleAction must cancel it. Guards the wiring
+	// regression where main.go dropped KeyCancel on the floor.
+	s := New()
+	s.Scanning = true
+	if action := s.HandleKey("esc"); action != KeyCancel {
+		t.Fatalf("esc during scan should map to KeyCancel, got %v", action)
+	}
+	s.HandleAction(KeyCancel)
+	if s.Scanning {
+		t.Fatal("scan flag should be reset after cancel")
+	}
+}
+
+func TestState_CtrlCQuitsWithOverlaysOpen(t *testing.T) {
+	// ctrl+c must quit even when a dialog swallows every other key.
+	overlays := []struct {
+		name  string
+		setup func(*State)
+	}{
+		{"password", func(s *State) { s.ShowPassword = true }},
+		{"filter", func(s *State) { s.ShowFilter = true }},
+		{"confirm", func(s *State) { s.ShowConfirm = true }},
+		{"help", func(s *State) { s.ShowHelp = true }},
+		{"detail", func(s *State) { s.ShowDetail = true; s.DetailItem = &model.Item{Name: "x"} }},
+		{"none", func(s *State) {}},
+	}
+	for _, o := range overlays {
+		t.Run(o.name, func(t *testing.T) {
+			s := New()
+			o.setup(s)
+			if action := s.HandleKey("ctrl+c"); action != KeyQuit {
+				t.Fatalf("ctrl+c with %s overlay should map to KeyQuit, got %v", o.name, action)
+			}
+		})
+	}
+}
+
 func TestState_CancelPasswordAndClearElevation(t *testing.T) {
 	s := New()
 	s.ShowPassword = true

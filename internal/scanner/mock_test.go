@@ -657,6 +657,60 @@ func TestBrewCleanSource(t *testing.T) {
 	t.Logf("brew-cache: %s reclaimable=%s", items[0].CurrentVer, items[0].Reclaimable)
 }
 
+func TestFirstField_EmptyFallback(t *testing.T) {
+	if got := firstField([]byte("13G\t/path"), "0B"); got != "13G" {
+		t.Errorf("expected first field, got %q", got)
+	}
+	if got := firstField([]byte("   "), "0B"); got != "0B" {
+		t.Errorf("expected fallback on blank output, got %q", got)
+	}
+	if got := firstField(nil, "0"); got != "0" {
+		t.Errorf("expected fallback on nil output, got %q", got)
+	}
+}
+
+func TestBrewCleanSource_DuFailsOrEmpty_NoPanic(t *testing.T) {
+	// du failing (or succeeding with empty stdout) must not panic the scan
+	// goroutine — it used to index Fields()[0] blindly.
+	tmpDir := t.TempDir()
+	origHome := os.Getenv("HOME")
+	_ = os.Setenv("HOME", tmpDir)
+	defer func() { _ = os.Setenv("HOME", origHome) }()
+
+	macCache := filepath.Join(tmpDir, "Library", "Caches", "Homebrew")
+	_ = os.MkdirAll(macCache, 0755)
+
+	src := &BrewCleanSource{}
+
+	t.Run("du error", func(t *testing.T) {
+		enableMocks()
+		defer disableMocks()
+		setMock("du", []string{"-sh", macCache}, "", errors.New("du: permission denied"))
+
+		items, err := src.Scan(context.Background(), model.PlatformInfo{OS: "darwin"})
+		if err != nil {
+			t.Fatalf("Scan failed: %v", err)
+		}
+		if len(items) != 1 || items[0].CurrentVer != "0B" {
+			t.Fatalf("expected brew-cache with 0B size, got %+v", items)
+		}
+	})
+
+	t.Run("du empty stdout", func(t *testing.T) {
+		enableMocks()
+		defer disableMocks()
+		setMock("du", []string{"-sh", macCache}, "", nil)
+
+		items, err := src.Scan(context.Background(), model.PlatformInfo{OS: "darwin"})
+		if err != nil {
+			t.Fatalf("Scan failed: %v", err)
+		}
+		if len(items) != 1 || items[0].CurrentVer != "0B" {
+			t.Fatalf("expected brew-cache with 0B size, got %+v", items)
+		}
+	})
+}
+
 // --- NVM / OMZ ---
 
 func TestNvmScan(t *testing.T) {
