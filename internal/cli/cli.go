@@ -60,6 +60,9 @@ func RunCheck(ctx context.Context, cfg Config) error {
 	if err != nil {
 		return err
 	}
+	// --only applies to --check as well (it was silently ignored before).
+	updates = filterCheckResults(updates, cfg.Only)
+	cleanup = filterCheckResults(cleanup, cfg.Only)
 	if cfg.JSON {
 		rep := BuildCheckReport(updates, cleanup)
 		rep.Platform = platformLabel(detectPlatform())
@@ -437,16 +440,47 @@ func itemMatchesFilter(s *model.SourceSummary, it *model.Item, only string) bool
 	if strings.EqualFold(string(s.Category), o) {
 		return true
 	}
-	if strings.EqualFold(string(it.Category), o) {
-		return true
+	if it != nil {
+		if strings.EqualFold(string(it.Category), o) {
+			return true
+		}
+		if strings.Contains(strings.ToLower(it.Name), o) {
+			return true
+		}
 	}
 	if strings.Contains(strings.ToLower(s.Label), o) {
 		return true
 	}
-	if strings.Contains(strings.ToLower(it.Name), o) {
-		return true
-	}
 	return false
+}
+
+// filterCheckResults applies --only to scan summaries: a summary matching
+// by category/label is kept whole, otherwise only matching items survive
+// and emptied summaries are dropped.
+func filterCheckResults(summaries []*model.SourceSummary, only string) []*model.SourceSummary {
+	if strings.TrimSpace(only) == "" {
+		return summaries
+	}
+	var out []*model.SourceSummary
+	for _, s := range summaries {
+		if itemMatchesFilter(s, nil, only) {
+			out = append(out, s)
+			continue
+		}
+		var kept []*model.Item
+		for _, it := range s.Items {
+			if itemMatchesFilter(s, it, only) {
+				kept = append(kept, it)
+			}
+		}
+		if len(kept) == 0 {
+			continue
+		}
+		clone := *s
+		clone.Items = kept
+		out = append(out, &clone)
+	}
+	return out
 }
 
 func printDryRun(action string, items []*model.Item) {

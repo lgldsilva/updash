@@ -16,7 +16,9 @@ func (s *PnpmSource) Label() string            { return "pnpm (global)" }
 func (s *PnpmSource) Icon() string             { return "📦" }
 
 func (s *PnpmSource) Scan(ctx context.Context, plat model.PlatformInfo) ([]*model.Item, error) {
-	out, err := execCombined(ctx, binPnpm, "outdated", flagGlobal, "--json")
+	// stdout only: pnpm writes deprecation/funding warnings to stderr, and
+	// merging them corrupts the JSON (see the execCombined doc in runner.go).
+	out, err := execCommand(ctx, binPnpm, "outdated", flagGlobal, "--json")
 	if err != nil && len(out) == 0 {
 		return []*model.Item{errItem(binPnpm, model.CatPnpm)}, nil
 	}

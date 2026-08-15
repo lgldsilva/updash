@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/lgldsilva/updash/internal/elevate"
@@ -32,7 +33,6 @@ type State struct {
 	Scanning     bool
 	Updating     bool
 	Cleaning     bool
-	Ready        bool
 	ShowHelp     bool
 	ShowConfirm  bool // confirmation dialog for destructive actions
 	ShowPassword bool // sudo password prompt (reused across elevated batches)
@@ -59,7 +59,7 @@ type State struct {
 	PasswordInput string
 	PasswordError string
 	ElevSession   *elevate.Session
-	ElevWait      chan struct{} // closed when mid-operation password is validated
+	ElevWait      chan *elevate.Session // receives the validated session for a waiting worker (nil on cancel)
 
 	// Progress tracking (written only from event loop)
 	UpdateTotal  int
@@ -91,9 +91,6 @@ type State struct {
 	Width  int
 	Height int
 
-	// Error state
-	Error string
-
 	// Build info (shown in title bar)
 	Version   string
 	LatestTag string
@@ -114,7 +111,6 @@ func NewWithVersion(version, latest string) *State {
 		ActiveTab: model.TabUpdates,
 		Ctx:       ctx,
 		Cancel:    cancel,
-		Ready:     true,
 		Width:     80,
 		Height:    24,
 		Version:   version,
@@ -306,11 +302,12 @@ func (s *State) LogScanErrors() {
 	logScanErrors(s.CleanItems)
 }
 
-// TotalCleanable returns total cleanable items.
+// TotalCleanable returns total cleanable items from live item statuses
+// (summary.Outdated goes stale after rescans swap summaries).
 func (s *State) TotalCleanable() int {
 	count := 0
 	for _, summary := range s.CleanItems {
-		count += summary.Outdated
+		count += countStatus(summary.Items, model.StatusCleanCandidate)
 	}
 	return count
 }
@@ -318,21 +315,13 @@ func (s *State) TotalCleanable() int {
 // AddLog adds a log entry.
 func (s *State) AddLog(msg string, success bool) {
 	s.Logs = append(s.Logs, model.GlobalLogEntry{
-		Timestamp: "now",
+		Timestamp: time.Now().Format("15:04:05"),
 		Message:   msg,
 		Success:   success,
 	})
 	if len(s.Logs) > 100 {
 		s.Logs = s.Logs[len(s.Logs)-100:]
 	}
-}
-
-// ctxWithElev returns the state context with a cached elevation session attached.
-func (s *State) ctxWithElev() context.Context {
-	if s.ElevSession != nil && s.ElevSession.Ready() {
-		return elevate.WithSession(s.Ctx, s.ElevSession)
-	}
-	return s.Ctx
 }
 
 func (s *State) pendingItemsForConfirm() ([]*model.Item, bool) {
@@ -342,9 +331,9 @@ func (s *State) pendingItemsForConfirm() ([]*model.Item, bool) {
 	return s.PendingCleanItems, true
 }
 
-// needsElevationPrompt reports whether the user must enter a sudo password
-// before starting the pending operation. MAS-only elevation is deferred until
-// the MAS batch runs so sudo credentials stay fresh after long brew runs.
+// needsElevationPrompt reports whether the pending confirmation needs a sudo
+// password before starting. Excludes the passwordless sudo probe (which can
+// block for seconds) — that runs as a tea.Cmd, see ConsumeConfirmCmd.
 func (s *State) needsElevationPrompt() bool {
 	items, cleanup := s.pendingItemsForConfirm()
 	if len(items) == 0 {
@@ -353,7 +342,7 @@ func (s *State) needsElevationPrompt() bool {
 	if !elevate.ItemsNeedElevation(items, s.Platform, cleanup) {
 		return false
 	}
-	if s.elevationReady() {
+	if s.elevationSessionReady() {
 		return false
 	}
 	if !cleanup && s.canDeferMASElevation(items) {
@@ -362,16 +351,8 @@ func (s *State) needsElevationPrompt() bool {
 	return true
 }
 
-func (s *State) elevationReady() bool {
-	if s.ElevSession != nil && s.ElevSession.Ready() {
-		return true
-	}
-	if elevate.CanElevateWithoutPassword(s.Ctx) {
-		s.ElevSession = elevate.NewSession()
-		s.ElevSession.SetPasswordless()
-		return true
-	}
-	return false
+func (s *State) elevationSessionReady() bool {
+	return s.ElevSession != nil && s.ElevSession.Ready()
 }
 
 // canDeferMASElevation returns true when only MAS items need sudo and other
@@ -392,23 +373,24 @@ func (s *State) canDeferMASElevation(items []*model.Item) bool {
 	return needsMAS
 }
 
-// waitForElevation blocks the caller until sudo is ready or ctx is cancelled.
-// Must run from a background goroutine; prompts via ElevRequiredMsg.
-func (s *State) waitForElevation(ctx context.Context, program *tea.Program, reason string) error {
-	if s.elevationReady() {
-		return nil
+// waitForElevation blocks the worker until sudo is ready or ctx is
+// cancelled. It prompts via ElevRequiredMsg carrying the wait channel; the
+// event loop delivers the validated session (or nil on cancel) through
+// that channel — the channel handoff keeps the worker off State fields.
+func waitForElevation(ctx context.Context, program *tea.Program, reason string, sess *elevate.Session) (*elevate.Session, error) {
+	if sess != nil && sess.Ready() {
+		return sess, nil
 	}
-	wait := make(chan struct{})
-	s.ElevWait = wait
-	program.Send(ElevRequiredMsg{Reason: reason})
+	wait := make(chan *elevate.Session, 1)
+	program.Send(ElevRequiredMsg{Reason: reason, Wait: wait})
 	select {
-	case <-wait:
-		if s.elevationReady() {
-			return nil
+	case got := <-wait:
+		if got == nil || !got.Ready() {
+			return nil, fmt.Errorf("sudo password required")
 		}
-		return fmt.Errorf("sudo password required")
+		return got, nil
 	case <-ctx.Done():
-		return ctx.Err()
+		return nil, ctx.Err()
 	}
 }
 
@@ -419,35 +401,56 @@ func (s *State) HandlePasswordOK(session *elevate.Session, program *tea.Program)
 		s.ShowPassword = false
 		s.PasswordInput = ""
 		s.PasswordError = ""
-		s.signalElevation()
-		return TickCmd()
+		s.deliverElevation(session)
+		return nil // spinner animation runs on the single tick chain (see onTick)
 	}
 	return s.ConsumeConfirmAfterPassword(program)
 }
 
-// signalElevation unblocks a goroutine waiting in waitForElevation.
-func (s *State) signalElevation() {
+// deliverElevation hands a validated session (or nil on cancel) to the
+// waiting worker. The channel is buffered, so this never blocks.
+func (s *State) deliverElevation(sess *elevate.Session) {
 	if s.ElevWait != nil {
-		close(s.ElevWait)
+		s.ElevWait <- sess
 		s.ElevWait = nil
 	}
 }
 
 // ConsumeConfirmCmd returns the pending async cmd and clears confirm state.
-// If elevation is required, shows the password prompt instead.
+// When a sudo password may be needed, the sudo -n probe runs as a tea.Cmd
+// (Bubble Tea executes cmds in their own goroutine) — it can block for
+// seconds on a black-holed network and must never freeze the render loop.
 // Call only from the Bubble Tea event loop (not from goroutines).
 func (s *State) ConsumeConfirmCmd(program *tea.Program) tea.Cmd {
 	if s.ConfirmCmd == nil {
 		return nil
 	}
 	if s.needsElevationPrompt() {
-		s.ShowPassword = true
-		s.PasswordInput = ""
-		s.PasswordError = ""
 		s.ShowConfirm = false
-		return nil
+		return checkPasswordlessElevation
 	}
 	return s.finishConfirm(program)
+}
+
+// checkPasswordlessElevation probes sudo -n off the event loop.
+func checkPasswordlessElevation() tea.Msg {
+	return PasswordlessResultMsg{OK: elevate.CanElevateWithoutPassword(context.Background())}
+}
+
+// HandlePasswordless resumes the pending confirmation after the sudo -n
+// probe: passwordless sudo continues straight away, otherwise the password
+// dialog opens.
+func (s *State) HandlePasswordless(ok bool, program *tea.Program) tea.Cmd {
+	if ok {
+		sess := elevate.NewSession()
+		sess.SetPasswordless()
+		s.ElevSession = sess
+		return s.finishConfirm(program)
+	}
+	s.ShowPassword = true
+	s.PasswordInput = ""
+	s.PasswordError = ""
+	return nil // spinner animation runs on the single tick chain (see onTick)
 }
 
 // ConsumeConfirmAfterPassword runs the pending cmd after password validation.
@@ -475,7 +478,7 @@ func (s *State) CancelPassword() {
 	s.ShowPassword = false
 	s.PasswordInput = ""
 	s.PasswordError = ""
-	s.signalElevation()
+	s.deliverElevation(nil)
 	s.ConfirmCmd = nil
 	s.PendingUpdateItems = nil
 	s.PendingCleanItems = nil

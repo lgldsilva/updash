@@ -1083,3 +1083,33 @@ func TestRunAll_WithCleanup(t *testing.T) {
 
 // Ensure runtime is referenced (for build constraint awareness).
 var _ = runtime.GOOS
+
+func TestPacmanScan_YayNonZeroExit(t *testing.T) {
+	enableMocks()
+	defer disableMocks()
+	src := &PacmanSource{}
+
+	t.Run("non-zero with updates still parses", func(t *testing.T) {
+		setMock("yay", []string{"-Qua"}, "core/btop 1.3.0 -> 1.5.0", errors.New("exit status 1"))
+		items, _ := src.Scan(context.Background(), model.PlatformInfo{HasYay: true})
+		if len(items) != 1 || items[0].Status != model.StatusOutdated {
+			t.Fatalf("expected 1 outdated item despite exit code, got %+v", items)
+		}
+	})
+
+	t.Run("non-zero with empty output means no updates", func(t *testing.T) {
+		setMock("yay", []string{"-Qua"}, "", errors.New("exit status 1"))
+		items, _ := src.Scan(context.Background(), model.PlatformInfo{HasYay: true})
+		if len(items) != 1 || items[0].Status != model.StatusOK {
+			t.Fatalf("expected OK on empty non-zero output, got %+v", items)
+		}
+	})
+
+	t.Run("non-zero with error text is an error", func(t *testing.T) {
+		setMock("yay", []string{"-Qua"}, "error: database is locked", errors.New("exit status 1"))
+		items, _ := src.Scan(context.Background(), model.PlatformInfo{HasYay: true})
+		if len(items) != 1 || items[0].Status != model.StatusError {
+			t.Fatalf("expected error item, got %+v", items)
+		}
+	})
+}

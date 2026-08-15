@@ -208,8 +208,10 @@ func probeAgentItem(ctx context.Context, plat model.PlatformInfo, a agentDef) *m
 }
 
 // npmInstalledPackages lists globally npm-installed package names (depth 0).
+// stdout only: npm ls --json output must not be corrupted by stderr warnings
+// (see the execCombined doc in runner.go).
 func npmInstalledPackages(ctx context.Context) map[string]bool {
-	out, err := execCombined(ctx, binNpm, "ls", flagGlobal, "--json", "--depth=0")
+	out, err := execCommand(ctx, binNpm, "ls", flagGlobal, "--json", "--depth=0")
 	installed := ParseNpmLsGlobal(out)
 	if err != nil && len(installed) == 0 {
 		return nil

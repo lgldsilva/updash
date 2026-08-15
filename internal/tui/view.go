@@ -200,7 +200,14 @@ func (s *State) renderItemTab(cfg itemTabConfig) string {
 
 func (s *State) renderUpdatesTab() string {
 	empty := ""
-	if s.TotalOutdated() == 0 && !s.Scanning {
+	updateErrs := 0
+	for _, sum := range s.Summaries {
+		updateErrs += countStatus(sum.Items, model.StatusError)
+	}
+	switch {
+	case s.TotalOutdated() == 0 && updateErrs > 0:
+		empty = tuiNewlineIndent + ItemErrorStyle.Render("⚠ No outdated packages — but some sources failed to scan (see Logs tab)") + tuiNewline
+	case s.TotalOutdated() == 0 && !s.Scanning:
 		empty = tuiNewlineIndent + ItemOKStyle.Render("✓ All packages are up to date") + tuiNewline
 	}
 	return s.renderItemTab(itemTabConfig{
@@ -612,20 +619,6 @@ func (s *State) renderProgressBar(total, done int) string {
 	return open + mid + closeB
 }
 
-func (s *State) renderLoading() string {
-	var b strings.Builder
-	b.WriteString(tuiBlankLine)
-	b.WriteString(SpinnerStyle.Render(" 🔄 Scanning system..."))
-	b.WriteString(tuiNewline)
-	b.WriteString(VerCurrentStyle.Render(truncatePlain("   Checking package managers, outdated packages, and cleanup candidates", s.contentWidth())))
-	b.WriteString(tuiNewline)
-	if s.Scanning {
-		b.WriteString(VerCurrentStyle.Render("   Running scans in parallel for updates + cleanup"))
-	}
-	b.WriteString(tuiBlankLine)
-	return s.frame(b.String())
-}
-
 func (s *State) renderFooter() string {
 	var hints []string
 
@@ -773,9 +766,12 @@ func (s *State) renderConfirmFooter() string {
 }
 
 // hasCleanupItems checks if a summary has any cleanup candidates.
+// StatusError is included so scan failures stay visible on the Cleanup tab
+// (isCleanupNavigable also lists them — the two must stay in sync).
 func hasCleanupItems(s *model.SourceSummary) bool {
 	for _, it := range s.Items {
-		if it.Status == model.StatusCleanCandidate || it.Status == model.StatusCleaning || it.Status == model.StatusCleaned {
+		switch it.Status {
+		case model.StatusCleanCandidate, model.StatusCleaning, model.StatusCleaned, model.StatusError:
 			return true
 		}
 	}

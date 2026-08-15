@@ -11,7 +11,13 @@ import (
 	"time"
 )
 
-const envSkipAutoUpgrade = "UPDASH_SKIP_AUTO_UPGRADE"
+const (
+	envSkipAutoUpgrade = "UPDASH_SKIP_AUTO_UPGRADE"
+	// envJustUpgraded marks a re-exec'd child of a fresh self-update. If the
+	// injected build version ever disagrees with the release tag, the child
+	// would "upgrade" again and loop forever — this guard breaks the cycle.
+	envJustUpgraded = "UPDASH_JUST_UPGRADED"
+)
 
 // StartupResult summarizes version info and optional self-update.
 type StartupResult struct {
@@ -32,7 +38,7 @@ func FormatBuild(version string) string {
 
 // ShouldAutoUpgrade reports whether startup should try to install a newer release.
 func ShouldAutoUpgrade(version string, skipFlag bool) bool {
-	if skipFlag || os.Getenv(envSkipAutoUpgrade) == "1" {
+	if skipFlag || os.Getenv(envSkipAutoUpgrade) == "1" || os.Getenv(envJustUpgraded) == "1" {
 		return false
 	}
 	return true
@@ -215,6 +221,7 @@ func Reexec() error {
 	// Re-exec the absolute path of this binary with the original argv; args are
 	// not shell-interpolated (execve), so this is not shell injection.
 	cmd := exec.Command(self, os.Args[1:]...) // #nosec G702 -- re-exec self, not user shell
+	cmd.Env = append(os.Environ(), envJustUpgraded+"=1")
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr

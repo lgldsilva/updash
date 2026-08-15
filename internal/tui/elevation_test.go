@@ -2,7 +2,9 @@ package tui
 
 import (
 	"testing"
+	"time"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/lgldsilva/updash/internal/elevate"
 	"github.com/lgldsilva/updash/internal/model"
 )
@@ -94,24 +96,50 @@ func TestMasElevFailResults(t *testing.T) {
 
 func TestHandlePasswordOK_MidOperation(t *testing.T) {
 	s := New()
-	wait := make(chan struct{})
+	wait := make(chan *elevate.Session, 1)
 	s.ElevWait = wait
 	sess := elevate.NewSession()
 	sess.SetPasswordless()
 
 	done := make(chan struct{})
 	go func() {
-		<-wait
+		got := <-wait
+		if got != sess {
+			t.Errorf("unexpected session delivered: %v", got)
+		}
 		close(done)
 	}()
 
-	cmd := s.HandlePasswordOK(sess, nil)
-	if cmd == nil {
-		t.Fatal("expected tick cmd")
-	}
+	s.HandlePasswordOK(sess, nil)
 	<-done
 	if s.ElevSession == nil || !s.ElevSession.Ready() {
 		t.Fatal("session not stored")
+	}
+	if s.ElevWait != nil {
+		t.Fatal("ElevWait should be cleared after delivery")
+	}
+}
+
+func TestCancelPassword_UnblocksWaitingWorkerWithNil(t *testing.T) {
+	s := New()
+	wait := make(chan *elevate.Session, 1)
+	s.ElevWait = wait
+	s.ConfirmCmd = func(p *tea.Program) tea.Cmd { return nil }
+
+	got := make(chan *elevate.Session, 1)
+	go func() { got <- <-wait }()
+
+	s.CancelPassword()
+	select {
+	case sess := <-got:
+		if sess != nil {
+			t.Fatalf("cancel must deliver nil, got %v", sess)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("worker was not unblocked by cancel")
+	}
+	if s.ElevWait != nil {
+		t.Fatal("ElevWait should be cleared after cancel")
 	}
 }
 

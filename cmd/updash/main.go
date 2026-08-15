@@ -3,8 +3,10 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/lgldsilva/updash/internal/cleaner"
@@ -67,13 +69,19 @@ func runMode(ctx context.Context, mode string, cfg cli.Config, startupRes upgrad
 
 func exitOnErr(err error) int {
 	if err != nil {
+		// --strict/--json failures used to exit 1 with no message at all.
+		fmt.Fprintf(os.Stderr, "✘ %v\n", err)
 		return 1
 	}
 	return 0
 }
 
 func exitOnUpdateClean(_ int, fail int, err error) int {
-	if err != nil || fail > 0 {
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "✘ %v\n", err)
+		return 1
+	}
+	if fail > 0 {
 		return 1
 	}
 	return 0
@@ -197,8 +205,6 @@ func (m *bubbleModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.onScanSourceDone(msg)
 	case tui.ScanFinishedMsg:
 		return m.onScanFinished(msg)
-	case tui.ErrMsg:
-		return m.onErr(msg)
 	case tui.UpdateBatchDoneMsg:
 		return m.onUpdateBatch(msg)
 	case tui.UpdateAllDoneMsg:
@@ -213,6 +219,8 @@ func (m *bubbleModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.onElevRequired(msg)
 	case tui.PasswordResultMsg:
 		return m.onPasswordResult(msg)
+	case tui.PasswordlessResultMsg:
+		return m.onPasswordlessResult(msg)
 	default:
 		return m, nil
 	}
@@ -237,26 +245,20 @@ func (m *bubbleModel) onKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case tui.KeyCancel:
 		// Esc while an operation runs must cancel it (dialog/password Esc
 		// paths already resolved themselves inline in HandleKey).
-		cmd := m.state.HandleAction(tui.KeyCancel)
-		if cmd == nil && m.state.NeedsSpinner() {
-			return m, tui.TickCmd()
-		}
-		return m, cmd
+		return m, m.state.HandleAction(tui.KeyCancel)
 	default:
-		cmd := m.state.HandleAction(action)
-		if cmd == nil && m.state.NeedsSpinner() {
-			return m, tui.TickCmd()
-		}
-		return m, cmd
+		return m, m.state.HandleAction(action)
 	}
 }
 
+// onTick drives the single perpetual spinner chain: it re-schedules itself
+// unconditionally, so no handler ever needs to spawn extra chains (which
+// used to multiply ticks and race the spinner ahead during scans).
 func (m *bubbleModel) onTick() (tea.Model, tea.Cmd) {
 	if m.state.NeedsSpinner() {
 		m.state.AdvanceSpinner()
-		return m, tui.TickCmd()
 	}
-	return m, nil
+	return m, tui.TickCmd()
 }
 
 func (m *bubbleModel) onScanSourceDone(msg tui.ScanSourceDoneMsg) (tea.Model, tea.Cmd) {
@@ -265,9 +267,13 @@ func (m *bubbleModel) onScanSourceDone(msg tui.ScanSourceDoneMsg) (tea.Model, te
 	} else {
 		m.state.Summaries = tui.MergeSummary(m.state.Summaries, msg.Summary)
 	}
-	m.state.ScanDone++
-	m.state.OperationLabel = msg.Summary.Label
-	return m, tui.TickCmd()
+	// Post-update/clean rescans replace summaries but must not advance the
+	// scan progress counter or flicker the operation label.
+	if !msg.Rescan && m.state.Scanning {
+		m.state.ScanDone++
+		m.state.OperationLabel = msg.Summary.Label
+	}
+	return m, nil
 }
 
 func (m *bubbleModel) onScanFinished(msg tui.ScanFinishedMsg) (tea.Model, tea.Cmd) {
@@ -291,15 +297,13 @@ func (m *bubbleModel) onScanFinished(msg tui.ScanFinishedMsg) (tea.Model, tea.Cm
 	return m, nil
 }
 
-func (m *bubbleModel) onErr(msg tui.ErrMsg) (tea.Model, tea.Cmd) {
-	m.state.Error = msg.Error.Error()
-	m.state.Scanning = false
-	return m, nil
-}
-
+// truncateErr shortens long command output for one-line log entries.
+// Rune-based so multi-byte package names never end up as mojibake.
 func truncateErr(s string) string {
-	if len(s) > 120 {
-		return s[:120] + "..."
+	const max = 120
+	runes := []rune(s)
+	if len(runes) > max {
+		return string(runes[:max]) + "..."
 	}
 	return s
 }
@@ -309,9 +313,11 @@ func (m *bubbleModel) onUpdateBatch(msg tui.UpdateBatchDoneMsg) (tea.Model, tea.
 	m.state.UpdateTotal = msg.Total
 	if msg.Results == nil && msg.Category != "" {
 		m.state.OperationLabel = msg.Category
+		m.state.MarkItemsUpdating(msg.Cat, msg.Names)
 		m.state.AddLog(fmt.Sprintf("⟳ %s: updating...", msg.Category), true)
-		return m, tui.TickCmd()
+		return m, nil
 	}
+	m.state.ApplyUpdateResults(msg.Results)
 	m.state.LogUpdateResults(msg.Results)
 	return m, nil
 }
@@ -324,7 +330,7 @@ func (m *bubbleModel) onUpdateAllDone(msg tui.UpdateAllDoneMsg) (tea.Model, tea.
 	m.state.AddLog(fmt.Sprintf("Update complete: %d ok, %d failed of %d",
 		msg.Success, msg.Failed, msg.Total), msg.Failed == 0)
 	m.state.ClampCursor()
-	return m, tui.TickCmd()
+	return m, nil
 }
 
 func (m *bubbleModel) onCleanBatch(msg tui.CleanBatchDoneMsg) (tea.Model, tea.Cmd) {
@@ -332,9 +338,11 @@ func (m *bubbleModel) onCleanBatch(msg tui.CleanBatchDoneMsg) (tea.Model, tea.Cm
 	m.state.CleanTotal = msg.Total
 	if msg.Results == nil && msg.Category != "" {
 		m.state.OperationLabel = msg.Category
+		m.state.MarkItemCleaning(msg.Cat, firstOr(msg.Names, msg.Category))
 		m.state.AddLog(fmt.Sprintf("⟳ %s: cleaning...", msg.Category), true)
-		return m, tui.TickCmd()
+		return m, nil
 	}
+	m.state.ApplyCleanResults(msg.Results)
 	for _, r := range msg.Results {
 		if !r.Success {
 			m.state.AddLog(fmt.Sprintf("✘ %s: %s", r.Item.Name, truncateErr(r.Error)), false)
@@ -349,9 +357,21 @@ func (m *bubbleModel) onCleanBatch(msg tui.CleanBatchDoneMsg) (tea.Model, tea.Cm
 	return m, nil
 }
 
+func firstOr(names []string, fallback string) string {
+	if len(names) > 0 {
+		return names[0]
+	}
+	return fallback
+}
+
 func (m *bubbleModel) onCleanAllDone(msg tui.CleanAllDoneMsg) (tea.Model, tea.Cmd) {
 	m.state.Cleaning = false
 	m.state.OperationLabel = ""
+	if msg.Failed > 0 {
+		m.state.LastSummary = fmt.Sprintf("⚠ Cleanup complete — %d item(s) failed, see Logs tab", msg.Failed)
+		m.state.AddLog(fmt.Sprintf("Cleanup complete with %d failure(s)", msg.Failed), false)
+		return m, nil
+	}
 	if msg.BytesFreed > 0 {
 		freed := cleaner.FormatBytes(msg.BytesFreed)
 		m.state.LastSummary = fmt.Sprintf("✓ Cleanup complete — %s freed", freed)
@@ -365,21 +385,23 @@ func (m *bubbleModel) onCleanAllDone(msg tui.CleanAllDoneMsg) (tea.Model, tea.Cm
 
 func (m *bubbleModel) onOutputLine(msg tui.OutputLineMsg) (tea.Model, tea.Cmd) {
 	line := msg.Line
-	if len(line) > 72 {
-		line = line[:72] + "…"
+	// Rune-safe truncation: package names and emoji are multi-byte.
+	if runes := []rune(line); len(runes) > 72 {
+		line = string(runes[:72]) + "…"
 	}
 	m.state.OperationLabel = line
-	return m, tui.TickCmd()
+	return m, nil
 }
 
 func (m *bubbleModel) onElevRequired(msg tui.ElevRequiredMsg) (tea.Model, tea.Cmd) {
+	m.state.ElevWait = msg.Wait
 	m.state.ShowPassword = true
 	m.state.PasswordInput = ""
 	m.state.PasswordError = ""
 	if msg.Reason != "" {
 		m.state.LastSummary = msg.Reason
 	}
-	return m, tui.TickCmd()
+	return m, nil
 }
 
 func (m *bubbleModel) onPasswordResult(msg tui.PasswordResultMsg) (tea.Model, tea.Cmd) {
@@ -389,6 +411,10 @@ func (m *bubbleModel) onPasswordResult(msg tui.PasswordResultMsg) (tea.Model, te
 	m.state.PasswordError = msg.Error
 	m.state.ShowPassword = true
 	return m, nil
+}
+
+func (m *bubbleModel) onPasswordlessResult(msg tui.PasswordlessResultMsg) (tea.Model, tea.Cmd) {
+	return m, m.state.HandlePasswordless(msg.OK, m.program)
 }
 
 func (m *bubbleModel) View() string {
@@ -426,9 +452,9 @@ UPDASH_DOCKER_BUILDER_MAX_AGE, UPDASH_DOCKER_CONTAINER_MAX_AGE (e.g. 168h for 7d
 Builder prune: UPDASH_DOCKER_BUILDER_MODE=age|all (CI/homelab: use all — age often
 reclaims 0B on active build caches). See --env-defaults for the full list.
 
-On startup (TUI and --check/--update/--clean/--all), updash prints its build
+On startup (TUI only — headless modes are skipped), updash prints its build
 version and checks the GitHub release API. When a newer release exists, it
-downloads, verifies, and reinstalls itself before scanning.
+downloads, verifies, and reinstalls itself before the dashboard starts.
 
 Examples:
   updash --check
@@ -452,13 +478,17 @@ Package managers by platform:
 
 const (
 	// Binary name used for build output and install path under repo/home.
-	updashBinary = "/updash"
+	updashBinary = "updash"
 )
 
 func updateSelf() {
-	home, _ := os.UserHomeDir()
-	repoDir := home + "/.config/updash"
-	binOut := repoDir + updashBinary
+	home, err := os.UserHomeDir()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "✘ could not resolve home directory: %v\n", err)
+		os.Exit(1)
+	}
+	repoDir := filepath.Join(home, ".config", "updash")
+	binOut := filepath.Join(repoDir, updashBinary)
 
 	fmt.Println("📦 Updating updash itself...")
 
@@ -469,7 +499,7 @@ func updateSelf() {
 		fmt.Printf("⚠ git pull failed (not a git repo?): %v\n", err)
 	}
 
-	build := exec.Command("go", "build", "-o", binOut, repoDir+"/cmd/updash/")
+	build := exec.Command("go", "build", "-o", binOut, filepath.Join("cmd", "updash"))
 	build.Dir = repoDir
 	build.Stdout = os.Stdout
 	build.Stderr = os.Stderr
@@ -478,16 +508,39 @@ func updateSelf() {
 		os.Exit(1)
 	}
 
-	installDir := home + "/.local/bin"
+	installDir := filepath.Join(home, ".local", "bin")
 	if err := os.MkdirAll(installDir, 0750); err != nil {
 		fmt.Fprintf(os.Stderr, "failed to create install dir: %v\n", err)
 		os.Exit(1)
 	}
-	copyCmd := exec.Command("cp", binOut, installDir+updashBinary)
-	if err := copyCmd.Run(); err != nil {
+	// Native copy (no `cp`) so --update-self also works on Windows.
+	if err := copyFile(binOut, filepath.Join(installDir, updashBinary)); err != nil {
 		fmt.Printf("✘ Install failed: %v\n", err)
 		os.Exit(1)
 	}
 
 	fmt.Println("✓ updash updated!")
+}
+
+// copyFile duplicates src to dst with the source's mode (portable cp).
+func copyFile(src, dst string) error {
+	in, err := os.Open(src) // #nosec G304 -- path built from UserHomeDir
+	if err != nil {
+		return err
+	}
+	defer func() { _ = in.Close() }() // read-only; nothing to report on close
+
+	info, err := in.Stat()
+	if err != nil {
+		return err
+	}
+	out, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, info.Mode()) // #nosec G304 -- path built from UserHomeDir
+	if err != nil {
+		return err
+	}
+	if _, err := io.Copy(out, in); err != nil {
+		_ = out.Close() // best-effort: the copy error is the real failure
+		return err
+	}
+	return out.Close()
 }

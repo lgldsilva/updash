@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# validate.sh — Full local validation gate (8 gates).
+# validate.sh — Full local validation gate (10 gates).
 # Exit code: 0 = all green, 1 = something failed.
 # Run manually:  ./scripts/validate.sh
 #
@@ -27,7 +27,7 @@ step() {
 echo "🔍 Full validation — $(date)"
 echo ""
 
-# ── 8 required gates ──────────────────────────────────────────────────────
+# ── 10 required gates ─────────────────────────────────────────────────────
 
 step "Build"           go build ./...
 # Platform-specific files (*_darwin.go, Windows paths) are otherwise never

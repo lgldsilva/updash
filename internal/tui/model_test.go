@@ -168,7 +168,6 @@ func TestState_CurrentItems(t *testing.T) {
 func TestState_CleanupToggleMatchesCursor(t *testing.T) {
 	s := New()
 	s.ActiveTab = model.TabCleanup
-	s.Ready = true
 	s.CleanItems = []*model.SourceSummary{
 		{
 			Category: model.CatDockerClean,
@@ -234,7 +233,6 @@ func TestState_HandleActions(t *testing.T) {
 			},
 		},
 	}
-	s.Ready = true
 
 	// Navigate down
 	s.HandleAction(KeyDown)
@@ -604,4 +602,112 @@ func TestLogUpdateResults_ManualOnlyLogsHint(t *testing.T) {
 	if !strings.Contains(s.Logs[2].Message, "✘ boom: kaboom") {
 		t.Errorf("unexpected failure log: %q", s.Logs[2].Message)
 	}
+}
+
+func TestFlattenCleanItems_ShowsErrorOnlySummaries(t *testing.T) {
+	// A cleanup source whose scan failed must stay visible on the Cleanup
+	// tab — hasCleanupItems used to drop error-only summaries entirely.
+	s := New()
+	s.CleanItems = []*model.SourceSummary{
+		{Category: model.CatCache, Label: "npm Cache", Items: []*model.Item{
+			{Name: "npm-cache", Status: model.StatusError, CurrentVer: "scan failed"},
+		}},
+	}
+	items := s.FlattenCleanItems()
+	if len(items) != 1 || items[0].Name != "npm-cache" {
+		t.Fatalf("expected error item visible on Cleanup tab, got %+v", items)
+	}
+}
+
+func TestCollectOutdatedItems_RespectsAppliedFilter(t *testing.T) {
+	// "U" must not update items hidden by the active "/" filter.
+	s := New()
+	s.Summaries = []*model.SourceSummary{
+		{Category: model.CatBrew, Label: "Homebrew", Items: []*model.Item{
+			{Name: "btop", Category: model.CatBrew, Status: model.StatusOutdated},
+		}},
+		{Category: model.CatNpm, Label: "npm", Items: []*model.Item{
+			{Name: "typescript", Category: model.CatNpm, Status: model.StatusOutdated},
+		}},
+	}
+	s.AppliedFilter = "brew"
+
+	got := s.collectOutdatedItems(false)
+	if len(got) != 1 || got[0].Name != "btop" {
+		t.Fatalf("expected filter to keep only btop, got %+v", got)
+	}
+}
+
+func TestHandleKey_TabGatesActions(t *testing.T) {
+	cases := []struct {
+		name string
+		tab  model.TabID
+		key  string
+		want KeyAction
+	}{
+		{"u on updates", model.TabUpdates, "u", KeyUpdateSelected},
+		{"u on cleanup", model.TabCleanup, "u", KeyNone},
+		{"c on cleanup", model.TabCleanup, "c", KeyCleanSelected},
+		{"c on updates", model.TabUpdates, "c", KeyNone},
+		{"a on updates", model.TabUpdates, "a", KeyUpdateAll},
+		{"a on cleanup", model.TabCleanup, "a", KeyCleanAll},
+		{"a on logs", model.TabLogs, "a", KeyNone},
+		{"space on logs", model.TabLogs, " ", KeyNone},
+		{"enter on logs", model.TabLogs, "enter", KeyNone},
+		{"select-all on logs", model.TabLogs, "*", KeyNone},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			s := New()
+			s.ActiveTab = tc.tab
+			if got := s.HandleKey(tc.key); got != tc.want {
+				t.Errorf("HandleKey(%q) on %v = %v, want %v", tc.key, tc.tab, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestRefuseBusy_BlocksConflictingOps(t *testing.T) {
+	s := New()
+	s.Updating = true
+	if !s.refuseBusy("Update") {
+		t.Fatal("refuseBusy should reject while updating")
+	}
+	if s.ShowConfirm {
+		t.Fatal("confirm dialog must not open while busy")
+	}
+	s.Updating = false
+	if s.refuseBusy("Update") {
+		t.Fatal("refuseBusy should allow when idle")
+	}
+}
+
+func TestHandlePasswordless(t *testing.T) {
+	t.Run("passwordless proceeds", func(t *testing.T) {
+		s := New()
+		called := false
+		s.ConfirmCmd = func(p *tea.Program) tea.Cmd { called = true; return nil }
+		s.HandlePasswordless(true, nil)
+		if !called {
+			t.Fatal("pending op should run after passwordless OK")
+		}
+		if s.ElevSession == nil || !s.ElevSession.Ready() {
+			t.Fatal("passwordless session should be cached")
+		}
+	})
+	t.Run("needs password opens dialog", func(t *testing.T) {
+		s := New()
+		called := false
+		s.ConfirmCmd = func(p *tea.Program) tea.Cmd { called = true; return nil }
+		s.HandlePasswordless(false, nil)
+		if called {
+			t.Fatal("pending op must not run before the password")
+		}
+		if !s.ShowPassword {
+			t.Fatal("password dialog should open")
+		}
+		if s.ConfirmCmd == nil {
+			t.Fatal("pending op should survive until password or cancel")
+		}
+	})
 }
