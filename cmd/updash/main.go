@@ -3,10 +3,10 @@ package main
 import (
 	"context"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/lgldsilva/updash/internal/cleaner"
@@ -488,18 +488,37 @@ func updateSelf() {
 		os.Exit(1)
 	}
 	repoDir := filepath.Join(home, ".config", "updash")
-	binOut := filepath.Join(repoDir, updashBinary)
+	installDir := filepath.Join(home, ".local", "bin")
+	if err := os.MkdirAll(installDir, 0o750); err != nil {
+		fmt.Fprintf(os.Stderr, "✘ failed to create install dir: %v\n", err)
+		os.Exit(1)
+	}
 
 	fmt.Println("📦 Updating updash itself...")
 
-	cmd := exec.Command("git", "-C", repoDir, "pull", "--ff-only")
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
-		fmt.Printf("⚠ git pull failed (not a git repo?): %v\n", err)
+	if gitBin, err := exec.LookPath("git"); err != nil {
+		fmt.Printf("⚠ git not found — building current checkout: %v\n", err)
+	} else {
+		pull := exec.Command(gitBin, "-C", repoDir, "pull", "--ff-only")
+		pull.Stdout = os.Stdout
+		pull.Stderr = os.Stderr
+		if err := pull.Run(); err != nil {
+			fmt.Printf("⚠ git pull failed (not a git repo?): %v\n", err)
+		}
 	}
 
-	build := exec.Command("go", "build", "-o", binOut, filepath.Join("cmd", "updash"))
+	goBin, err := exec.LookPath("go")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "✘ go toolchain not found (install Go or run `make install`): %v\n", err)
+		os.Exit(1)
+	}
+	binName := updashBinary
+	if runtime.GOOS == "windows" {
+		binName += ".exe"
+	}
+	// Build straight into the install dir — the toolchain writes the binary,
+	// so no intermediate copy step is needed.
+	build := exec.Command(goBin, "build", "-o", filepath.Join(installDir, binName), filepath.Join("cmd", "updash"))
 	build.Dir = repoDir
 	build.Stdout = os.Stdout
 	build.Stderr = os.Stderr
@@ -508,39 +527,5 @@ func updateSelf() {
 		os.Exit(1)
 	}
 
-	installDir := filepath.Join(home, ".local", "bin")
-	if err := os.MkdirAll(installDir, 0750); err != nil {
-		fmt.Fprintf(os.Stderr, "failed to create install dir: %v\n", err)
-		os.Exit(1)
-	}
-	// Native copy (no `cp`) so --update-self also works on Windows.
-	if err := copyFile(binOut, filepath.Join(installDir, updashBinary)); err != nil {
-		fmt.Printf("✘ Install failed: %v\n", err)
-		os.Exit(1)
-	}
-
 	fmt.Println("✓ updash updated!")
-}
-
-// copyFile duplicates src to dst with the source's mode (portable cp).
-func copyFile(src, dst string) error {
-	in, err := os.Open(src) // #nosec G304 -- path built from UserHomeDir
-	if err != nil {
-		return err
-	}
-	defer func() { _ = in.Close() }() // read-only; nothing to report on close
-
-	info, err := in.Stat()
-	if err != nil {
-		return err
-	}
-	out, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, info.Mode()) // #nosec G304 -- path built from UserHomeDir
-	if err != nil {
-		return err
-	}
-	if _, err := io.Copy(out, in); err != nil {
-		_ = out.Close() // best-effort: the copy error is the real failure
-		return err
-	}
-	return out.Close()
 }
