@@ -40,6 +40,18 @@ func layoutLogFile() string {
 	return filepath.Join(home, ".cache", "updash", "layout-debug.log")
 }
 
+// appendLayoutLine appends one formatted line to the debug log at path.
+// Callers serialize writes via layoutLogMu. Owner-only file (0600); the path
+// comes from UPDASH_DEBUG_LAYOUT_FILE or ~/.cache — debug-only diagnostics.
+func appendLayoutLine(path, format string, args ...any) {
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600) // #nosec G304 -- debug log path from env/home
+	if err != nil {
+		return
+	}
+	defer func() { _ = f.Close() }()
+	_, _ = fmt.Fprintf(f, format+"\n", args...)
+}
+
 func layoutLog(format string, args ...any) {
 	if !layoutDebugEnabled() {
 		return
@@ -47,24 +59,15 @@ func layoutLog(format string, args ...any) {
 	layoutLogOnce.Do(func() {
 		layoutLogPath = layoutLogFile()
 		_ = os.MkdirAll(filepath.Dir(layoutLogPath), 0o750)
-		// truncate on first open of process (owner-only log file)
-		// Path is under ~/.cache or explicit UPDASH_DEBUG_LAYOUT_FILE (debug only).
-		f, err := os.OpenFile(layoutLogPath, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600) // #nosec G304 -- debug log path from env/home
-		if err == nil {
-			_, _ = fmt.Fprintf(f, "# updash layout debug started %s\n", time.Now().Format(time.RFC3339))
-			_, _ = fmt.Fprintf(f, "# UPDASH_DEBUG_LAYOUT=1  file=%s\n", layoutLogPath)
-			_, _ = fmt.Fprintf(f, "# columns: ts | event | details\n")
-			_ = f.Close()
-		}
+		// Fresh log per process (owner-only; created on first append below).
+		_ = os.Truncate(layoutLogPath, 0)
+		appendLayoutLine(layoutLogPath, "# updash layout debug started %s", time.Now().Format(time.RFC3339))
+		appendLayoutLine(layoutLogPath, "# UPDASH_DEBUG_LAYOUT=1  file=%s", layoutLogPath)
+		appendLayoutLine(layoutLogPath, "# columns: ts | event | details")
 	})
 	layoutLogMu.Lock()
 	defer layoutLogMu.Unlock()
-	f, err := os.OpenFile(layoutLogPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600) // #nosec G304 -- debug log path from env/home
-	if err != nil {
-		return
-	}
-	defer func() { _ = f.Close() }()
-	_, _ = fmt.Fprintf(f, "%s | %s\n", time.Now().Format("15:04:05.000"), fmt.Sprintf(format, args...))
+	appendLayoutLine(layoutLogPath, "%s | %s", time.Now().Format("15:04:05.000"), fmt.Sprintf(format, args...))
 }
 
 // layoutLogAlways writes even without UPDASH_DEBUG_LAYOUT (used for overflow only).
@@ -73,12 +76,7 @@ func layoutLogAlways(format string, args ...any) {
 	_ = os.MkdirAll(filepath.Dir(path), 0o750)
 	layoutLogMu.Lock()
 	defer layoutLogMu.Unlock()
-	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600) // #nosec G304 -- debug log path from env/home
-	if err != nil {
-		return
-	}
-	defer func() { _ = f.Close() }()
-	_, _ = fmt.Fprintf(f, "%s | OVERFLOW | %s\n", time.Now().Format("15:04:05.000"), fmt.Sprintf(format, args...))
+	appendLayoutLine(path, "%s | OVERFLOW | %s", time.Now().Format("15:04:05.000"), fmt.Sprintf(format, args...))
 }
 
 // LogWindowSize records a tea.WindowSizeMsg for diagnostics.
