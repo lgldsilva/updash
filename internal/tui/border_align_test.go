@@ -13,7 +13,6 @@ func sampleBrewState(term int) *State {
 	s := New()
 	s.Width = term
 	s.Height = 40
-	s.Ready = true
 	s.Version = "test"
 	s.Platform.OS = "darwin"
 	s.Summaries = []*model.SourceSummary{{
@@ -108,7 +107,6 @@ func TestNoDoubleRightBorder(t *testing.T) {
 	s := New()
 	s.Width = 80
 	s.Height = 24
-	s.Ready = true
 	s.Platform.OS = "darwin"
 	s.Summaries = []*model.SourceSummary{{
 		Category: model.CatBrew, Icon: "🍺", Label: "Homebrew", Total: 1,
@@ -152,7 +150,6 @@ func TestGearEmoji_noWidthDisagreement(t *testing.T) {
 	s := New()
 	s.Width = 200
 	s.Height = 40
-	s.Ready = true
 	s.Platform.OS = "darwin"
 	s.Summaries = []*model.SourceSummary{
 		{Category: model.CatAI, Icon: "⚙️", Label: "AI Infra", Total: 4,

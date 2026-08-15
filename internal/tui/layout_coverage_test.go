@@ -221,7 +221,6 @@ func TestFrame_withWideContent(t *testing.T) {
 	s := New()
 	s.Width = 100
 	s.Height = 30
-	s.Ready = true
 	s.Platform.OS = "darwin"
 	s.Summaries = []*model.SourceSummary{{
 		Category: model.CatBrew, Icon: "🍺", Label: "Homebrew", Total: 2,

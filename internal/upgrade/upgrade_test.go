@@ -1279,3 +1279,35 @@ func TestStartup_packageManaged(t *testing.T) {
 		t.Fatalf("note = %q, want package-managed", res.Note)
 	}
 }
+
+func TestIsNewer(t *testing.T) {
+	cases := []struct {
+		current, tag string
+		want         bool
+	}{
+		{"1.2.3", "v1.2.4", true},
+		{"v1.2.3", "1.3.0", true},
+		{"1.2.3", "v1.2.3", false},
+		{"1.2.4", "v1.2.3", false},     // downgrade: never
+		{"2.0.0", "v1.9.9", false},     // newer dev build: never downgrade
+		{"dev", "v9.9.9", false},       // unparseable current: never auto-update
+		{"1.2.3", "v1.2.3-rc1", false}, // rc of the current version: not newer
+		{"1.2.3", "v2.0.0-rc1", true},  // future rc parses above the current base
+	}
+	for _, tc := range cases {
+		if got := isNewer(tc.current, tc.tag); got != tc.want {
+			t.Errorf("isNewer(%q, %q) = %v, want %v", tc.current, tc.tag, got, tc.want)
+		}
+	}
+}
+
+func TestShouldAutoUpgrade_JustUpgradedGuard(t *testing.T) {
+	t.Setenv("UPDASH_JUST_UPGRADED", "1")
+	if ShouldAutoUpgrade("1.0.0", false) {
+		t.Fatal("re-exec'd child must not auto-upgrade again (anti-loop guard)")
+	}
+	t.Setenv("UPDASH_JUST_UPGRADED", "")
+	if !ShouldAutoUpgrade("1.0.0", false) {
+		t.Fatal("normal startup should auto-upgrade")
+	}
+}

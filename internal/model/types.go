@@ -181,6 +181,3 @@ type GlobalLogEntry struct {
 	Message   string
 	Success   bool
 }
-
-// TabUpdateMsg is sent when the TUI should refresh.
-type TabUpdateMsg struct{}

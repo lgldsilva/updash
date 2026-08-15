@@ -14,7 +14,6 @@ func TestCategoryHeader_frameAlignment(t *testing.T) {
 	s := New()
 	s.Width = 200
 	s.Height = 40
-	s.Ready = true
 	s.Platform.OS = "darwin"
 	s.Summaries = []*model.SourceSummary{
 		{Category: model.CatAgent, Icon: "🤖", Label: "AI Agents", Total: 10,

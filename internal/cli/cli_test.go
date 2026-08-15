@@ -611,15 +611,6 @@ func TestEnsureCategoryElevation_readySession(t *testing.T) {
 	}
 }
 
-func TestContainsPasswordNote(t *testing.T) {
-	if !containsPasswordNote("precisa de SENHA de admin") {
-		t.Fatal("expected password note")
-	}
-	if containsPasswordNote("nothing special") {
-		t.Fatal("unexpected match")
-	}
-}
-
 func TestItemNeedsNativeElevation(t *testing.T) {
 	plat := model.PlatformInfo{OS: "darwin"}
 	if !itemNeedsNativeElevation(&model.Item{Name: "microsoft-office", Category: model.CatBrew}, plat) {
@@ -659,5 +650,46 @@ func TestBrewItemNeedsPassword(t *testing.T) {
 	}
 	if brewItemNeedsPassword(&model.Item{Name: "wget"}) {
 		t.Fatal("wget should not need password")
+	}
+}
+
+func TestFilterCheckResults(t *testing.T) {
+	brew := &model.SourceSummary{
+		Category: model.CatBrew, Label: "Homebrew",
+		Items: []*model.Item{
+			{Name: "btop", Category: model.CatBrew, Status: model.StatusOutdated},
+			{Name: "git", Category: model.CatBrew, Status: model.StatusOutdated},
+		},
+	}
+	ghExt := &model.SourceSummary{
+		Category: model.CatAI, Label: "AI Infra",
+		Items: []*model.Item{
+			{Name: "gh-extensions", Category: model.CatGHExt, Status: model.StatusOutdated},
+			{Name: "semidx", Category: model.CatAI, Status: model.StatusOutdated},
+		},
+	}
+	summaries := []*model.SourceSummary{brew, ghExt}
+
+	// --only brew keeps the matching summary whole.
+	got := filterCheckResults(summaries, "brew")
+	if len(got) != 1 || got[0].Label != "Homebrew" || len(got[0].Items) != 2 {
+		t.Fatalf("brew filter: %+v", got)
+	}
+
+	// Child-category filter keeps only the matching item of the AI summary.
+	got = filterCheckResults(summaries, "gh-ext")
+	if len(got) != 1 || len(got[0].Items) != 1 || got[0].Items[0].Name != "gh-extensions" {
+		t.Fatalf("gh-ext filter: %+v", got)
+	}
+
+	// No match drops everything (check prints "everything up to date").
+	got = filterCheckResults(summaries, "doesnotexist")
+	if len(got) != 0 {
+		t.Fatalf("no-match filter should drop all summaries, got %+v", got)
+	}
+
+	// Empty filter is a no-op.
+	if got = filterCheckResults(summaries, ""); len(got) != 2 {
+		t.Fatalf("empty filter must be a no-op, got %+v", got)
 	}
 }

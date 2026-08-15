@@ -53,7 +53,6 @@ func TestFrame_neverExceedsTerminalWidth(t *testing.T) {
 		s := New()
 		s.Width = term
 		s.Height = 30
-		s.Ready = true
 		s.Version = "0.3.0"
 		s.LatestTag = "v0.3.0"
 		s.Platform.OS = "darwin"

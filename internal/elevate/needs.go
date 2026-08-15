@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"github.com/lgldsilva/updash/internal/model"
+	"github.com/lgldsilva/updash/internal/scanner"
 )
 
 // CategoryNeedsElevation reports whether updating items in this category may
@@ -24,6 +25,17 @@ func CategoryNeedsElevation(cat model.Category, plat model.PlatformInfo) bool {
 	}
 }
 
+// ItemNeedsUpdateElevation reports whether updating this specific item may
+// require privileged access: elevation-needing categories plus brew PKG
+// casks (Microsoft, etc.) whose installers prompt for sudo mid-run even
+// though the brew category as a whole does not.
+func ItemNeedsUpdateElevation(item *model.Item, plat model.PlatformInfo) bool {
+	if CategoryNeedsElevation(item.Category, plat) {
+		return true
+	}
+	return item.Category == model.CatBrew && scanner.BrewNeedsSudoPrime(item.Name)
+}
+
 // ItemNeedsElevation reports whether cleaning this item may require sudo.
 func ItemNeedsElevation(item *model.Item) bool {
 	if item.Category != model.CatCache {
@@ -40,7 +52,7 @@ func ItemsNeedElevation(items []*model.Item, plat model.PlatformInfo, cleanup bo
 			if ItemNeedsElevation(it) {
 				return true
 			}
-		} else if CategoryNeedsElevation(it.Category, plat) {
+		} else if ItemNeedsUpdateElevation(it, plat) {
 			return true
 		}
 	}

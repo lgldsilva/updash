@@ -61,7 +61,7 @@ var keyActions = map[string]KeyAction{
 	"r": KeyRefresh, "R": KeyRefresh,
 	"?": KeyHelp,
 	"/": KeyFilter,
-	"q": KeyQuit, "Q": KeyQuit, "ctrl+c": KeyQuit,
+	"q": KeyQuit, "Q": KeyQuit, // "ctrl+c" is handled at the top of HandleKey
 }
 
 var tabKeys = map[string]model.TabID{
@@ -72,6 +72,11 @@ var tabKeys = map[string]model.TabID{
 
 // HandleKey processes a key press and returns an action.
 func (s *State) HandleKey(key string) KeyAction {
+	// Ctrl+C always quits, even with a dialog/overlay open — otherwise the
+	// single-char handlers below would swallow it and trap the user.
+	if key == "ctrl+c" {
+		return KeyQuit
+	}
 	if s.ShowHelp {
 		// Any key dismisses the help overlay; Esc is the explicit close.
 		return KeyHelp
@@ -105,11 +110,15 @@ func (s *State) HandleKey(key string) KeyAction {
 		return KeyFilter
 	}
 	if key == "a" || key == "A" {
-		// A = Update All on Updates tab, Clean All on Cleanup tab.
-		if s.ActiveTab == model.TabCleanup {
+		// A = Update All on Updates tab, Clean All on Cleanup tab; no-op on Logs.
+		switch s.ActiveTab {
+		case model.TabCleanup:
 			return KeyCleanAll
+		case model.TabUpdates:
+			return KeyUpdateAll
+		default:
+			return KeyNone
 		}
-		return KeyUpdateAll
 	}
 	if tab, ok := tabKeys[key]; ok {
 		s.ActiveTab = tab
@@ -117,9 +126,36 @@ func (s *State) HandleKey(key string) KeyAction {
 		return KeyTab
 	}
 	if action, ok := keyActions[key]; ok {
+		if !s.actionAllowedOnTab(action) {
+			return KeyNone
+		}
 		return action
 	}
 	return KeyNone
+}
+
+// actionAllowedOnTab reports whether the action applies to the active tab.
+// Update keys belong to Updates, clean keys to Cleanup, and item
+// selection/detail make no sense on Logs — acting on invisible items from
+// another tab is never what the user meant.
+func (s *State) actionAllowedOnTab(action KeyAction) bool {
+	switch s.ActiveTab {
+	case model.TabLogs:
+		switch action {
+		case KeyUpdateSelected, KeyUpdateAll, KeyCleanSelected, KeyCleanAll,
+			KeySelect, KeySelectAll, KeySelectNone, KeySelectCategory, KeyDetail:
+			return false
+		}
+	case model.TabUpdates:
+		if action == KeyCleanSelected || action == KeyCleanAll {
+			return false
+		}
+	case model.TabCleanup:
+		if action == KeyUpdateSelected {
+			return false
+		}
+	}
+	return true
 }
 
 func (s *State) handlePasswordKey(key string) KeyAction {
@@ -203,13 +239,21 @@ func (s *State) HandleAction(action KeyAction) tea.Cmd {
 	case KeyDetail:
 		s.toggleDetail()
 	case KeyUpdateSelected:
-		s.runUpdateSelected()
+		if !s.refuseBusy("Update") {
+			s.runUpdateSelected()
+		}
 	case KeyUpdateAll:
-		s.runUpdateAll()
+		if !s.refuseBusy("Update all") {
+			s.runUpdateAll()
+		}
 	case KeyCleanSelected:
-		s.runCleanSelected()
+		if !s.refuseBusy("Clean") {
+			s.runCleanSelected()
+		}
 	case KeyCleanAll:
-		s.runCleanAll()
+		if !s.refuseBusy("Clean all") {
+			s.runCleanAll()
+		}
 	case KeyRefresh:
 		return s.runRefresh()
 	case KeyHelp:
@@ -260,7 +304,7 @@ func (s *State) submitPassword() tea.Cmd {
 		program.Send(PasswordResultMsg{OK: true, Session: sess})
 	}()
 
-	return TickCmd()
+	return nil // spinner animation runs on the single tick chain (see onTick)
 }
 
 func (s *State) moveCursor(delta int) {
@@ -359,6 +403,22 @@ func (s *State) cancelOperation() {
 	s.Cancel = cancel
 }
 
+// busy reports whether any scan/update/clean operation is in flight.
+func (s *State) busy() bool {
+	return s.Scanning || s.Updating || s.Cleaning
+}
+
+// refuseBusy rejects a new operation while one is running — the alternative
+// (silently dropping the confirmed action) looks like a dead key.
+func (s *State) refuseBusy(action string) bool {
+	if !s.busy() {
+		return false
+	}
+	s.LastSummary = "⚠ Operation in progress — press Esc to cancel it first"
+	s.AddLog(fmt.Sprintf("%s ignored: another operation is running", action), false)
+	return true
+}
+
 // ---------------------------------------------------------------------------
 // Scan (refresh)
 // ---------------------------------------------------------------------------
@@ -372,19 +432,77 @@ func (s *State) runRefresh() tea.Cmd {
 // Update (selected + all)
 // ---------------------------------------------------------------------------
 
-// collectOutdatedItems returns all outdated items, or only selected ones when selectedOnly is true.
+// collectOutdatedItems returns all outdated items, or only selected ones when
+// selectedOnly is true. The applied filter is honored, symmetric with
+// collectCleanCandidates — hidden items must not sneak into a batch.
+// Manual-only items (KeepPolicy-driven, e.g. WhatsApp or JetBrains casks) are
+// skipped, mirroring the CLI's partitionUpdatable — the TUI must not run
+// updates the project defines as manual.
 func (s *State) collectOutdatedItems(selectedOnly bool) []*model.Item {
 	var out []*model.Item
-	for _, it := range s.FlattenItems() {
+	skipped := 0
+	for _, it := range flattenSummaries(s.Summaries, hasUpdateItems, isUpdateNavigable, s.AppliedFilter) {
 		if it.Status != model.StatusOutdated {
 			continue
 		}
 		if selectedOnly && !it.Selected {
 			continue
 		}
+		if IsManualOnlyItem(it) {
+			skipped++
+			continue
+		}
 		out = append(out, it)
 	}
+	if skipped > 0 {
+		s.AddLog(fmt.Sprintf("⊘ %d manual-only item(s) skipped — update them by hand (see detail)", skipped), false)
+	}
 	return out
+}
+
+// IsManualOnlyItem reports whether an item must be updated manually
+// (KeepPolicy or brew note marks it as manual reinstall / licensed app).
+func IsManualOnlyItem(it *model.Item) bool {
+	if it == nil {
+		return false
+	}
+	if it.KeepPolicy != "" {
+		if kind, _ := updater.ClassifyItem(it, nil); kind == updater.KindManualOnly {
+			return true
+		}
+	}
+	return false
+}
+
+// LogUpdateResults writes per-item update outcomes to the Logs tab.
+// Manual-only results log as ⊘ with the suggested command, not as failures.
+func (s *State) LogUpdateResults(results []*updater.Result) {
+	for _, r := range results {
+		switch {
+		case r.Success:
+			s.AddLog(fmt.Sprintf("✓ %s: updated", r.Item.Name), true)
+		case IsManualOnlyItem(r.Item):
+			s.AddLog(fmt.Sprintf("⊘ %s: manual only — %s", r.Item.Name, updater.SuggestCommand(r.Item)), false)
+		default:
+			s.AddLog(fmt.Sprintf("✘ %s: %s", r.Item.Name, truncatePlain(r.Error, 120)), false)
+		}
+	}
+}
+
+// countResults tallies batch outcomes. Manual-only items count as skipped,
+// not failed — nothing was actually attempted for them.
+func countResults(results []*updater.Result) (ok, fail int) {
+	for _, r := range results {
+		switch {
+		case r.Success:
+			ok++
+		case IsManualOnlyItem(r.Item):
+			// skipped, not failed
+		default:
+			fail++
+		}
+	}
+	return ok, fail
 }
 
 // showUpdateConfirm prepares the confirmation dialog for an update batch.
@@ -419,7 +537,9 @@ func (s *State) runUpdateAll() {
 }
 
 // startUpdateAll returns a tea.Cmd that runs updates async.
-// Processes each category as a batch and sends progress messages.
+// Processes each category as a batch and sends progress messages. Workers
+// operate on item copies and an env snapshot; the event loop applies
+// results back onto live items (see items.go).
 func (s *State) startUpdateAll(items []*model.Item, program *tea.Program) tea.Cmd {
 	if s.Updating {
 		return nil
@@ -428,10 +548,13 @@ func (s *State) startUpdateAll(items []*model.Item, program *tea.Program) tea.Cm
 	s.OperationLabel = ""
 	s.LastSummary = ""
 	s.AddLog(fmt.Sprintf("Starting update of %d items...", len(items)), true)
-	groups := groupOutdatedByCategory(s.Summaries, items)
+
+	env := s.snapshotEnv()
+	batch := copyItems(items)
+	groups := groupOutdatedByCategory(env.summaries, batch)
 
 	go func() {
-		total := len(items)
+		total := len(batch)
 		done, success, failed := 0, 0, 0
 		defer func() {
 			program.Send(UpdateAllDoneMsg{Success: success, Failed: failed, Total: total})
@@ -440,63 +563,60 @@ func (s *State) startUpdateAll(items []*model.Item, program *tea.Program) tea.Cm
 			if len(group.items) == 0 {
 				continue
 			}
-			ok, fail, n := s.runUpdateGroup(group, done, total, program)
+			ok, fail, n := runUpdateGroup(env, group, done, total, program)
 			success += ok
 			failed += fail
 			done += n
-			s.rescanCategory(s.Ctx, program, group.category, false)
+			rescanCategory(env.ctx, env.platform, program, group.category, false)
 		}
 	}()
-	return TickCmd()
+	return nil // spinner animation runs on the single tick chain (see onTick)
 }
 
-func (s *State) runUpdateGroup(group categoryGroup, done, total int, program *tea.Program) (ok, fail, n int) {
-	for _, it := range group.items {
-		it.Status = model.StatusUpdating
-	}
+// runUpdateGroup runs one category batch on the worker goroutine. It only
+// touches the env snapshot and item copies — never State.
+func runUpdateGroup(env workerEnv, group categoryGroup, done, total int, program *tea.Program) (ok, fail, n int) {
 	program.Send(UpdateBatchDoneMsg{
 		Results: nil, Done: done, Total: total,
-		Category: categoryLabel(s.Summaries, group.category),
+		Category: categoryLabel(env.summaries, group.category),
+		Cat:      group.category,
+		Names:    itemNames(group.items),
 	})
 
-	cmdCtx, cancel := context.WithTimeout(s.Ctx, updater.BatchTimeout(group.category))
-	defer cancel()
-
-	if results, skipped := s.tryMASElevation(group, cmdCtx, program); skipped {
-		done += len(group.items)
-		program.Send(UpdateBatchDoneMsg{Results: results, Done: done, Total: total})
+	sess, results, skipped := tryMASElevation(env, group, program)
+	if skipped {
+		program.Send(UpdateBatchDoneMsg{Results: results, Done: done + len(group.items), Total: total})
 		return 0, len(group.items), len(group.items)
 	}
 
-	results := s.execUpdateBatch(group, cmdCtx, program)
-	for _, r := range results {
-		if r.Success {
-			ok++
-		} else {
-			fail++
-		}
-	}
+	results = execUpdateBatch(env.withSession(sess), group, program)
+	ok, fail = countResults(results)
 	program.Send(UpdateBatchDoneMsg{Results: results, Done: done + len(results), Total: total})
 	return ok, fail, len(results)
 }
 
-func (s *State) tryMASElevation(group categoryGroup, cmdCtx context.Context, program *tea.Program) (results []*updater.Result, skipped bool) {
-	needsElev := elevate.CategoryNeedsElevation(group.category, s.Platform)
-	if !needsElev || group.category != model.CatMAS {
-		return nil, false
+// tryMASElevation blocks (on the worker) until sudo is ready for the MAS
+// batch, prompting via ElevRequiredMsg when needed. The returned session
+// must back the batch context.
+func tryMASElevation(env workerEnv, group categoryGroup, program *tea.Program) (sess *elevate.Session, results []*updater.Result, skipped bool) {
+	if group.category != model.CatMAS || !elevate.CategoryNeedsElevation(group.category, env.platform) {
+		return env.sess, nil, false
 	}
-	if err := s.waitForElevation(cmdCtx, program, "Mac App Store updates need your Mac login password"); err != nil {
+	waitCtx, cancel := context.WithTimeout(env.ctx, updater.BatchTimeout(model.CatMAS))
+	defer cancel()
+	sess, err := waitForElevation(waitCtx, program, "Mac App Store updates need your Mac login password", env.sess)
+	if err != nil {
 		for _, it := range group.items {
 			it.Status = model.StatusError
 		}
-		return masElevFailResults(group.items, err), true
+		return nil, masElevFailResults(group.items, err), true
 	}
-	return nil, false
+	return sess, nil, false
 }
 
-func (s *State) execUpdateBatch(group categoryGroup, cmdCtx context.Context, program *tea.Program) []*updater.Result {
-	needsElev := elevate.CategoryNeedsElevation(group.category, s.Platform)
-	cmdCtx = elevate.WithSession(cmdCtx, s.ElevSession)
+func execUpdateBatch(env workerEnv, group categoryGroup, program *tea.Program) []*updater.Result {
+	needsElev := elevate.CategoryNeedsElevation(group.category, env.platform)
+	cmdCtx := env.ctxWithElev()
 	hasSession := elevate.FromContext(cmdCtx) != nil && elevate.FromContext(cmdCtx).Ready()
 	leaveAlt := needsElev && !hasSession && group.category != model.CatMAS
 	if leaveAlt {
@@ -639,7 +759,8 @@ func (s *State) runCleanAll() {
 }
 
 // startCleanSelected returns a tea.Cmd that runs cleanup async.
-// Items are processed one-by-one with progress messages.
+// Items are processed one-by-one with progress messages, on copies; the
+// event loop applies results back onto live items (see items.go).
 func (s *State) startCleanSelected(items []*model.Item, program *tea.Program) tea.Cmd {
 	if s.Cleaning {
 		return nil
@@ -649,27 +770,33 @@ func (s *State) startCleanSelected(items []*model.Item, program *tea.Program) te
 	s.LastSummary = ""
 	s.AddLog(fmt.Sprintf("Starting cleanup of %d items...", len(items)), true)
 
+	env := s.snapshotEnv()
+	batch := copyItems(items)
+
 	go func() {
-		total := len(items)
+		total := len(batch)
 		var totalFreed int64
+		failed := 0
 		defer func() {
-			program.Send(CleanAllDoneMsg{BytesFreed: totalFreed})
+			program.Send(CleanAllDoneMsg{BytesFreed: totalFreed, Failed: failed})
 		}()
-		for i, it := range items {
-			totalFreed += s.cleanOneItem(it, i, total, program)
-			s.rescanCategory(s.Ctx, program, it.Category, true)
+		for i, it := range batch {
+			freed, fail := cleanOneItem(env, it, i, total, program)
+			totalFreed += freed
+			failed += fail
+			rescanCategory(env.ctx, env.platform, program, it.Category, true)
 		}
 	}()
-	return TickCmd()
+	return nil // spinner animation runs on the single tick chain (see onTick)
 }
 
-func (s *State) cleanOneItem(it *model.Item, i, total int, program *tea.Program) int64 {
-	it.Status = model.StatusCleaning
+func cleanOneItem(env workerEnv, it *model.Item, i, total int, program *tea.Program) (freed int64, failed int) {
 	program.Send(CleanBatchDoneMsg{
 		Results: nil, Done: i, Total: total, Category: it.Name,
+		Cat: it.Category, Names: []string{it.Name},
 	})
 
-	cmdCtx, cancel := context.WithTimeout(s.ctxWithElev(), cleaner.ItemTimeout(it))
+	cmdCtx, cancel := context.WithTimeout(env.ctxWithElev(), cleaner.ItemTimeout(it))
 	needsElev := elevate.ItemNeedsElevation(it)
 	hasSession := elevate.FromContext(cmdCtx) != nil && elevate.FromContext(cmdCtx).Ready()
 	leaveAlt := needsElev && !hasSession
@@ -684,12 +811,13 @@ func (s *State) cleanOneItem(it *model.Item, i, total int, program *tea.Program)
 		program.Send(tea.EnterAltScreen()) //nolint:staticcheck
 	}
 
-	var freed int64
 	for _, r := range results {
 		if r.Success {
 			freed += r.BytesFreed
+		} else {
+			failed++
 		}
 	}
 	program.Send(CleanBatchDoneMsg{Results: results, Done: i + 1, Total: total})
-	return freed
+	return freed, failed
 }

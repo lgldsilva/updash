@@ -37,8 +37,19 @@ func MergeSummary(list []*model.SourceSummary, sum *model.SourceSummary) []*mode
 }
 
 // startScan launches a background scan without blocking the Bubble Tea event loop.
+// startScan launches a background scan without blocking the Bubble Tea event loop.
+//
+// Divergence from scanner.RunAll is intentional: the TUI needs one message
+// per source for incremental progress, so it orchestrates the sources itself
+// (bounded by maxConcurrentScans) instead of the CLI's unbounded RunAll.
 func (s *State) startScan() tea.Cmd {
-	if s.Scanning || s.Program == nil {
+	// A rescan while an update/clean batch is running would swap the very
+	// summaries those workers are mutating — refuse it with a visible hint.
+	if s.Scanning || s.Updating || s.Cleaning || s.Program == nil {
+		if s.Updating || s.Cleaning {
+			s.LastSummary = "⚠ Refresh skipped — operation in progress (Esc cancels)"
+			s.AddLog("Refresh ignored: another operation is running", false)
+		}
 		return nil
 	}
 
@@ -81,30 +92,31 @@ func (s *State) startScan() tea.Cmd {
 		program.Send(ScanFinishedMsg{Elapsed: time.Since(start).Round(time.Millisecond)})
 	}()
 
-	return TickCmd()
+	return nil // spinner animation runs on the single tick chain (see onTick)
 }
 
-// rescanCategory re-probes one package manager and pushes fresh summary to the TUI.
-// Uses s.Ctx (not the caller's batch ctx) so rescans still run after batch timeouts cancel.
-func (s *State) rescanCategory(_ context.Context, program *tea.Program, cat model.Category, cleanup bool) {
+// rescanCategory re-probes one package manager and pushes a fresh summary
+// to the TUI. Runs on worker goroutines: it must only use the caller's
+// snapshot (ctx/plat), never State — the event loop may be swapping fields.
+func rescanCategory(ctx context.Context, plat model.PlatformInfo, program *tea.Program, cat model.Category, cleanup bool) {
 	if program == nil {
 		return
 	}
-	scanCtx := s.Ctx
-	if scanCtx == nil {
-		scanCtx = context.Background()
+	if ctx == nil {
+		ctx = context.Background()
 	}
-	for _, src := range scanner.EnabledSources(s.Platform, cleanup || scanner.IsCleanupCategory(cat)) {
+	for _, src := range scanner.EnabledSources(plat, cleanup || scanner.IsCleanupCategory(cat)) {
 		if src.Category() != cat {
 			continue
 		}
 		if cleanup != scanner.IsCleanupCategory(src.Category()) {
 			continue
 		}
-		summary := scanner.ScanSource(scanCtx, src, s.Platform)
+		summary := scanner.ScanSource(ctx, src, plat)
 		program.Send(ScanSourceDoneMsg{
 			Summary:   summary,
 			IsCleanup: scanner.IsCleanupCategory(summary.Category),
+			Rescan:    true,
 		})
 	}
 }

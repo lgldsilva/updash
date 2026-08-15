@@ -22,6 +22,18 @@ const (
 	nameNpmCache = "npm-cache"
 )
 
+// firstField returns the first whitespace-separated field of out, or
+// fallback when out has none. Guards `du` calls that succeed with an
+// empty stdout — indexing Fields()[0] blindly would panic inside the scan
+// goroutine and take the whole process down.
+func firstField(out []byte, fallback string) string {
+	fields := strings.Fields(string(out))
+	if len(fields) == 0 {
+		return fallback
+	}
+	return fields[0]
+}
+
 // --- Brew Cleanup ---
 
 type BrewCleanSource struct{}
@@ -44,8 +56,10 @@ func (s *BrewCleanSource) Scan(ctx context.Context, plat model.PlatformInfo) ([]
 		}
 	}
 
-	sizeOut, _ := execCommand(ctx, binDu, flagDuShort, cacheDir)
-	size := strings.TrimSpace(strings.Fields(string(sizeOut))[0])
+	size := "0B"
+	if sizeOut, err := execCommand(ctx, binDu, flagDuShort, cacheDir); err == nil {
+		size = firstField(sizeOut, size)
+	}
 
 	reclaimable := "~0B"
 	if _, err := exec.LookPath(binBrew); err == nil {
@@ -83,7 +97,7 @@ func (s *AptCleanSource) Scan(ctx context.Context, plat model.PlatformInfo) ([]*
 			{Name: "apt-cache", Category: model.CatCache, Status: model.StatusOK, CurrentVer: verNoCache},
 		}, nil
 	}
-	size := strings.TrimSpace(strings.Fields(string(out))[0])
+	size := firstField(out, "0B")
 	return []*model.Item{
 		{
 			Name:        "apt-cache",
@@ -164,7 +178,7 @@ func (s *GoCleanSource) Scan(ctx context.Context, plat model.PlatformInfo) ([]*m
 			{Name: nameGoCache, Category: model.CatCache, Status: model.StatusOK, CurrentVer: verNoCache},
 		}, nil
 	}
-	size := strings.TrimSpace(strings.Fields(string(sizeOut))[0])
+	size := firstField(sizeOut, "0B")
 
 	return []*model.Item{
 		{
@@ -202,13 +216,13 @@ func (s *NpmCleanSource) Scan(ctx context.Context, plat model.PlatformInfo) ([]*
 			{Name: nameNpmCache, Category: model.CatCache, Status: model.StatusOK, CurrentVer: verNoCache},
 		}, nil
 	}
-	total := strings.TrimSpace(strings.Fields(string(totalOut))[0])
+	total := firstField(totalOut, "0B")
 
 	var reclaimBytes int64
 	for _, sub := range []string{"_cacache", "_npx"} {
 		subDir := filepath.Join(cacheDir, sub)
 		if out, err := execCommand(ctx, binDu, "-sk", subDir); err == nil {
-			kb, _ := strconv.ParseInt(strings.Fields(string(out))[0], 10, 64)
+			kb, _ := strconv.ParseInt(firstField(out, "0"), 10, 64)
 			reclaimBytes += kb * 1024
 		}
 	}

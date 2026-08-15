@@ -24,6 +24,16 @@ func (s *PacmanSource) Scan(ctx context.Context, plat model.PlatformInfo) ([]*mo
 func (s *PacmanSource) scanYay(ctx context.Context) ([]*model.Item, error) {
 	out, err := execCommand(ctx, binYay, "-Qua")
 	if err != nil {
+		// yay exits non-zero on benign states (no updates on some versions,
+		// foreign-repo quirks). Parse whatever it printed: arrow lines are
+		// updates, blank output means no updates, anything else is a real error.
+		items := parsePacmanArrowLines(string(out), true)
+		if len(items) > 0 {
+			return okOrOutdated(binYay, model.CatPacman, items), nil
+		}
+		if len(strings.TrimSpace(string(out))) == 0 {
+			return okOrOutdated(binYay, model.CatPacman, nil), nil
+		}
 		return []*model.Item{errItem(binYay, model.CatPacman)}, nil
 	}
 	return okOrOutdated(binYay, model.CatPacman, parsePacmanArrowLines(string(out), true)), nil

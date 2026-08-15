@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"strings"
 
 	"github.com/lgldsilva/updash/internal/elevate"
 	"github.com/lgldsilva/updash/internal/model"
@@ -68,15 +67,7 @@ func primeElevationSession(
 }
 
 func itemsNeedPasswordElevation(items []*model.Item, plat model.PlatformInfo) bool {
-	for _, it := range items {
-		if it.Category == model.CatBrew && brewItemNeedsPassword(it) {
-			return true
-		}
-		if elevate.CategoryNeedsElevation(it.Category, plat) {
-			return true
-		}
-	}
-	return false
+	return elevate.ItemsNeedElevation(items, plat, false)
 }
 
 // ensureCategoryElevation attaches the run-wide session for a category batch.
@@ -132,8 +123,8 @@ func elevationSkipReason(cfg Config) string {
 }
 
 func brewItemNeedsPassword(it *model.Item) bool {
-	note := scanner.BrewUpgradeNote(it.Name)
-	return note != "" && containsPasswordNote(note)
+	// PKG casks (Microsoft, etc.) carry an upgrade note mentioning admin/senha.
+	return scanner.BrewNeedsSudoPrime(it.Name)
 }
 
 func brewBatchNeedsPassword(items []*model.Item) bool {
@@ -143,11 +134,6 @@ func brewBatchNeedsPassword(items []*model.Item) bool {
 		}
 	}
 	return false
-}
-
-func containsPasswordNote(note string) bool {
-	n := strings.ToLower(note)
-	return strings.Contains(n, "senha") || strings.Contains(n, "admin")
 }
 
 func runBrewUpdateBatch(

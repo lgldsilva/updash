@@ -30,7 +30,7 @@ func TestMergeSummary_InsertAndReplace(t *testing.T) {
 func TestRescanCategory_nilProgram(t *testing.T) {
 	s := New()
 	// must not panic when program is nil
-	s.rescanCategory(context.Background(), nil, model.CatBrew, false)
+	rescanCategory(context.Background(), s.Platform, nil, model.CatBrew, false)
 }
 
 func TestStartScan_Idempotent(t *testing.T) {

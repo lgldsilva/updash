@@ -62,10 +62,7 @@ func Check(ctx context.Context, cfg Config, currentVersion string) (string, bool
 	if err != nil {
 		return "", false, fmt.Errorf("resolve version: %w", err)
 	}
-	if cfg.CheckOnly && cfg.Version == "" {
-		return tag, !sameVersion(currentVersion, tag), nil
-	}
-	return tag, !sameVersion(currentVersion, tag), nil
+	return tag, isNewer(currentVersion, tag), nil
 }
 
 // Run performs a full upgrade: check, download, verify, install.
@@ -80,7 +77,7 @@ func Run(ctx context.Context, cfg Config, currentVersion string) error {
 	fmt.Printf("current: %s\nlatest:  %s\n", currentVersion, tag)
 
 	if cfg.CheckOnly {
-		if sameVersion(currentVersion, tag) {
+		if !isNewer(currentVersion, tag) {
 			fmt.Println("up to date.")
 		} else {
 			fmt.Println("an update is available — run `updash upgrade`.")
@@ -88,7 +85,10 @@ func Run(ctx context.Context, cfg Config, currentVersion string) error {
 		return nil
 	}
 
-	if cfg.Version == "" && sameVersion(currentVersion, tag) {
+	// Auto-latest upgrades are forward-only: a dev/snapshot build newer than
+	// the latest stable release must not be downgraded. An explicit
+	// --version still installs exactly what was asked.
+	if cfg.Version == "" && !isNewer(currentVersion, tag) {
 		fmt.Println("already up to date.")
 		return nil
 	}
@@ -167,7 +167,10 @@ func fetchLatestFromList(ctx context.Context, hc *http.Client, url, token string
 	}
 	var tags []string
 	for _, r := range releases {
-		if r.Draft || r.TagName == "" {
+		// Match /releases/latest semantics: drafts and prereleases are not
+		// candidates for "latest" — a fallback host must not auto-install
+		// an -rc build.
+		if r.Draft || r.Prerelease || r.TagName == "" {
 			continue
 		}
 		tags = append(tags, r.TagName)
@@ -493,6 +496,23 @@ func sameVersion(current, tag string) bool {
 	current = strings.TrimPrefix(current, versionPrefix)
 	tag = strings.TrimPrefix(tag, versionPrefix)
 	return current == tag
+}
+
+// isNewer reports whether tag is strictly newer than current by semver.
+// Unparseable versions (dev builds, dirty git describes) never count as
+// older — the startup auto-upgrade must not replace a newer snapshot with
+// an older stable release. Pre-release suffixes parse to their base
+// version, so an -rc of the current version is not "newer" either.
+func isNewer(current, tag string) bool {
+	cv, cok := parseTag(current)
+	tv, tok := parseTag(tag)
+	if !cok || !tok {
+		return false
+	}
+	if tv.less(cv) {
+		return false
+	}
+	return cv.less(tv)
 }
 
 // --- HTTP helpers ---

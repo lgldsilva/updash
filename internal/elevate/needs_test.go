@@ -47,3 +47,42 @@ func TestItemNeedsElevation(t *testing.T) {
 		t.Fatal("brew cleanup should not need elevation")
 	}
 }
+
+func TestItemNeedsUpdateElevation(t *testing.T) {
+	mac := model.PlatformInfo{OS: "darwin"}
+
+	cases := []struct {
+		name string
+		item *model.Item
+		plat model.PlatformInfo
+		want bool
+	}{
+		{"mas app", &model.Item{Category: model.CatMAS}, mac, true},
+		{"apt pkg", &model.Item{Category: model.CatApt}, model.PlatformInfo{OS: "linux"}, true},
+		{"brew pkg cask", &model.Item{Category: model.CatBrew, Name: "microsoft-teams"}, mac, true},
+		{"brew plain cask", &model.Item{Category: model.CatBrew, Name: "btop"}, mac, false},
+		{"brew jetbrains (manual, no sudo)", &model.Item{Category: model.CatBrew, Name: "intellij-idea"}, mac, false},
+		{"npm", &model.Item{Category: model.CatNpm}, mac, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := ItemNeedsUpdateElevation(tc.item, tc.plat); got != tc.want {
+				t.Errorf("ItemNeedsUpdateElevation(%s) = %v, want %v", tc.name, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestItemsNeedElevation_BrewPkgCask(t *testing.T) {
+	mac := model.PlatformInfo{OS: "darwin"}
+	items := []*model.Item{
+		{Category: model.CatBrew, Name: "git"},
+		{Category: model.CatBrew, Name: "microsoft-office"},
+	}
+	if !ItemsNeedElevation(items, mac, false) {
+		t.Fatal("brew PKG cask batch should require elevation")
+	}
+	if ItemsNeedElevation(items[:1], mac, false) {
+		t.Fatal("plain brew batch should not require elevation")
+	}
+}

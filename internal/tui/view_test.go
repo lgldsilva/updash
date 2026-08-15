@@ -166,7 +166,6 @@ func TestRenderTitle(t *testing.T) {
 
 func TestRenderTabs(t *testing.T) {
 	s := New()
-	s.Ready = true
 	s.ActiveTab = model.TabUpdates
 
 	output := s.renderTabs()
@@ -183,7 +182,6 @@ func TestRenderTabs(t *testing.T) {
 
 func TestRenderTabs_WithCounts(t *testing.T) {
 	s := New()
-	s.Ready = true
 	s.ActiveTab = model.TabCleanup
 	s.CleanItems = []*model.SourceSummary{
 		{Category: model.CatCache, Items: []*model.Item{
@@ -224,7 +222,6 @@ func TestRenderProgressBar(t *testing.T) {
 
 func TestRenderUpdatesTab_WithItems(t *testing.T) {
 	s := New()
-	s.Ready = true
 	s.Summaries = []*model.SourceSummary{
 		{
 			Category: model.CatBrew,
@@ -264,7 +261,6 @@ func TestRenderUpdatesTab_WithItems(t *testing.T) {
 
 func TestRenderUpdatesTab_AllUpToDate(t *testing.T) {
 	s := New()
-	s.Ready = true
 	s.Summaries = nil
 	output := s.renderUpdatesTab()
 	if output == "" {
@@ -277,7 +273,6 @@ func TestRenderUpdatesTab_AllUpToDate(t *testing.T) {
 
 func TestRenderUpdatesTab_WithCursor(t *testing.T) {
 	s := New()
-	s.Ready = true
 	s.Cursor = 0
 	s.Summaries = []*model.SourceSummary{
 		{
@@ -298,7 +293,6 @@ func TestRenderUpdatesTab_WithCursor(t *testing.T) {
 
 func TestRenderCleanupTab_WithItems(t *testing.T) {
 	s := New()
-	s.Ready = true
 	s.CleanItems = []*model.SourceSummary{
 		{
 			Category: model.CatCache,
@@ -332,7 +326,6 @@ func TestRenderCleanupTab_WithItems(t *testing.T) {
 
 func TestRenderCleanupTab_NothingToClean(t *testing.T) {
 	s := New()
-	s.Ready = true
 	s.CleanItems = nil
 	output := s.renderCleanupTab()
 	if output == "" {
@@ -402,7 +395,6 @@ func TestFormatRow(t *testing.T) {
 
 func TestRenderContent(t *testing.T) {
 	s := New()
-	s.Ready = true
 
 	// Updates tab
 	s.ActiveTab = model.TabUpdates
@@ -428,7 +420,6 @@ func TestRenderContent(t *testing.T) {
 
 func TestRenderFooter(t *testing.T) {
 	s := New()
-	s.Ready = true
 
 	// Updates tab
 	s.ActiveTab = model.TabUpdates
@@ -452,20 +443,8 @@ func TestRenderFooter(t *testing.T) {
 	}
 }
 
-func TestRenderLoading(t *testing.T) {
-	s := New()
-	output := s.renderLoading()
-	if output == "" {
-		t.Error("renderLoading() returned empty")
-	}
-	if !strings.Contains(output, "Scanning") {
-		t.Errorf("expected Scanning message: %s", output)
-	}
-}
-
 func TestFullRender(t *testing.T) {
 	s := New()
-	s.Ready = true
 
 	output := s.Render()
 	if output == "" {

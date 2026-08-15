@@ -17,11 +17,6 @@ var (
 	ColorWhite  = lipgloss.Color("#ffffff")
 
 	// App styles
-	AppStyle = lipgloss.NewStyle().
-			Border(lipgloss.RoundedBorder()).
-			Padding(1, 2).
-			BorderForeground(ColorCyan)
-
 	// No MarginBottom — margins inside framed content can inflate measured width/height.
 	TitleStyle = lipgloss.NewStyle().
 			Bold(true).
@@ -43,28 +38,13 @@ var (
 			Bold(true).
 			Foreground(ColorYellow)
 
-	CatSummaryStyle = lipgloss.NewStyle().
-			Foreground(ColorGray).
-			Italic(true)
-
 	// Item states
 	ItemOKStyle = lipgloss.NewStyle().
 			Foreground(ColorGreen)
 
-	ItemOutdatedStyle = lipgloss.NewStyle().
-				Foreground(ColorYellow)
-
 	ItemErrorStyle = lipgloss.NewStyle().
 			Foreground(ColorRed).
 			Bold(true)
-
-	ItemSelectedStyle = lipgloss.NewStyle().
-				Foreground(ColorCyan).
-				Bold(true)
-
-	ItemCursorStyle = lipgloss.NewStyle().
-			Foreground(ColorCyan).
-			Background(lipgloss.Color("#333333"))
 
 	// Version formatting
 	VerCurrentStyle = lipgloss.NewStyle().
@@ -80,12 +60,6 @@ var (
 	// Progress bars
 	BarStyle = lipgloss.NewStyle().
 			Height(1)
-
-	BarFilled = lipgloss.NewStyle().
-			Background(ColorGreen)
-
-	BarEmpty = lipgloss.NewStyle().
-			Background(ColorGray)
 
 	// Footer / keybindings — no MarginTop (explicit newlines in view)
 	FooterStyle = lipgloss.NewStyle().

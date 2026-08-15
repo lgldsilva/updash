@@ -359,7 +359,8 @@ func batchAptUpgrade(ctx context.Context, items []*model.Item, opts Options) []*
 		cmd := elevate.Sudo(ctx, args[0], args[1:]...)
 		var out []byte
 		var err error
-		if opts.Verbose || opts.Interactive {
+		// opts.Output (TUI streaming) takes priority over buffering, same as brew.
+		if opts.Output != nil || opts.Verbose || opts.Interactive {
 			opts.ConfigureCmd(cmd)
 			err = cmd.Run()
 		} else {
@@ -766,7 +767,8 @@ func runCmd(ctx context.Context, item *model.Item, opts Options, name string, ar
 
 func runCmdWithBuilder(ctx context.Context, item *model.Item, cmd *exec.Cmd, opts Options) *Result {
 	var stdout, stderr bytes.Buffer
-	if opts.Verbose || opts.Interactive {
+	// opts.Output (TUI streaming) takes priority over buffering, same as brew.
+	if opts.Output != nil || opts.Verbose || opts.Interactive {
 		opts.ConfigureCmd(cmd)
 	} else {
 		cmd.Stdout = &stdout
