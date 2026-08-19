@@ -620,13 +620,13 @@ func execUpdateBatch(env workerEnv, group categoryGroup, program *tea.Program) [
 	hasSession := elevate.FromContext(cmdCtx) != nil && elevate.FromContext(cmdCtx).Ready()
 	leaveAlt := needsElev && !hasSession && group.category != model.CatMAS
 	if leaveAlt {
-		program.Send(tea.ExitAltScreen()) //nolint:staticcheck
+		program.Send(tea.ExitAltScreen())
 	}
 	opts := updater.SilentOptions()
 	opts.Output = newOutputLog(program)
 	results := updater.UpdateAllWithOptions(cmdCtx, group.items, opts)
 	if leaveAlt {
-		program.Send(tea.EnterAltScreen()) //nolint:staticcheck
+		program.Send(tea.EnterAltScreen())
 	}
 	return results
 }
@@ -801,14 +801,14 @@ func cleanOneItem(env workerEnv, it *model.Item, i, total int, program *tea.Prog
 	hasSession := elevate.FromContext(cmdCtx) != nil && elevate.FromContext(cmdCtx).Ready()
 	leaveAlt := needsElev && !hasSession
 	if leaveAlt {
-		program.Send(tea.ExitAltScreen()) //nolint:staticcheck
+		program.Send(tea.ExitAltScreen())
 	}
 	opts := cleaner.SilentOptions()
 	opts.Output = newOutputLog(program)
 	results := cleaner.CleanAllWithOptions(cmdCtx, []*model.Item{it}, opts)
 	cancel()
 	if leaveAlt {
-		program.Send(tea.EnterAltScreen()) //nolint:staticcheck
+		program.Send(tea.EnterAltScreen())
 	}
 
 	for _, r := range results {

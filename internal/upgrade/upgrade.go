@@ -407,7 +407,7 @@ func replaceRunningBinaryWithOS(newBin []byte, goos string) error {
 	tmp := filepath.Join(dir, ".updash.upgrade.tmp")
 	old := self + ".old"
 
-	// #nosec G306 — binary needs executable permission
+	// 0755: the downloaded artifact is an executable binary.
 	if err := os.WriteFile(tmp, newBin, 0755); err != nil {
 		return fmt.Errorf("write temp binary: %w", err)
 	}

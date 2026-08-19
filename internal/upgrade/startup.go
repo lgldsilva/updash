@@ -219,7 +219,9 @@ func Reexec() error {
 		return err
 	}
 	// Re-exec the absolute path of this binary with the original argv; args are
-	// not shell-interpolated (execve), so this is not shell injection.
+	// not shell-interpolated (execve), so this is not shell injection. The
+	// argv-preserving re-exec is inherently flagged by taint analysis — no
+	// exec API variant avoids it — so this finding is accepted here only.
 	cmd := exec.Command(self, os.Args[1:]...) // #nosec G702 -- re-exec self, not user shell
 	cmd.Env = append(os.Environ(), envJustUpgraded+"=1")
 	cmd.Stdin = os.Stdin
