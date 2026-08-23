@@ -3,6 +3,8 @@ package scanner
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"regexp"
 	"strings"
 
 	"github.com/lgldsilva/updash/internal/model"
@@ -48,7 +50,7 @@ func (s *WingetSource) Scan(ctx context.Context, plat model.PlatformInfo) ([]*mo
 	}
 
 	var data wingetUpgradeJSON
-	if err := json.Unmarshal([]byte(output), &data); err != nil || len(data.Upgrades) == 0 {
+	if err := json.Unmarshal([]byte(output), &data); err != nil {
 		// Also try direct upgrade list
 		return scanWingetText(ctx)
 	}
@@ -61,6 +63,7 @@ func (s *WingetSource) Scan(ctx context.Context, plat model.PlatformInfo) ([]*mo
 		}
 		items = append(items, &model.Item{
 			Name:         name,
+			PackageID:    p.ID,
 			Category:     model.CatWinget,
 			CurrentVer:   p.Version,
 			AvailableVer: p.NewVer,
@@ -82,18 +85,20 @@ func scanWingetText(ctx context.Context) ([]*model.Item, error) {
 	out, err := execCommand(ctx, binWinget, cmdUpgrade)
 	if err != nil {
 		return []*model.Item{
-			{Name: binWinget, Category: model.CatWinget, Status: model.StatusOK, CurrentVer: statusUpToDate},
+			{Name: binWinget, Category: model.CatWinget, Status: model.StatusError, CurrentVer: fmt.Sprintf("%v", err)},
 		}, nil
 	}
 
 	lines := strings.Split(string(out), "\n")
 	var items []*model.Item
 	inTable := false
+	sawTable := false
 
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
 		if strings.Contains(line, "Name") && strings.Contains(line, "Id") && strings.Contains(line, "Version") {
 			inTable = true
+			sawTable = true
 			continue
 		}
 		if !inTable || line == "" || strings.HasPrefix(line, "---") {
@@ -105,13 +110,15 @@ func scanWingetText(ctx context.Context) ([]*model.Item, error) {
 		}
 
 		// Parse table line: "Name  Id  Version  Available  Source"
-		fields := strings.Fields(line)
+		fields := wingetColumnSplit.Split(line, -1)
 		if len(fields) >= 4 {
-			name := fields[0]
-			cur := fields[2]
-			avail := fields[3]
+			name := strings.TrimSpace(fields[0])
+			id := strings.TrimSpace(fields[1])
+			cur := strings.TrimSpace(fields[2])
+			avail := strings.TrimSpace(fields[3])
 			items = append(items, &model.Item{
 				Name:         name,
+				PackageID:    id,
 				Category:     model.CatWinget,
 				CurrentVer:   cur,
 				AvailableVer: avail,
@@ -121,6 +128,9 @@ func scanWingetText(ctx context.Context) ([]*model.Item, error) {
 	}
 
 	if len(items) == 0 {
+		if !sawTable {
+			return []*model.Item{{Name: binWinget, Category: model.CatWinget, Status: model.StatusUnverified, CurrentVer: "unrecognized winget output"}}, nil
+		}
 		items = append(items, &model.Item{
 			Name: binWinget, Category: model.CatWinget, Status: model.StatusOK, CurrentVer: statusUpToDate,
 		})
@@ -128,3 +138,5 @@ func scanWingetText(ctx context.Context) ([]*model.Item, error) {
 
 	return items, nil
 }
+
+var wingetColumnSplit = regexp.MustCompile(`\s{2,}`)

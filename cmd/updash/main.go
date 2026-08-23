@@ -71,7 +71,7 @@ func exitOnErr(err error) int {
 	if err != nil {
 		// --strict/--json failures used to exit 1 with no message at all.
 		fmt.Fprintf(os.Stderr, "✘ %v\n", err)
-		return 1
+		return cli.ExitCode(err)
 	}
 	return 0
 }
@@ -79,7 +79,7 @@ func exitOnErr(err error) int {
 func exitOnUpdateClean(_ int, fail int, err error) int {
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "✘ %v\n", err)
-		return 1
+		return cli.ExitCode(err)
 	}
 	if fail > 0 {
 		return 1
@@ -262,6 +262,9 @@ func (m *bubbleModel) onTick() (tea.Model, tea.Cmd) {
 }
 
 func (m *bubbleModel) onScanSourceDone(msg tui.ScanSourceDoneMsg) (tea.Model, tea.Cmd) {
+	if !m.state.IsCurrentGeneration(msg.Generation) {
+		return m, nil
+	}
 	if msg.IsCleanup {
 		m.state.CleanItems = tui.MergeSummary(m.state.CleanItems, msg.Summary)
 	} else {
@@ -277,6 +280,9 @@ func (m *bubbleModel) onScanSourceDone(msg tui.ScanSourceDoneMsg) (tea.Model, te
 }
 
 func (m *bubbleModel) onScanFinished(msg tui.ScanFinishedMsg) (tea.Model, tea.Cmd) {
+	if !m.state.IsCurrentGeneration(msg.Generation) {
+		return m, nil
+	}
 	m.state.Scanning = false
 	m.state.OperationLabel = ""
 	m.state.ClampCursor()
@@ -284,11 +290,16 @@ func (m *bubbleModel) onScanFinished(msg tui.ScanFinishedMsg) (tea.Model, tea.Cm
 	if msg.Elapsed > 0 {
 		elapsed = fmt.Sprintf(" (%s)", msg.Elapsed)
 	}
-	if errs := m.state.TotalScanErrors(); errs > 0 {
+	if errs := m.state.TotalScanInconclusive(); errs > 0 {
 		m.state.LogScanErrors()
-		m.state.LastSummary = fmt.Sprintf("⚠ Scan done — %d error(s), see Logs tab", errs)
-		m.state.AddLog(fmt.Sprintf("Scan complete: %d outdated, %d cleanable, %d error(s)%s",
+		m.state.LastSummary = fmt.Sprintf("⚠ Scan done — %d inconclusive source result(s), see Logs tab", errs)
+		m.state.AddLog(fmt.Sprintf("Scan complete: %d outdated, %d cleanable, %d inconclusive result(s)%s",
 			m.state.TotalOutdated(), m.state.TotalCleanable(), errs, elapsed), false)
+	} else if nonAffirmative := m.state.TotalScanNonAffirmative(); nonAffirmative > 0 {
+		m.state.LogScanErrors()
+		m.state.LastSummary = fmt.Sprintf("ⓘ Scan done — %d non-affirmative informational result(s), see Logs tab", nonAffirmative)
+		m.state.AddLog(fmt.Sprintf("Scan complete: %d outdated, %d cleanable, %d informational result(s)%s",
+			m.state.TotalOutdated(), m.state.TotalCleanable(), nonAffirmative, elapsed), false)
 	} else {
 		m.state.LastSummary = ""
 		m.state.AddLog(fmt.Sprintf("Scan complete: %d outdated, %d cleanable%s",
@@ -309,20 +320,28 @@ func truncateErr(s string) string {
 }
 
 func (m *bubbleModel) onUpdateBatch(msg tui.UpdateBatchDoneMsg) (tea.Model, tea.Cmd) {
+	if !m.state.IsCurrentGeneration(msg.Generation) {
+		return m, nil
+	}
 	m.state.UpdateDone = msg.Done
 	m.state.UpdateTotal = msg.Total
 	if msg.Results == nil && msg.Category != "" {
 		m.state.OperationLabel = msg.Category
-		m.state.MarkItemsUpdating(msg.Cat, msg.Names)
+		m.state.MarkItemsUpdating(msg.Source, msg.Items)
 		m.state.AddLog(fmt.Sprintf("⟳ %s: updating...", msg.Category), true)
 		return m, nil
 	}
-	m.state.ApplyUpdateResults(msg.Results)
+	if ambiguous := m.state.ApplyUpdateResultsForSource(msg.Results, msg.Source); ambiguous > 0 {
+		m.state.AddLog(fmt.Sprintf("⚠ %d update result(s) ignored: ambiguous source/item identity", ambiguous), false)
+	}
 	m.state.LogUpdateResults(msg.Results)
 	return m, nil
 }
 
 func (m *bubbleModel) onUpdateAllDone(msg tui.UpdateAllDoneMsg) (tea.Model, tea.Cmd) {
+	if !m.state.IsCurrentGeneration(msg.Generation) {
+		return m, nil
+	}
 	m.state.Updating = false
 	m.state.OperationLabel = ""
 	m.state.LastSummary = fmt.Sprintf("✓ Update done: %d ok, %d failed of %d",
@@ -334,15 +353,22 @@ func (m *bubbleModel) onUpdateAllDone(msg tui.UpdateAllDoneMsg) (tea.Model, tea.
 }
 
 func (m *bubbleModel) onCleanBatch(msg tui.CleanBatchDoneMsg) (tea.Model, tea.Cmd) {
+	if !m.state.IsCurrentGeneration(msg.Generation) {
+		return m, nil
+	}
 	m.state.CleanDone = msg.Done
 	m.state.CleanTotal = msg.Total
 	if msg.Results == nil && msg.Category != "" {
 		m.state.OperationLabel = msg.Category
-		m.state.MarkItemCleaning(msg.Cat, firstOr(msg.Names, msg.Category))
+		for _, item := range msg.Items {
+			m.state.MarkItemCleaning(msg.Source, item)
+		}
 		m.state.AddLog(fmt.Sprintf("⟳ %s: cleaning...", msg.Category), true)
 		return m, nil
 	}
-	m.state.ApplyCleanResults(msg.Results)
+	if ambiguous := m.state.ApplyCleanResultsForSource(msg.Results, msg.Source); ambiguous > 0 {
+		m.state.AddLog(fmt.Sprintf("⚠ %d cleanup result(s) ignored: ambiguous source/item identity", ambiguous), false)
+	}
 	for _, r := range msg.Results {
 		if !r.Success {
 			m.state.AddLog(fmt.Sprintf("✘ %s: %s", r.Item.Name, truncateErr(r.Error)), false)
@@ -357,14 +383,10 @@ func (m *bubbleModel) onCleanBatch(msg tui.CleanBatchDoneMsg) (tea.Model, tea.Cm
 	return m, nil
 }
 
-func firstOr(names []string, fallback string) string {
-	if len(names) > 0 {
-		return names[0]
-	}
-	return fallback
-}
-
 func (m *bubbleModel) onCleanAllDone(msg tui.CleanAllDoneMsg) (tea.Model, tea.Cmd) {
+	if !m.state.IsCurrentGeneration(msg.Generation) {
+		return m, nil
+	}
 	m.state.Cleaning = false
 	m.state.OperationLabel = ""
 	if msg.Failed > 0 {
@@ -384,6 +406,9 @@ func (m *bubbleModel) onCleanAllDone(msg tui.CleanAllDoneMsg) (tea.Model, tea.Cm
 }
 
 func (m *bubbleModel) onOutputLine(msg tui.OutputLineMsg) (tea.Model, tea.Cmd) {
+	if !m.state.IsCurrentGeneration(msg.Generation) {
+		return m, nil
+	}
 	line := msg.Line
 	// Rune-safe truncation: package names and emoji are multi-byte.
 	if runes := []rune(line); len(runes) > 72 {
@@ -394,6 +419,9 @@ func (m *bubbleModel) onOutputLine(msg tui.OutputLineMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m *bubbleModel) onElevRequired(msg tui.ElevRequiredMsg) (tea.Model, tea.Cmd) {
+	if !m.state.IsCurrentGeneration(msg.Generation) {
+		return m, nil
+	}
 	m.state.ElevWait = msg.Wait
 	m.state.ShowPassword = true
 	m.state.PasswordInput = ""
@@ -405,6 +433,9 @@ func (m *bubbleModel) onElevRequired(msg tui.ElevRequiredMsg) (tea.Model, tea.Cm
 }
 
 func (m *bubbleModel) onPasswordResult(msg tui.PasswordResultMsg) (tea.Model, tea.Cmd) {
+	if !m.state.IsCurrentGeneration(msg.Generation) {
+		return m, nil
+	}
 	if msg.OK {
 		return m, m.state.HandlePasswordOK(msg.Session, m.program)
 	}
@@ -414,6 +445,9 @@ func (m *bubbleModel) onPasswordResult(msg tui.PasswordResultMsg) (tea.Model, te
 }
 
 func (m *bubbleModel) onPasswordlessResult(msg tui.PasswordlessResultMsg) (tea.Model, tea.Cmd) {
+	if !m.state.IsCurrentGeneration(msg.Generation) {
+		return m, nil
+	}
 	return m, m.state.HandlePasswordless(msg.OK, m.program)
 }
 

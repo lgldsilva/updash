@@ -31,8 +31,23 @@ func printCheckEnhanced(updates, cleanup []*model.SourceSummary) (outdated, clea
 		cleanable += printCleanupSummary(s)
 	}
 
-	printCheckFooter(outdated, cleanable, needsSudo, manualOnly)
+	printCheckFooterWithTruth(outdated, cleanable, needsSudo, manualOnly, hasNonAffirmative(updates, cleanup))
 	return outdated, cleanable, needsSudo, manualOnly
+}
+
+func hasNonAffirmative(groups ...[]*model.SourceSummary) bool {
+	for _, summaries := range groups {
+		for _, s := range summaries {
+			if s != nil {
+				for _, it := range s.Items {
+					if it != nil && (it.Status == model.StatusError || it.Status == model.StatusUnverified || it.Status == model.StatusInfo) {
+						return true
+					}
+				}
+			}
+		}
+	}
+	return false
 }
 
 func printUpdateSummary(s *model.SourceSummary) (outdated, needsSudo, manualOnly int) {
@@ -40,6 +55,7 @@ func printUpdateSummary(s *model.SourceSummary) (outdated, needsSudo, manualOnly
 		return printAgentSummary(s)
 	}
 	if s.Outdated == 0 {
+		printSourceTruth(s)
 		return 0, 0, 0
 	}
 	fmt.Printf("  %s %s: %d outdated\n", s.Icon, s.Label, s.Outdated)
@@ -52,6 +68,22 @@ func printUpdateSummary(s *model.SourceSummary) (outdated, needsSudo, manualOnly
 		countScanHints(it, &needsSudo, &manualOnly)
 	}
 	return outdated, needsSudo, manualOnly
+}
+
+func printSourceTruth(s *model.SourceSummary) {
+	for _, it := range s.Items {
+		if it == nil {
+			continue
+		}
+		switch it.Status {
+		case model.StatusError:
+			fmt.Printf("  ✘ %s %s: %s\n", s.Icon, s.Label, it.CurrentVer)
+		case model.StatusUnverified:
+			fmt.Printf("  ? %s %s: %s\n", s.Icon, s.Label, it.CurrentVer)
+		case model.StatusInfo:
+			fmt.Printf("  ℹ %s %s: freshness not verified\n", s.Icon, it.Name)
+		}
+	}
 }
 
 func printAgentSummary(s *model.SourceSummary) (outdated, needsSudo, manualOnly int) {
@@ -68,7 +100,16 @@ func printAgentSummary(s *model.SourceSummary) (outdated, needsSudo, manualOnly 
 			outdated++
 			countScanHints(it, &needsSudo, &manualOnly)
 		} else if it.CurrentVer != "" {
-			fmt.Printf("    ✓ %s  %s\n", it.Name, it.CurrentVer)
+			switch it.Status {
+			case model.StatusOK:
+				fmt.Printf("    ✓ %s  %s\n", it.Name, it.CurrentVer)
+			case model.StatusInfo:
+				fmt.Printf("    ℹ %s  %s (freshness not verified)\n", it.Name, it.CurrentVer)
+			case model.StatusUnverified:
+				fmt.Printf("    ? %s  %s (verification failed)\n", it.Name, it.CurrentVer)
+			case model.StatusError:
+				fmt.Printf("    ✘ %s  %s\n", it.Name, it.CurrentVer)
+			}
 		}
 	}
 	return outdated, needsSudo, manualOnly
@@ -93,8 +134,16 @@ func printCleanupSummary(s *model.SourceSummary) int {
 }
 
 func printCheckFooter(outdated, cleanable, needsSudo, manualOnly int) {
+	printCheckFooterWithTruth(outdated, cleanable, needsSudo, manualOnly, false)
+}
+
+func printCheckFooterWithTruth(outdated, cleanable, needsSudo, manualOnly int, nonAffirmative bool) {
 	if outdated == 0 && cleanable == 0 {
-		fmt.Println("\n✓ Everything is up to date!")
+		if nonAffirmative {
+			fmt.Println("\n⚠ No pending updates found, but some sources were not affirmatively verified.")
+		} else {
+			fmt.Println("\n✓ Everything is up to date!")
+		}
 		return
 	}
 	fmt.Printf("\n%d outdated", outdated)

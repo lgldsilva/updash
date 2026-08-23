@@ -111,6 +111,34 @@ func TestExitCodeForCheck(t *testing.T) {
 	}
 }
 
+func TestCheckReport_ProblemsTakeExitPrecedence(t *testing.T) {
+	updates := []*model.SourceSummary{{Category: model.CatNpm, Label: "npm", Items: []*model.Item{{Name: "npm", Category: model.CatNpm, Status: model.StatusError}}}}
+	rep := BuildCheckReport(updates, nil)
+	if rep.Errors != 1 || len(rep.Problems) != 1 {
+		t.Fatalf("report did not retain error: %+v", rep)
+	}
+	if code := ExitCodeForReport(Config{Strict: true}, rep); code != 2 {
+		t.Fatalf("exit code=%d, want 2", code)
+	}
+}
+
+func TestCheckReport_CountsInfoWithoutTreatingItAsError(t *testing.T) {
+	rep := BuildCheckReport([]*model.SourceSummary{{Category: model.CatBun, Items: []*model.Item{{Name: "bun-pkg", Category: model.CatBun, Status: model.StatusInfo}}}}, nil)
+	if rep.Info != 1 || rep.Errors != 0 || rep.Unverified != 0 {
+		t.Fatalf("report=%+v", rep)
+	}
+	if ExitCodeForReport(Config{}, rep) != 0 {
+		t.Fatal("informational inventory must not be inconclusive")
+	}
+}
+
+func TestExitCodeForReport_StrictIsLowerPrecedenceThanInconclusive(t *testing.T) {
+	rep := CheckReport{Outdated: 1, Errors: 1}
+	if got := ExitCodeForReport(Config{Strict: true}, rep); got != 2 {
+		t.Fatalf("ExitCodeForReport()=%d, want 2", got)
+	}
+}
+
 func TestValidateJSONMode(t *testing.T) {
 	if err := ValidateJSONMode("check", true); err != nil {
 		t.Fatal(err)

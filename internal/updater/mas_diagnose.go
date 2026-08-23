@@ -17,12 +17,10 @@ func explainMasFailure(itemName, packageID, output string, err error) string {
 	}
 
 	combined := strings.ToLower(output + " " + err.Error())
-	killed := strings.Contains(combined, "killed") || strings.Contains(combined, "signal")
-
-	if errors.Is(err, context.DeadlineExceeded) || killed {
+	if errors.Is(err, context.DeadlineExceeded) {
 		cmd := masSuggestCommand(packageID)
 		return fmt.Sprintf(
-			"%s: mas interrompido (sudo expirou ou precisa de Terminal) — tente de novo com senha ou rode: %s",
+			"%s: mas atingiu o tempo limite — tente novamente ou rode: %s",
 			itemName, cmd,
 		)
 	}

@@ -9,12 +9,17 @@ import (
 
 // outputLog streams subprocess lines into the TUI log via OutputLineMsg.
 type outputLog struct {
-	program *tea.Program
-	buf     []byte
+	program    *tea.Program
+	buf        []byte
+	generation uint64
 }
 
-func newOutputLog(program *tea.Program) *outputLog {
-	return &outputLog{program: program}
+func newOutputLog(program *tea.Program, generations ...uint64) *outputLog {
+	var generation uint64
+	if len(generations) > 0 {
+		generation = generations[0]
+	}
+	return &outputLog{program: program, generation: generation}
 }
 
 func (o *outputLog) Write(p []byte) (int, error) {
@@ -26,9 +31,21 @@ func (o *outputLog) Write(p []byte) (int, error) {
 		}
 		line := strings.TrimSpace(string(o.buf[:idx]))
 		o.buf = o.buf[idx+1:]
-		if line != "" && o.program != nil {
-			o.program.Send(OutputLineMsg{Line: line})
-		}
+		o.sendLine(line)
 	}
 	return len(p), nil
+}
+
+// Flush emits a final partial line exactly once. Commands often finish
+// without a trailing newline, and leaving it buffered hides the last error.
+func (o *outputLog) Flush() {
+	line := strings.TrimSpace(string(o.buf))
+	o.buf = nil
+	o.sendLine(line)
+}
+
+func (o *outputLog) sendLine(line string) {
+	if line != "" && o.program != nil {
+		o.program.Send(OutputLineMsg{Generation: o.generation, Line: line})
+	}
 }

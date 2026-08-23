@@ -29,6 +29,11 @@ func TestHasUpdateItems(t *testing.T) {
 			sum:  &model.SourceSummary{Items: []*model.Item{{Status: model.StatusOK}}},
 			want: false,
 		},
+		{
+			name: "unverified stays visible",
+			sum:  &model.SourceSummary{Items: []*model.Item{{Status: model.StatusUnverified}}},
+			want: true,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -36,6 +41,36 @@ func TestHasUpdateItems(t *testing.T) {
 				t.Errorf("hasUpdateItems() = %v, want %v", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestRenderUpdatesTab_UnverifiedIsInconclusive(t *testing.T) {
+	s := New()
+	s.Summaries = []*model.SourceSummary{{
+		Category: model.CatBrew,
+		Label:    "Homebrew",
+		Items:    []*model.Item{{Name: "registry", Category: model.CatBrew, Status: model.StatusUnverified, CurrentVer: "registry unavailable"}},
+	}}
+	if out := s.renderUpdatesTab(); !strings.Contains(strings.ToLower(out), "unverified") {
+		t.Fatalf("unverified source must be visibly inconclusive: %s", out)
+	}
+}
+
+func TestRenderUpdatesTab_UnverifiedOnlyIsNotAllUpdated(t *testing.T) {
+	s := New()
+	s.Summaries = []*model.SourceSummary{{Category: model.CatBrew, Label: "Homebrew", Items: []*model.Item{{Name: "registry", Category: model.CatBrew, Status: model.StatusUnverified}}}}
+	out := strings.ToLower(s.renderUpdatesTab())
+	if strings.Contains(out, "all packages are up to date") || !strings.Contains(out, "unverified") {
+		t.Fatalf("unverified-only result must stay inconclusive: %s", out)
+	}
+}
+
+func TestRenderUpdatesTab_InfoOnlyIsNotAllUpdated(t *testing.T) {
+	s := New()
+	s.Summaries = []*model.SourceSummary{{Category: model.CatAI, Label: "AI tools", Items: []*model.Item{{Name: "note", Category: model.CatAI, Status: model.StatusInfo, CurrentVer: "version check not supported"}}}}
+	out := strings.ToLower(s.renderUpdatesTab())
+	if strings.Contains(out, "all packages are up to date") || !strings.Contains(out, "ⓘ") {
+		t.Fatalf("info-only result must remain non-affirmative: %s", out)
 	}
 }
 
@@ -333,6 +368,28 @@ func TestRenderCleanupTab_NothingToClean(t *testing.T) {
 	}
 	if !strings.Contains(output, "Nothing to clean") {
 		t.Errorf("should show nothing-to-clean: %s", output)
+	}
+}
+
+func TestRenderCleanupTab_InfoOnlyIsNotNothingToClean(t *testing.T) {
+	s := New()
+	s.CleanItems = []*model.SourceSummary{{
+		Category: model.CatCache,
+		Label:    "cache inventory",
+		Items: []*model.Item{{
+			Name:       "inventory",
+			Category:   model.CatCache,
+			Status:     model.StatusInfo,
+			CurrentVer: "not verified",
+		}},
+	}}
+
+	output := s.renderCleanupTab()
+	if strings.Contains(output, "✓ Nothing to clean") {
+		t.Fatalf("info-only cleanup scan must not claim nothing to clean: %s", output)
+	}
+	if !strings.Contains(strings.ToLower(output), "informational") {
+		t.Fatalf("info-only cleanup scan needs truthful informational copy: %s", output)
 	}
 }
 

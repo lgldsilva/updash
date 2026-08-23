@@ -16,9 +16,17 @@ type npmOutdatedEntry struct {
 // ParseNpmOutdatedJSON converts `npm outdated --json` output into Item list.
 // Empty or "{}" yields no items (caller adds an OK placeholder when needed).
 func ParseNpmOutdatedJSON(out []byte, cat model.Category) []*model.Item {
+	items, _ := parseNpmOutdatedJSON(out, cat)
+	return items
+}
+
+func parseNpmOutdatedJSON(out []byte, cat model.Category) ([]*model.Item, error) {
 	var data map[string]npmOutdatedEntry
-	if err := json.Unmarshal(out, &data); err != nil || len(data) == 0 {
-		return nil
+	if err := json.Unmarshal(out, &data); err != nil {
+		return nil, err
+	}
+	if len(data) == 0 {
+		return nil, nil
 	}
 	items := make([]*model.Item, 0, len(data))
 	for name, pkg := range data {
@@ -34,7 +42,7 @@ func ParseNpmOutdatedJSON(out []byte, cat model.Category) []*model.Item {
 			Status:       model.StatusOutdated,
 		})
 	}
-	return items
+	return items, nil
 }
 
 // npmLsGlobal is the shape of `npm ls -g --json --depth=0`.

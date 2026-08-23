@@ -12,6 +12,24 @@ import (
 	"github.com/lgldsilva/updash/internal/updater"
 )
 
+// Planner seams keep TUI preflight deterministic in tests while production
+// derives scope and elevation from the same command plan the updater executes.
+var (
+	plansRequireElevation = updater.PlansRequireElevation
+	prepareUpdateBatch    = func(ctx context.Context, cat model.Category, items []*model.Item) (preparedUpdateBatch, error) {
+		return updater.PrepareUpdateBatch(ctx, cat, items)
+	}
+	executePreparedBatch = func(ctx context.Context, batch preparedUpdateBatch, opts updater.Options) []*updater.Result {
+		return updater.ExecutePreparedBatch(ctx, batch.(*updater.PreparedUpdateBatch), opts)
+	}
+)
+
+type preparedUpdateBatch interface {
+	Category() model.Category
+	Items() []*model.Item
+	Plans() []updater.CommandPlan
+}
+
 // KeyAction handles a key press and returns a command.
 type KeyAction int
 
@@ -186,6 +204,8 @@ func (s *State) handleConfirmKey(key string) KeyAction {
 		s.ShowConfirm = false
 		s.ConfirmCmd = nil
 		s.PendingUpdateItems = nil
+		s.PendingUpdateBatches = nil
+		s.PendingUpdateRequiresElevation = false
 		s.PendingCleanItems = nil
 		return KeyCancel
 	default:
@@ -290,6 +310,7 @@ func (s *State) submitPassword() tea.Cmd {
 	s.PasswordInput = ""
 	program := s.Program
 	ctx := s.Ctx
+	generation := s.Generation
 
 	if program == nil {
 		return nil
@@ -298,10 +319,10 @@ func (s *State) submitPassword() tea.Cmd {
 	go func() {
 		sess := elevate.NewSession()
 		if err := sess.Validate(ctx, pw); err != nil {
-			program.Send(PasswordResultMsg{OK: false, Error: err.Error()})
+			program.Send(PasswordResultMsg{Generation: generation, OK: false, Error: err.Error()})
 			return
 		}
-		program.Send(PasswordResultMsg{OK: true, Session: sess})
+		program.Send(PasswordResultMsg{Generation: generation, OK: true, Session: sess})
 	}()
 
 	return nil // spinner animation runs on the single tick chain (see onTick)
@@ -395,6 +416,8 @@ func (s *State) cancelOperation() {
 	s.Cleaning = false
 	s.OperationLabel = ""
 	s.LastSummary = "Cancelled"
+	// Invalidate before any worker can enqueue its final message.
+	s.nextGeneration()
 	s.AddLog("Operation cancelled by user", false)
 
 	// Recreate context for subsequent operations.
@@ -441,6 +464,7 @@ func (s *State) runRefresh() tea.Cmd {
 func (s *State) collectOutdatedItems(selectedOnly bool) []*model.Item {
 	var out []*model.Item
 	skipped := 0
+	inconclusive := 0
 	for _, it := range flattenSummaries(s.Summaries, hasUpdateItems, isUpdateNavigable, s.AppliedFilter) {
 		if it.Status != model.StatusOutdated {
 			continue
@@ -452,10 +476,18 @@ func (s *State) collectOutdatedItems(selectedOnly bool) []*model.Item {
 			skipped++
 			continue
 		}
+		if source, ok := resolveSource(s.Summaries, it); !ok || sourceIsInconclusive(s.Summaries, source) {
+			inconclusive++
+			continue
+		}
 		out = append(out, it)
 	}
 	if skipped > 0 {
 		s.AddLog(fmt.Sprintf("⊘ %d manual-only item(s) skipped — update them by hand (see detail)", skipped), false)
+	}
+	if inconclusive > 0 {
+		s.LastSummary = "⚠ Update blocked — selected source has errors or is unverified"
+		s.AddLog(fmt.Sprintf("⚠ %d item(s) skipped: source state is inconclusive", inconclusive), false)
 	}
 	return out
 }
@@ -506,20 +538,118 @@ func countResults(results []*updater.Result) (ok, fail int) {
 }
 
 // showUpdateConfirm prepares the confirmation dialog for an update batch.
-func (s *State) showUpdateConfirm(items []*model.Item) {
+// A category-global command affects a whole source, so a filtered or partial
+// selection must be rejected before a worker (and therefore any command) runs.
+func (s *State) showUpdateConfirm(items []*model.Item) bool {
+	if s.itemsHaveInconclusiveSource(s.Summaries, items) {
+		s.LastSummary = "⚠ Update blocked — selected source has errors or is unverified"
+		s.AddLog("Update blocked before confirmation: source state is inconclusive", false)
+		return false
+	}
+	groups, err := prepareUpdateGroups(s.Summaries, items)
+	if err != nil {
+		s.LastSummary = fmt.Sprintf("⚠ Update blocked — cannot plan commands: %v", err)
+		s.AddLog(fmt.Sprintf("Update blocked before confirmation: %v", err), false)
+		return false
+	}
+	if label, blocked := s.partialCategoryGlobalSelection(groups); blocked {
+		s.LastSummary = fmt.Sprintf("⚠ %s has a category-wide update step — select all outdated items from that source", label)
+		s.AddLog(fmt.Sprintf("Update blocked: partial selection for category-global source %s", label), false)
+		return false
+	}
 	s.ShowConfirm = true
 	s.ConfirmMsg = confirmMessage("Update", items)
 	s.PendingUpdateItems = items
+	s.PendingUpdateBatches = groups
+	s.PendingUpdateRequiresElevation = preparedGroupsRequireElevation(groups)
 	s.ConfirmCmd = func(program *tea.Program) tea.Cmd {
-		return s.startUpdateAll(items, program)
+		return s.startUpdateAll(groups, program)
 	}
+	return true
+}
+
+// partialCategoryGlobalSelection reports whether a selected source has a
+// category-global command but omits any automatically updatable outdated item
+// from that same (category, label) source. The comparison uses PackageID when
+// supplied, so display-name changes cannot turn a partial selection into a
+// false complete one.
+func (s *State) partialCategoryGlobalSelection(groups []*preparedUpdateGroup) (string, bool) {
+	selected := make(map[SourceIdentity][]*model.Item)
+	for _, group := range groups {
+		selected[group.source] = append(selected[group.source], group.batch.Items()...)
+	}
+	for _, group := range groups {
+		chosen := selected[group.source]
+		if !hasCategoryGlobalPlan(group.batch.Plans()) {
+			continue
+		}
+		all := s.outdatedItemsForSource(group.source)
+		if !sameItemSet(chosen, all) {
+			return group.source.Label, true
+		}
+	}
+	return "", false
+}
+
+func preparedGroupsRequireElevation(groups []*preparedUpdateGroup) bool {
+	for _, group := range groups {
+		if plansRequireElevation(group.batch.Plans()) {
+			return true
+		}
+	}
+	return false
+}
+
+func hasCategoryGlobalPlan(plans []updater.CommandPlan) bool {
+	for _, plan := range plans {
+		if plan.Scope == updater.CommandScopeCategoryGlobal {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *State) outdatedItemsForSource(source SourceIdentity) []*model.Item {
+	var items []*model.Item
+	for _, summary := range s.Summaries {
+		if summary.Category != source.Category || summary.Label != source.Label {
+			continue
+		}
+		for _, item := range summary.Items {
+			if item.Status == model.StatusOutdated && !IsManualOnlyItem(item) {
+				items = append(items, item)
+			}
+		}
+	}
+	return items
+}
+
+func sameItemSet(left, right []*model.Item) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	seen := make(map[string]struct{}, len(left))
+	for _, item := range left {
+		seen[itemIdentityKey(itemIdentity(item))] = struct{}{}
+	}
+	if len(seen) != len(left) {
+		return false
+	}
+	for _, item := range right {
+		if _, ok := seen[itemIdentityKey(itemIdentity(item))]; !ok {
+			return false
+		}
+	}
+	return true
 }
 
 // runUpdateSelected prepares selected items for async update and shows confirm.
 func (s *State) runUpdateSelected() {
 	selected := s.collectOutdatedItems(true)
 	if len(selected) == 0 {
-		s.LastSummary = "No items selected — press Space on outdated items first"
+		if s.LastSummary == "" {
+			s.LastSummary = "No items selected — press Space on outdated items first"
+		}
 		s.AddLog("No items selected for update", false)
 		return
 	}
@@ -540,34 +670,36 @@ func (s *State) runUpdateAll() {
 // Processes each category as a batch and sends progress messages. Workers
 // operate on item copies and an env snapshot; the event loop applies
 // results back onto live items (see items.go).
-func (s *State) startUpdateAll(items []*model.Item, program *tea.Program) tea.Cmd {
+func (s *State) startUpdateAll(groups []*preparedUpdateGroup, program *tea.Program) tea.Cmd {
 	if s.Updating {
 		return nil
 	}
 	s.Updating = true
+	s.nextGeneration()
 	s.OperationLabel = ""
 	s.LastSummary = ""
-	s.AddLog(fmt.Sprintf("Starting update of %d items...", len(items)), true)
+	total := 0
+	for _, group := range groups {
+		total += len(group.batch.Items())
+	}
+	s.AddLog(fmt.Sprintf("Starting update of %d items...", total), true)
 
 	env := s.snapshotEnv()
-	batch := copyItems(items)
-	groups := groupOutdatedByCategory(env.summaries, batch)
 
 	go func() {
-		total := len(batch)
 		done, success, failed := 0, 0, 0
 		defer func() {
-			program.Send(UpdateAllDoneMsg{Success: success, Failed: failed, Total: total})
+			program.Send(UpdateAllDoneMsg{Generation: env.generation, Success: success, Failed: failed, Total: total})
 		}()
 		for _, group := range groups {
-			if len(group.items) == 0 {
+			if len(group.batch.Items()) == 0 {
 				continue
 			}
 			ok, fail, n := runUpdateGroup(env, group, done, total, program)
 			success += ok
 			failed += fail
 			done += n
-			rescanCategory(env.ctx, env.platform, program, group.category, false)
+			rescanCategory(env.ctx, env.platform, program, env.generation, group.source.Category, false)
 		}
 	}()
 	return nil // spinner animation runs on the single tick chain (see onTick)
@@ -575,56 +707,62 @@ func (s *State) startUpdateAll(items []*model.Item, program *tea.Program) tea.Cm
 
 // runUpdateGroup runs one category batch on the worker goroutine. It only
 // touches the env snapshot and item copies — never State.
-func runUpdateGroup(env workerEnv, group categoryGroup, done, total int, program *tea.Program) (ok, fail, n int) {
+func runUpdateGroup(env workerEnv, group *preparedUpdateGroup, done, total int, program *tea.Program) (ok, fail, n int) {
+	items := group.batch.Items()
 	program.Send(UpdateBatchDoneMsg{
-		Results: nil, Done: done, Total: total,
-		Category: categoryLabel(env.summaries, group.category),
-		Cat:      group.category,
-		Names:    itemNames(group.items),
+		Generation: env.generation,
+		Results:    nil, Done: done, Total: total,
+		Category: group.label(),
+		Source:   group.source,
+		Items:    itemIdentities(items),
 	})
 
 	sess, results, skipped := tryMASElevation(env, group, program)
 	if skipped {
-		program.Send(UpdateBatchDoneMsg{Results: results, Done: done + len(group.items), Total: total})
-		return 0, len(group.items), len(group.items)
+		program.Send(UpdateBatchDoneMsg{Generation: env.generation, Results: results, Done: done + len(items), Total: total, Source: group.source, Items: itemIdentities(items)})
+		return 0, len(items), len(items)
 	}
 
 	results = execUpdateBatch(env.withSession(sess), group, program)
 	ok, fail = countResults(results)
-	program.Send(UpdateBatchDoneMsg{Results: results, Done: done + len(results), Total: total})
+	program.Send(UpdateBatchDoneMsg{Generation: env.generation, Results: results, Done: done + len(results), Total: total, Source: group.source, Items: itemIdentities(items)})
 	return ok, fail, len(results)
 }
 
 // tryMASElevation blocks (on the worker) until sudo is ready for the MAS
 // batch, prompting via ElevRequiredMsg when needed. The returned session
 // must back the batch context.
-func tryMASElevation(env workerEnv, group categoryGroup, program *tea.Program) (sess *elevate.Session, results []*updater.Result, skipped bool) {
-	if group.category != model.CatMAS || !elevate.CategoryNeedsElevation(group.category, env.platform) {
+func tryMASElevation(env workerEnv, group *preparedUpdateGroup, program *tea.Program) (sess *elevate.Session, results []*updater.Result, skipped bool) {
+	items := group.batch.Items()
+	requiresElevation := plansRequireElevation(group.batch.Plans())
+	if !requiresElevation {
 		return env.sess, nil, false
 	}
-	waitCtx, cancel := context.WithTimeout(env.ctx, updater.BatchTimeout(model.CatMAS))
+	waitCtx, cancel := context.WithTimeout(env.ctx, updater.BatchTimeout(group.category))
 	defer cancel()
-	sess, err := waitForElevation(waitCtx, program, "Mac App Store updates need your Mac login password", env.sess)
+	var err error
+	sess, err = waitForElevation(waitCtx, program, env.generation, group.label()+" updates need your administrator password", env.sess)
 	if err != nil {
-		for _, it := range group.items {
+		for _, it := range items {
 			it.Status = model.StatusError
 		}
-		return nil, masElevFailResults(group.items, err), true
+		return nil, masElevFailResults(items, err), true
 	}
 	return sess, nil, false
 }
 
-func execUpdateBatch(env workerEnv, group categoryGroup, program *tea.Program) []*updater.Result {
-	needsElev := elevate.CategoryNeedsElevation(group.category, env.platform)
+func execUpdateBatch(env workerEnv, group *preparedUpdateGroup, program *tea.Program) []*updater.Result {
+	needsElev := plansRequireElevation(group.batch.Plans())
 	cmdCtx := env.ctxWithElev()
 	hasSession := elevate.FromContext(cmdCtx) != nil && elevate.FromContext(cmdCtx).Ready()
-	leaveAlt := needsElev && !hasSession && group.category != model.CatMAS
+	leaveAlt := needsElev && !hasSession
 	if leaveAlt {
 		program.Send(tea.ExitAltScreen())
 	}
 	opts := updater.SilentOptions()
-	opts.Output = newOutputLog(program)
-	results := updater.UpdateAllWithOptions(cmdCtx, group.items, opts)
+	opts.Output = newOutputLog(program, env.generation)
+	results := executePreparedBatch(cmdCtx, group.batch, opts)
+	opts.Output.(*outputLog).Flush()
 	if leaveAlt {
 		program.Send(tea.EnterAltScreen())
 	}
@@ -634,44 +772,93 @@ func execUpdateBatch(env workerEnv, group categoryGroup, program *tea.Program) [
 // categoryGroup holds items grouped by category.
 type categoryGroup struct {
 	category model.Category
+	source   SourceIdentity
 	items    []*model.Item
 }
 
-// categoryLabel returns the human-readable label for a category from summaries.
-func categoryLabel(summaries []*model.SourceSummary, cat model.Category) string {
-	for _, s := range summaries {
-		if s.Category == cat {
-			return s.Label
-		}
-	}
-	return string(cat)
+type preparedUpdateGroup struct {
+	category model.Category
+	source   SourceIdentity
+	batch    preparedUpdateBatch
 }
 
-// groupOutdatedByCategory groups items by their source category, using the
-// summaries structure so the goroutine doesn't need to read State directly.
-func groupOutdatedByCategory(summaries []*model.SourceSummary, items []*model.Item) []categoryGroup {
-	// Build fast lookup
-	need := make(map[*model.Item]bool, len(items))
-	for _, it := range items {
-		need[it] = true
-	}
+type cleanTarget struct {
+	item   *model.Item
+	source SourceIdentity
+}
 
-	var groups []categoryGroup
-	for _, summary := range summaries {
-		var groupItems []*model.Item
-		for _, it := range summary.Items {
-			if need[it] {
-				groupItems = append(groupItems, it)
-			}
+func (g categoryGroup) label() string {
+	if g.source.Label != "" {
+		return g.source.Label
+	}
+	return string(g.category)
+}
+
+func (g *preparedUpdateGroup) label() string {
+	if g.source.Label != "" {
+		return g.source.Label
+	}
+	return string(g.category)
+}
+
+// categoryLabel returns the human-readable label for a category from summaries.
+// groupOutdatedByCategory groups copied update targets directly. It resolves
+// their immutable source/item identities while still on the event loop, so no
+// worker ever receives a shallow summary snapshot or relies on pointer identity.
+func groupOutdatedByCategory(summaries []*model.SourceSummary, items []*model.Item) []categoryGroup {
+	type operationKey struct {
+		source   SourceIdentity
+		category model.Category
+	}
+	byOperation := make(map[operationKey]int)
+	groups := make([]categoryGroup, 0, len(items))
+	for _, item := range items {
+		source, ok := resolveSource(summaries, item)
+		if !ok {
+			// An ambiguous or vanished target must not be sent to a package
+			// manager. The caller's copies are simply excluded from the batch.
+			continue
 		}
-		if len(groupItems) > 0 {
-			groups = append(groups, categoryGroup{
-				category: summary.Category,
-				items:    groupItems,
-			})
+		key := operationKey{source: source, category: item.Category}
+		idx, ok := byOperation[key]
+		if !ok {
+			idx = len(groups)
+			byOperation[key] = idx
+			groups = append(groups, categoryGroup{category: item.Category, source: source})
 		}
+		groups[idx].items = append(groups[idx].items, item)
 	}
 	return groups
+}
+
+func prepareUpdateGroups(summaries []*model.SourceSummary, items []*model.Item) ([]*preparedUpdateGroup, error) {
+	raw := groupOutdatedByCategory(summaries, copyItems(items))
+	groups := make([]*preparedUpdateGroup, 0, len(raw))
+	for _, group := range raw {
+		batch, err := prepareUpdateBatch(context.Background(), group.category, group.items)
+		if err != nil {
+			return nil, err
+		}
+		groups = append(groups, &preparedUpdateGroup{category: group.category, source: group.source, batch: batch})
+	}
+	return groups, nil
+}
+
+func resolveSource(summaries []*model.SourceSummary, item *model.Item) (SourceIdentity, bool) {
+	var source SourceIdentity
+	matches := 0
+	for _, summary := range summaries {
+		for _, live := range summary.Items {
+			liveID := itemIdentityFor(live, summary.Category)
+			itemID := itemIdentityFor(item, liveID.Category)
+			if sameItemIdentity(liveID, itemID) {
+				item.Category = itemID.Category
+				source = SourceIdentity{Category: summary.Category, Label: summary.Label}
+				matches++
+			}
+		}
+	}
+	return source, matches == 1
 }
 
 func masElevFailResults(items []*model.Item, err error) []*updater.Result {
@@ -709,8 +896,13 @@ func confirmMessage(verb string, items []*model.Item) string {
 // collectCleanCandidates returns all cleanable items, selecting them when selectAll is true.
 func (s *State) collectCleanCandidates(selectAll bool) []*model.Item {
 	var out []*model.Item
+	inconclusive := 0
 	for _, it := range s.FlattenCleanItems() {
 		if it.Status != model.StatusCleanCandidate {
+			continue
+		}
+		if source, ok := resolveSource(s.CleanItems, it); !ok || sourceIsInconclusive(s.CleanItems, source) {
+			inconclusive++
 			continue
 		}
 		if selectAll {
@@ -718,17 +910,72 @@ func (s *State) collectCleanCandidates(selectAll bool) []*model.Item {
 		}
 		out = append(out, it)
 	}
+	if inconclusive > 0 {
+		s.LastSummary = "⚠ Cleanup blocked — selected source has errors or is unverified"
+		s.AddLog(fmt.Sprintf("⚠ %d cleanup item(s) skipped: source state is inconclusive", inconclusive), false)
+	}
 	return out
+}
+
+func sourceIsInconclusive(summaries []*model.SourceSummary, source SourceIdentity) bool {
+	for _, summary := range summaries {
+		if summary.Category != source.Category || summary.Label != source.Label {
+			continue
+		}
+		if summary.ErrorCount > 0 || summary.Unverified > 0 {
+			return true
+		}
+		for _, item := range summary.Items {
+			if item.Status == model.StatusError || item.Status == model.StatusUnverified {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// sourceIsNonAffirmative includes informational results for presentation and
+// reporting only. Info does not block unrelated action targets.
+func sourceIsNonAffirmative(summaries []*model.SourceSummary, source SourceIdentity) bool {
+	for _, summary := range summaries {
+		if summary.Category != source.Category || summary.Label != source.Label {
+			continue
+		}
+		if sourceIsInconclusive(summaries, source) {
+			return true
+		}
+		for _, item := range summary.Items {
+			if item.Status == model.StatusInfo {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // showCleanConfirm prepares the confirmation dialog for a cleanup batch.
 func (s *State) showCleanConfirm(items []*model.Item) {
+	if s.itemsHaveInconclusiveSource(s.CleanItems, items) {
+		s.LastSummary = "⚠ Cleanup blocked — selected source has errors or is unverified"
+		s.AddLog("Cleanup blocked before confirmation: source state is inconclusive", false)
+		return
+	}
 	s.ShowConfirm = true
 	s.ConfirmMsg = confirmMessage("Clean", items)
 	s.PendingCleanItems = items
 	s.ConfirmCmd = func(program *tea.Program) tea.Cmd {
 		return s.startCleanSelected(items, program)
 	}
+}
+
+func (s *State) itemsHaveInconclusiveSource(summaries []*model.SourceSummary, items []*model.Item) bool {
+	for _, item := range items {
+		source, ok := resolveSource(summaries, item)
+		if ok && sourceIsInconclusive(summaries, source) {
+			return true
+		}
+	}
+	return false
 }
 
 // runCleanSelected prepares selected cleanup items and shows confirm.
@@ -741,7 +988,9 @@ func (s *State) runCleanSelected() {
 		}
 	}
 	if len(matched) == 0 {
-		s.LastSummary = "No items selected — press Space on cleanup items first"
+		if s.LastSummary == "" {
+			s.LastSummary = "No items selected — press Space on cleanup items first"
+		}
 		s.AddLog("No items selected for cleanup", false)
 		return
 	}
@@ -766,34 +1015,47 @@ func (s *State) startCleanSelected(items []*model.Item, program *tea.Program) te
 		return nil
 	}
 	s.Cleaning = true
+	s.nextGeneration()
 	s.OperationLabel = ""
 	s.LastSummary = ""
 	s.AddLog(fmt.Sprintf("Starting cleanup of %d items...", len(items)), true)
 
 	env := s.snapshotEnv()
 	batch := copyItems(items)
+	targets := make([]cleanTarget, 0, len(batch))
+	for _, item := range batch {
+		source, ok := resolveSource(s.CleanItems, item)
+		if !ok {
+			continue
+		}
+		targets = append(targets, cleanTarget{item: item, source: source})
+	}
+	if blocked := len(batch) - len(targets); blocked > 0 {
+		s.AddLog(fmt.Sprintf("⚠ %d cleanup target(s) blocked: ambiguous source/item identity", blocked), false)
+	}
 
 	go func() {
-		total := len(batch)
+		total := len(targets)
 		var totalFreed int64
 		failed := 0
 		defer func() {
-			program.Send(CleanAllDoneMsg{BytesFreed: totalFreed, Failed: failed})
+			program.Send(CleanAllDoneMsg{Generation: env.generation, BytesFreed: totalFreed, Failed: failed})
 		}()
-		for i, it := range batch {
-			freed, fail := cleanOneItem(env, it, i, total, program)
+		for i, target := range targets {
+			freed, fail := cleanOneItem(env, target.item, target.source, i, total, program)
 			totalFreed += freed
 			failed += fail
-			rescanCategory(env.ctx, env.platform, program, it.Category, true)
+			rescanCategory(env.ctx, env.platform, program, env.generation, target.item.Category, true)
 		}
 	}()
 	return nil // spinner animation runs on the single tick chain (see onTick)
 }
 
-func cleanOneItem(env workerEnv, it *model.Item, i, total int, program *tea.Program) (freed int64, failed int) {
+func cleanOneItem(env workerEnv, it *model.Item, source SourceIdentity, i, total int, program *tea.Program) (freed int64, failed int) {
 	program.Send(CleanBatchDoneMsg{
-		Results: nil, Done: i, Total: total, Category: it.Name,
-		Cat: it.Category, Names: []string{it.Name},
+		Generation: env.generation,
+		Results:    nil, Done: i, Total: total, Category: it.Name,
+		Source: source, Items: []ItemIdentity{itemIdentity(it)},
 	})
 
 	cmdCtx, cancel := context.WithTimeout(env.ctxWithElev(), cleaner.ItemTimeout(it))
@@ -804,8 +1066,9 @@ func cleanOneItem(env workerEnv, it *model.Item, i, total int, program *tea.Prog
 		program.Send(tea.ExitAltScreen())
 	}
 	opts := cleaner.SilentOptions()
-	opts.Output = newOutputLog(program)
+	opts.Output = newOutputLog(program, env.generation)
 	results := cleaner.CleanAllWithOptions(cmdCtx, []*model.Item{it}, opts)
+	opts.Output.(*outputLog).Flush()
 	cancel()
 	if leaveAlt {
 		program.Send(tea.EnterAltScreen())
@@ -818,6 +1081,6 @@ func cleanOneItem(env workerEnv, it *model.Item, i, total int, program *tea.Prog
 			failed++
 		}
 	}
-	program.Send(CleanBatchDoneMsg{Results: results, Done: i + 1, Total: total})
+	program.Send(CleanBatchDoneMsg{Generation: env.generation, Results: results, Done: i + 1, Total: total, Source: source, Items: []ItemIdentity{itemIdentity(it)}})
 	return freed, failed
 }

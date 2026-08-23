@@ -33,6 +33,13 @@ jobs:
         run: go test -race -count=1 ${{ env.TEST_IO_PKGS }}
       - name: Test gate packages (race + cover)
         run: go test -race -count=1 -coverprofile=coverage.out ${{ env.COVER_PKGS }}
+      - name: Enforce coverage >= 90%
+        run: |
+          set -eu
+          pct=$(go tool cover -func=coverage.out | awk '/^total:/ {gsub("%","",$3); print $3}')
+          test -n "$pct"
+          echo "coverage=${pct}%"
+          awk -v p="$pct" -v min=90 'BEGIN { exit (p+0 < min+0) }'
 
 
 
@@ -232,7 +239,7 @@ jobs:
   ci-gate:
     name: PR gate
     runs-on: ubuntu-latest
-    needs: [test, cross-build, lint, security-gosec, security-trivy-fs, package]
+    needs: [test, cross-build, lint, security-govulncheck, secrets-scan, security-gosec, security-trivy-fs, package]
     if: always()
     steps:
       - name: Verify
@@ -244,6 +251,24 @@ jobs:
           c="${{ needs.cross-build.result }}"
           echo "cross-build: $c"
           [ "$c" = "success" ]
+          l="${{ needs.lint.result }}"
+          echo "lint: $l"
+          [ "$l" = "success" ]
+          v="${{ needs.security-govulncheck.result }}"
+          echo "govulncheck: $v"
+          [ "$v" = "success" ]
+          g="${{ needs.secrets-scan.result }}"
+          echo "gitleaks: $g"
+          [ "$g" = "success" ]
+          s="${{ needs.security-gosec.result }}"
+          echo "gosec: $s"
+          [ "$s" = "success" ]
+          tr="${{ needs.security-trivy-fs.result }}"
+          echo "trivy: $tr"
+          [ "$tr" = "success" ]
+          p="${{ needs.package.result }}"
+          echo "package: $p"
+          [ "$p" = "success" ]
 
   dispatch-autotag:
     name: Dispatch release tagging

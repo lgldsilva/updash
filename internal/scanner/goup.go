@@ -33,15 +33,20 @@ func (s *GoSource) Scan(ctx context.Context, plat model.PlatformInfo) ([]*model.
 	gopath := strings.TrimSpace(string(gopathBytes))
 
 	// List Go binaries using native Go APIs so this works on Windows too.
-	entries, err := os.ReadDir(filepath.Join(gopath, "bin"))
+	return scanGoBinInventory(filepath.Join(gopath, "bin"), os.ReadDir), nil
+}
+
+func scanGoBinInventory(dir string, readDir func(string) ([]os.DirEntry, error)) []*model.Item {
+	entries, err := readDir(dir)
 	if err != nil {
-		return []*model.Item{okItem(binGo, model.CatGo)}, nil
+		if os.IsNotExist(err) {
+			return []*model.Item{{Name: binGo, Category: model.CatGo, Status: model.StatusInfo, CurrentVer: "no Go tools installed"}}
+		}
+		return []*model.Item{{Name: binGo, Category: model.CatGo, Status: model.StatusError, CurrentVer: "unable to read Go tools"}}
 	}
-
 	if len(entries) == 0 {
-		return []*model.Item{okItem(binGo, model.CatGo)}, nil
+		return []*model.Item{{Name: binGo, Category: model.CatGo, Status: model.StatusInfo, CurrentVer: "no Go tools installed"}}
 	}
-
 	var items []*model.Item
 	for _, e := range entries {
 		if e.IsDir() {
@@ -54,21 +59,21 @@ func (s *GoSource) Scan(ctx context.Context, plat model.PlatformInfo) ([]*model.
 		items = append(items, &model.Item{
 			Name:     name,
 			Category: model.CatGo,
-			Status:   model.StatusOK,
+			Status:   model.StatusInfo,
 		})
 	}
 
-	return items, nil
+	return items
 }
 
 func (s *GoSource) scanGup(ctx context.Context) ([]*model.Item, error) {
 	out, err := execCommand(ctx, "gup", cmdUpdate, "--dry-run")
 	if err != nil {
-		return []*model.Item{okItem(binGo, model.CatGo)}, nil
+		return []*model.Item{{Name: binGo, Category: model.CatGo, Status: model.StatusError, CurrentVer: "gup check failed"}}, nil
 	}
 
 	output := string(out)
-	if strings.Contains(output, statusUpToDate) || output == "" {
+	if strings.Contains(strings.ToLower(output), statusUpToDate) || strings.Contains(strings.ToLower(output), "nothing to update") || output == "" {
 		return []*model.Item{okItem(binGo, model.CatGo)}, nil
 	}
 
@@ -93,7 +98,7 @@ func (s *GoSource) scanGup(ctx context.Context) ([]*model.Item, error) {
 	}
 
 	if len(items) == 0 {
-		items = append(items, okItem(binGo, model.CatGo))
+		items = append(items, &model.Item{Name: binGo, Category: model.CatGo, Status: model.StatusUnverified, CurrentVer: "unrecognized gup output"})
 	}
 
 	return items, nil

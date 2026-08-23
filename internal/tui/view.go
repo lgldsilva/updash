@@ -200,14 +200,14 @@ func (s *State) renderItemTab(cfg itemTabConfig) string {
 
 func (s *State) renderUpdatesTab() string {
 	empty := ""
-	updateErrs := 0
-	for _, sum := range s.Summaries {
-		updateErrs += countStatus(sum.Items, model.StatusError)
-	}
+	updateProblems := scanProblemCount(s.Summaries)
+	updateNonAffirmative := scanNonAffirmativeCount(s.Summaries)
 	switch {
-	case s.TotalOutdated() == 0 && updateErrs > 0:
-		empty = tuiNewlineIndent + ItemErrorStyle.Render("⚠ No outdated packages — but some sources failed to scan (see Logs tab)") + tuiNewline
-	case s.TotalOutdated() == 0 && !s.Scanning:
+	case s.TotalOutdated() == 0 && updateProblems > 0:
+		empty = tuiNewlineIndent + ItemErrorStyle.Render("⚠ No outdated packages — source state is inconclusive (see Logs tab)") + tuiNewline
+	case s.TotalOutdated() == 0 && updateNonAffirmative > 0:
+		empty = tuiNewlineIndent + VerCurrentStyle.Render("ⓘ No outdated packages — source state is informational, not verified") + tuiNewline
+	case s.TotalOutdated() == 0 && updateNonAffirmative == 0 && !s.Scanning:
 		empty = tuiNewlineIndent + ItemOKStyle.Render("✓ All packages are up to date") + tuiNewline
 	}
 	return s.renderItemTab(itemTabConfig{
@@ -231,7 +231,13 @@ func (s *State) renderUpdatesTab() string {
 
 func (s *State) renderCleanupTab() string {
 	empty := ""
-	if s.TotalCleanable() == 0 && !s.Scanning {
+	cleanupProblems := scanProblemCount(s.CleanItems)
+	cleanupNonAffirmative := scanNonAffirmativeCount(s.CleanItems)
+	if s.TotalCleanable() == 0 && cleanupProblems > 0 {
+		empty = tuiNewlineIndent + ItemErrorStyle.Render("⚠ Nothing to clean — source state is inconclusive (see Logs tab)") + tuiNewline
+	} else if s.TotalCleanable() == 0 && cleanupNonAffirmative > 0 {
+		empty = tuiNewlineIndent + VerCurrentStyle.Render("ⓘ No cleanup candidates — source inventory is informational, not verified") + tuiNewline
+	} else if s.TotalCleanable() == 0 && !s.Scanning {
 		empty = tuiNewlineIndent + ItemOKStyle.Render("✓ Nothing to clean") + tuiNewline
 	}
 	return s.renderItemTab(itemTabConfig{
@@ -248,6 +254,19 @@ func (s *State) renderCleanupTab() string {
 			return s.writeCleanupItems(b, summary, flatIdx)
 		},
 	})
+}
+
+func scanProblemCount(summaries []*model.SourceSummary) int {
+	var problems int
+	for _, summary := range summaries {
+		problems += countStatus(summary.Items, model.StatusError)
+		problems += countStatus(summary.Items, model.StatusUnverified)
+	}
+	return problems
+}
+
+func scanNonAffirmativeCount(summaries []*model.SourceSummary) int {
+	return scanProblemCount(summaries) + countSummariesStatus(summaries, model.StatusInfo)
 }
 
 func (s *State) writeScanWait(b *strings.Builder, waiting bool) {
@@ -541,6 +560,10 @@ func (s *State) renderItemStyled(item *model.Item) string {
 			lipgloss.NewStyle().Render(tuiIndent),
 			ItemOKStyle.Render("✓ updated"),
 		)
+	case model.StatusInfo:
+		return joinRow(bold.Render(namePlain), lipgloss.NewStyle().Render(tuiIndent), VerCurrentStyle.Render("ⓘ "+truncatePlain(item.CurrentVer, m.ver*2)))
+	case model.StatusUnverified:
+		return joinRow(bold.Render(namePlain), lipgloss.NewStyle().Render(tuiIndent), ItemErrorStyle.Render("⚠ unverified — "+truncatePlain(item.CurrentVer, m.ver*2)))
 	default:
 		return bold.Render(namePlain)
 	}
@@ -576,6 +599,10 @@ func (s *State) renderCleanupItemStyled(item *model.Item) string {
 		return joinRow(namePlain, lipgloss.NewStyle().Render(tuiIndent), ItemOKStyle.Render(msg))
 	case model.StatusError:
 		return joinRow(namePlain, lipgloss.NewStyle().Render(tuiIndent), ItemErrorStyle.Render("✘ failed"))
+	case model.StatusInfo:
+		return joinRow(namePlain, lipgloss.NewStyle().Render(tuiIndent), VerCurrentStyle.Render("ⓘ "+truncatePlain(item.CurrentVer, m.ver*2)))
+	case model.StatusUnverified:
+		return joinRow(namePlain, lipgloss.NewStyle().Render(tuiIndent), ItemErrorStyle.Render("⚠ unverified — "+truncatePlain(item.CurrentVer, m.ver*2)))
 	default:
 		return namePlain
 	}
@@ -771,7 +798,7 @@ func (s *State) renderConfirmFooter() string {
 func hasCleanupItems(s *model.SourceSummary) bool {
 	for _, it := range s.Items {
 		switch it.Status {
-		case model.StatusCleanCandidate, model.StatusCleaning, model.StatusCleaned, model.StatusError:
+		case model.StatusCleanCandidate, model.StatusCleaning, model.StatusCleaned, model.StatusError, model.StatusInfo, model.StatusUnverified:
 			return true
 		}
 	}

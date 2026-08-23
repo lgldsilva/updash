@@ -79,7 +79,7 @@ func TestScanSource_BuildSummary(t *testing.T) {
 		err: errors.New("scan warning"),
 	}
 	sum := ScanSource(context.Background(), src, model.PlatformInfo{})
-	if sum.Total != 3 || sum.Outdated != 1 || sum.OK != 1 || sum.ErrorCount < 2 {
+	if sum.Total != 3 || sum.Outdated != 1 || sum.OK != 1 || sum.ErrorCount != 1 {
 		t.Fatalf("unexpected summary: %+v", sum)
 	}
 	if sum.Reclaimable != "1G" {
@@ -98,5 +98,12 @@ func TestScanSource_ReclaimableMerge(t *testing.T) {
 	sum := ScanSource(context.Background(), src, model.PlatformInfo{})
 	if sum.Reclaimable != "1G + 2G" {
 		t.Fatalf("reclaimable = %q", sum.Reclaimable)
+	}
+}
+
+func TestBuildSummary_DoesNotDoubleCountSourceAndItemError(t *testing.T) {
+	src := stubSource{cat: model.CatNpm, items: []*model.Item{{Status: model.StatusError}}, err: errors.New("bad scan")}
+	if got := ScanSource(t.Context(), src, model.PlatformInfo{}).ErrorCount; got != 1 {
+		t.Fatalf("ErrorCount=%d, want 1", got)
 	}
 }

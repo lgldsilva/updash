@@ -61,9 +61,7 @@ func OutputNeedsPassword(s string) bool {
 	return strings.Contains(s, "sudo") ||
 		strings.Contains(s, "password") ||
 		strings.Contains(s, "administrator") ||
-		strings.Contains(s, "tty") ||
-		strings.Contains(s, "killed") ||
-		strings.Contains(s, "signal")
+		strings.Contains(s, "tty")
 }
 
 func itemNeedsPasswordHint(item *model.Item) bool {

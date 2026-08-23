@@ -19,6 +19,12 @@ func TestApplyAgentOutdated(t *testing.T) {
 		t.Fatal("same version should stay OK")
 	}
 
+	newer := &model.Item{Name: "newer", CurrentVer: "2.0.0", Status: model.StatusOK}
+	ApplyAgentOutdated(newer, "1.9.0")
+	if newer.Status != model.StatusOK {
+		t.Fatalf("installed newer version must not be outdated: %+v", newer)
+	}
+
 	inst := &model.Item{Name: "y", CurrentVer: "installed", Status: model.StatusOK}
 	ApplyAgentOutdated(inst, "2.0.0")
 	if inst.Status != model.StatusOutdated {

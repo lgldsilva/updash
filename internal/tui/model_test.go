@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"testing"
@@ -635,6 +636,156 @@ func TestCollectOutdatedItems_RespectsAppliedFilter(t *testing.T) {
 	got := s.collectOutdatedItems(false)
 	if len(got) != 1 || got[0].Name != "btop" {
 		t.Fatalf("expected filter to keep only btop, got %+v", got)
+	}
+}
+
+func TestRunUpdateSelected_BlocksPartialCategoryGlobalPlan(t *testing.T) {
+	s := New()
+	first := &model.Item{Name: "git", Category: model.CatApt, Status: model.StatusOutdated, Selected: true}
+	second := &model.Item{Name: "curl", Category: model.CatApt, Status: model.StatusOutdated}
+	s.Summaries = []*model.SourceSummary{{
+		Category: model.CatApt, Label: "APT", Items: []*model.Item{first, second},
+	}}
+
+	s.runUpdateSelected()
+	if s.ShowConfirm {
+		t.Fatal("partial selection for a category-global plan must not reach confirmation")
+	}
+	if !strings.Contains(s.LastSummary, "select all") {
+		t.Fatalf("missing actionable partial-selection explanation: %q", s.LastSummary)
+	}
+}
+
+func TestRunUpdateSelected_AllowsCompleteCategoryGlobalPlanOnce(t *testing.T) {
+	s := New()
+	first := &model.Item{Name: "git", Category: model.CatApt, Status: model.StatusOutdated, Selected: true}
+	second := &model.Item{Name: "curl", Category: model.CatApt, Status: model.StatusOutdated, Selected: true}
+	s.Summaries = []*model.SourceSummary{{
+		Category: model.CatApt, Label: "APT", Items: []*model.Item{first, second},
+	}}
+
+	s.runUpdateSelected()
+	if !s.ShowConfirm || len(s.PendingUpdateItems) != 2 {
+		t.Fatalf("complete category selection must reach one confirmation, state=%+v", s)
+	}
+}
+
+func TestRunUpdateSelected_BlocksUnverifiedSource(t *testing.T) {
+	s := New()
+	s.Summaries = []*model.SourceSummary{{
+		Category: model.CatBrew,
+		Label:    "Homebrew",
+		Items: []*model.Item{
+			{Name: "git", Category: model.CatBrew, Status: model.StatusOutdated, Selected: true},
+			{Name: "verification", Category: model.CatBrew, Status: model.StatusUnverified, CurrentVer: "registry unavailable"},
+		},
+	}}
+
+	s.runUpdateSelected()
+	if s.ShowConfirm || !strings.Contains(strings.ToLower(s.LastSummary), "unverified") {
+		t.Fatalf("unverified source must block update confirmation: state=%+v", s)
+	}
+}
+
+func TestRunCleanSelected_BlocksUnverifiedSource(t *testing.T) {
+	s := New()
+	s.ActiveTab = model.TabCleanup
+	s.CleanItems = []*model.SourceSummary{{
+		Category: model.CatCache,
+		Label:    "npm cache",
+		Items: []*model.Item{
+			{Name: "cache", Category: model.CatCache, Status: model.StatusCleanCandidate, Selected: true},
+			{Name: "verification", Category: model.CatCache, Status: model.StatusUnverified, CurrentVer: "permission denied"},
+		},
+	}}
+
+	s.runCleanSelected()
+	if s.ShowConfirm || !strings.Contains(strings.ToLower(s.LastSummary), "unverified") {
+		t.Fatalf("unverified source must block cleanup confirmation: state=%+v", s)
+	}
+}
+
+func TestRunUpdateSelected_BlocksErroredSource(t *testing.T) {
+	s := New()
+	s.Summaries = []*model.SourceSummary{{
+		Category: model.CatBrew, Label: "Homebrew",
+		Items: []*model.Item{{Name: "git", Category: model.CatBrew, Status: model.StatusOutdated, Selected: true}, {Name: "scan", Category: model.CatBrew, Status: model.StatusError, CurrentVer: "timeout"}},
+	}}
+	s.runUpdateSelected()
+	if s.ShowConfirm || !strings.Contains(strings.ToLower(s.LastSummary), "error") {
+		t.Fatalf("errored source must block update confirmation: state=%+v", s)
+	}
+}
+
+type preparedBatchStub struct {
+	category model.Category
+	items    []*model.Item
+	plans    []updater.CommandPlan
+}
+
+func (b *preparedBatchStub) Category() model.Category     { return b.category }
+func (b *preparedBatchStub) Items() []*model.Item         { return b.items }
+func (b *preparedBatchStub) Plans() []updater.CommandPlan { return b.plans }
+
+func TestNeedsElevationPrompt_UsesPreparedNpmPlan(t *testing.T) {
+	original := prepareUpdateBatch
+	t.Cleanup(func() { prepareUpdateBatch = original })
+	prepareUpdateBatch = func(_ context.Context, cat model.Category, items []*model.Item) (preparedUpdateBatch, error) {
+		return &preparedBatchStub{category: cat, items: items, plans: []updater.CommandPlan{{Name: "npm", Elevated: true}}}, nil
+	}
+	s := New()
+	s.Summaries = []*model.SourceSummary{{Category: model.CatNpm, Label: "npm", Items: []*model.Item{{Name: "pkg", Category: model.CatNpm, Status: model.StatusOutdated}}}}
+	if !s.showUpdateConfirm([]*model.Item{{Name: "pkg", Category: model.CatNpm, Status: model.StatusOutdated}}) {
+		t.Fatal("expected elevated npm plan to reach confirmation")
+	}
+	if !s.needsElevationPrompt() {
+		t.Fatal("elevated npm plan must request password before confirmation")
+	}
+}
+
+func TestShowUpdateConfirm_BlocksPlannerError(t *testing.T) {
+	original := prepareUpdateBatch
+	t.Cleanup(func() { prepareUpdateBatch = original })
+	prepareUpdateBatch = func(context.Context, model.Category, []*model.Item) (preparedUpdateBatch, error) {
+		return nil, errTest("prefix unavailable")
+	}
+	s := New()
+	s.Summaries = []*model.SourceSummary{{Category: model.CatNpm, Label: "npm", Items: []*model.Item{{Name: "pkg", Category: model.CatNpm, Status: model.StatusOutdated}}}}
+	item := &model.Item{Name: "pkg", Category: model.CatNpm, Status: model.StatusOutdated}
+	if s.showUpdateConfirm([]*model.Item{item}) || s.ShowConfirm || !strings.Contains(s.LastSummary, "prefix unavailable") {
+		t.Fatalf("planner error must block before confirmation: state=%+v", s)
+	}
+}
+
+func TestUpdateConfirmation_PreparesOnceAndExecutesSameBatch(t *testing.T) {
+	originalPrepare, originalExecute := prepareUpdateBatch, executePreparedBatch
+	t.Cleanup(func() {
+		prepareUpdateBatch = originalPrepare
+		executePreparedBatch = originalExecute
+	})
+	prepared := &preparedBatchStub{plans: []updater.CommandPlan{{Name: "npm --prefix", Scope: updater.CommandScopeExact}}}
+	prepareCalls := 0
+	prepareUpdateBatch = func(_ context.Context, cat model.Category, items []*model.Item) (preparedUpdateBatch, error) {
+		prepareCalls++
+		prepared.category, prepared.items = cat, items
+		return prepared, nil
+	}
+	var executed preparedUpdateBatch
+	executePreparedBatch = func(_ context.Context, batch preparedUpdateBatch, _ updater.Options) []*updater.Result {
+		executed = batch
+		return []*updater.Result{{Item: batch.Items()[0], Success: true}}
+	}
+	s := New()
+	s.Summaries = []*model.SourceSummary{{Category: model.CatNpm, Label: "npm", Items: []*model.Item{{Name: "pkg", Category: model.CatNpm, Status: model.StatusOutdated}}}}
+	if !s.showUpdateConfirm([]*model.Item{{Name: "pkg", Category: model.CatNpm, Status: model.StatusOutdated}}) {
+		t.Fatalf("confirmation unexpectedly blocked: %s", s.LastSummary)
+	}
+	if prepareCalls != 1 || len(s.PendingUpdateBatches) != 1 || s.PendingUpdateBatches[0].batch != prepared {
+		t.Fatalf("confirmation must retain its single prepared batch: calls=%d groups=%d", prepareCalls, len(s.PendingUpdateBatches))
+	}
+	results := execUpdateBatch(workerEnv{ctx: context.Background()}, s.PendingUpdateBatches[0], nil)
+	if len(results) != 1 || executed != prepared || prepareCalls != 1 {
+		t.Fatalf("executor must receive retained batch without replanning: results=%d executed=%p prepared=%p calls=%d", len(results), executed, prepared, prepareCalls)
 	}
 }
 

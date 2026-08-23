@@ -43,6 +43,15 @@ func TestNpmGlobalUpdateArgs_BuildsAndDedups(t *testing.T) {
 	}
 }
 
+func TestNpmGlobalUpdateArgs_EmptyNeverBuildsBareGlobalUpdate(t *testing.T) {
+	if got := npmGlobalUpdateArgs(nil); len(got) != 0 {
+		t.Fatalf("npmGlobalUpdateArgs(nil) = %v, want no command", got)
+	}
+	if got := npmGlobalUpdateArgs([]*model.Item{{Name: ""}}); len(got) != 0 {
+		t.Fatalf("npmGlobalUpdateArgs(empty name) = %v, want no command", got)
+	}
+}
+
 // The composed pipeline (partition -> args) must never emit a protected name.
 func TestNpmPipeline_ExcludesProtectedFromArgs(t *testing.T) {
 	items := []*model.Item{

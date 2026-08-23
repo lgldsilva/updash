@@ -5,10 +5,13 @@ import (
 	"context"
 	"os"
 	"sort"
+	"strings"
 	"sync"
 
 	"github.com/lgldsilva/updash/internal/model"
 )
+
+const maxConcurrentSources = 6
 
 // A Source scans one category of packages.
 type Source interface {
@@ -24,23 +27,51 @@ type Source interface {
 
 // RunAll scans every applicable source in parallel and returns summaries.
 func RunAll(ctx context.Context, plat model.PlatformInfo, includeCleanup bool) []*model.SourceSummary {
-	sources := enabledSources(plat, includeCleanup)
+	return RunAllFiltered(ctx, plat, includeCleanup, nil)
+}
+
+// RunAllFiltered scans only selected source categories. Empty categories keeps
+// RunAll's historical behavior, while the worker limit avoids an unbounded
+// burst of external commands on a full scan.
+func RunAllFiltered(ctx context.Context, plat model.PlatformInfo, includeCleanup bool, categories []model.Category) []*model.SourceSummary {
+	return runAllFiltered(ctx, plat, includeCleanup, categories, false)
+}
+
+// RunAllFilteredForCleanup restricts logical aliases such as "brew" and
+// "docker" to their cleanup sources, instead of also launching their update
+// scanners. It is used by --clean --only.
+func RunAllFilteredForCleanup(ctx context.Context, plat model.PlatformInfo, categories []model.Category) []*model.SourceSummary {
+	return runAllFiltered(ctx, plat, true, categories, true)
+}
+
+func runAllFiltered(ctx context.Context, plat model.PlatformInfo, includeCleanup bool, categories []model.Category, cleanupOnly bool) []*model.SourceSummary {
+	sources := filterSources(enabledSources(plat, includeCleanup), categories, cleanupOnly)
 
 	var mu sync.Mutex
 	results := make([]*model.SourceSummary, 0, len(sources))
 	var wg sync.WaitGroup
-
-	for _, src := range sources {
+	jobs := make(chan Source)
+	workers := maxConcurrentSources
+	if len(sources) < workers {
+		workers = len(sources)
+	}
+	for range workers {
 		wg.Add(1)
-		s := src
 		go func() {
 			defer wg.Done()
-			summary := ScanSource(ctx, s, plat)
-			mu.Lock()
-			results = append(results, summary)
-			mu.Unlock()
+			for s := range jobs {
+				summary := ScanSource(ctx, s, plat)
+				mu.Lock()
+				results = append(results, summary)
+				mu.Unlock()
+			}
 		}()
 	}
+
+	for _, src := range sources {
+		jobs <- src
+	}
+	close(jobs)
 
 	wg.Wait()
 
@@ -49,6 +80,82 @@ func RunAll(ctx context.Context, plat model.PlatformInfo, includeCleanup bool) [
 	})
 
 	return results
+}
+
+func filterSources(sources []Source, categories []model.Category, cleanupOnly bool) []Source {
+	if len(categories) == 0 {
+		return sources
+	}
+	want := make(map[model.Category]struct{}, len(categories))
+	for _, cat := range categories {
+		want[cat] = struct{}{}
+	}
+	out := make([]Source, 0, len(categories))
+	for _, src := range sources {
+		if sourceMatchesSelection(src, want, cleanupOnly) {
+			out = append(out, src)
+		}
+	}
+	return out
+}
+
+func sourceMatchesSelection(src Source, want map[model.Category]struct{}, cleanupOnly bool) bool {
+	if cleanupOnly {
+		switch src.(type) {
+		case *BrewCleanSource:
+			_, ok := want[model.CatBrew]
+			return ok
+		case *DockerCleanSource:
+			_, ok := want[model.CatDocker]
+			return ok
+		}
+		if !IsCleanupCategory(src.Category()) {
+			return false
+		}
+		_, ok := want[src.Category()]
+		return ok
+	}
+	if _, ok := want[src.Category()]; ok {
+		return true
+	}
+	if _, ok := want[model.CatGHExt]; ok {
+		_, isAI := src.(*AIInfraSource)
+		return isAI
+	}
+	return false
+}
+
+// CanonicalCategory resolves an exact case-insensitive source category for
+// this host. Labels and package names are deliberately not aliases.
+func CanonicalCategory(plat model.PlatformInfo, includeCleanup bool, raw string) (model.Category, bool) {
+	want := model.Category(strings.ToLower(strings.TrimSpace(raw)))
+	if want == model.CatGHExt {
+		for _, src := range enabledSources(plat, includeCleanup) {
+			if _, ok := src.(*AIInfraSource); ok {
+				return want, true
+			}
+		}
+	}
+	if includeCleanup && (want == model.CatBrew || want == model.CatDocker) {
+		for _, src := range enabledSources(plat, includeCleanup) {
+			if want == model.CatBrew {
+				if _, ok := src.(*BrewCleanSource); ok {
+					return want, true
+				}
+			}
+			if want == model.CatDocker {
+				if _, ok := src.(*DockerCleanSource); ok {
+					return want, true
+				}
+			}
+		}
+	}
+	for _, src := range enabledSources(plat, includeCleanup) {
+		if strings.EqualFold(string(src.Category()), string(want)) {
+			return src.Category(), true
+		}
+	}
+	return "", false
 }
 
 // enabledSources returns scanners for the current platform.
