@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -196,7 +197,7 @@ func probeAgentItem(ctx context.Context, plat model.PlatformInfo, a agentDef) *m
 	it := &model.Item{
 		Name:     a.name,
 		Category: model.CatAgent,
-		Status:   model.StatusOK,
+		Status:   model.StatusInfo,
 	}
 	if a.npmPackage != "" {
 		it.PackageID = a.npmPackage
@@ -215,7 +216,11 @@ func probeAgentItem(ctx context.Context, plat model.PlatformInfo, a agentDef) *m
 		it.CurrentVer = statusInstalled
 		return it
 	}
-	it.CurrentVer = probeAgentVersion(ctx, a.verCmd)
+	var ok bool
+	it.CurrentVer, ok = probeAgentVersionOK(ctx, a.verCmd)
+	if !ok {
+		it.Status = model.StatusUnverified
+	}
 	return it
 }
 
@@ -297,6 +302,10 @@ func resolveRegistryLatestFrom(ctx context.Context, items []*model.Item, catalog
 		t := targets[i]
 		if latest := registryLatest(ctx, t.a); latest != "" {
 			ApplyAgentOutdated(t.it, latest)
+		} else if t.it.Status != model.StatusUnverified {
+			// The probe could not confirm a version: do not leave the item
+			// claiming an affirmative status it never verified.
+			t.it.Status = model.StatusUnverified
 		}
 	})
 }
@@ -335,8 +344,46 @@ func ApplyAgentOutdated(it *model.Item, latest string) {
 	if cur == lat {
 		return
 	}
+	if compareAgentVersions(cur, lat) >= 0 {
+		return
+	}
 	it.AvailableVer = lat
 	it.Status = model.StatusOutdated
+}
+
+// compareAgentVersions compares numeric semver cores. Unknown formats return
+// -1 so that a newly discovered version remains visible instead of hidden.
+func compareAgentVersions(current, latest string) int {
+	parse := func(v string) ([]int, bool) {
+		core := strings.SplitN(v, "-", 2)[0]
+		parts := strings.Split(core, ".")
+		if len(parts) != 3 {
+			return nil, false
+		}
+		out := make([]int, 3)
+		for i, p := range parts {
+			n, err := strconv.Atoi(p)
+			if err != nil {
+				return nil, false
+			}
+			out[i] = n
+		}
+		return out, true
+	}
+	a, oka := parse(current)
+	b, okb := parse(latest)
+	if !oka || !okb {
+		return -1
+	}
+	for i := range a {
+		if a[i] < b[i] {
+			return -1
+		}
+		if a[i] > b[i] {
+			return 1
+		}
+	}
+	return 0
 }
 
 func normalizeAgentVer(v string) string {
@@ -349,17 +396,17 @@ func normalizeAgentVer(v string) string {
 	return v
 }
 
-func probeAgentVersion(ctx context.Context, verCmd []string) string {
+func probeAgentVersionOK(ctx context.Context, verCmd []string) (string, bool) {
 	out, err := execCommandBudget(ctx, agentProbeTimeout, verCmd[0], verCmd[1:]...)
 	if err == nil {
-		return parseAgentVersion(string(out))
+		return parseAgentVersion(string(out)), true
 	}
 	if exitErr, ok := err.(*exec.ExitError); ok {
 		if v := parseAgentVersion(string(exitErr.Stderr)); v != "" {
-			return v
+			return v, true
 		}
 	}
-	return statusInstalled
+	return statusInstalled, false
 }
 
 // agentSkipVersionProbe avoids Electron/GUI CLIs that hang without a display (common over SSH).
@@ -433,11 +480,13 @@ func (s *AIInfraSource) Scan(ctx context.Context, plat model.PlatformInfo) ([]*m
 }
 
 func probeInfraItem(ctx context.Context, t infraTool) *model.Item {
-	it := &model.Item{Name: t.name, Category: t.category, Status: model.StatusOK}
+	it := &model.Item{Name: t.name, Category: t.category, Status: model.StatusInfo}
 	if len(t.verCmd) > 0 {
 		out, err := execCommandBudget(ctx, agentProbeTimeout, t.verCmd[0], t.verCmd[1:]...)
 		if err == nil {
 			it.CurrentVer = truncateVersionOutput(string(out))
+		} else {
+			it.Status = model.StatusUnverified
 		}
 		// A failed version probe must not skip the freshness check below.
 	}
@@ -451,10 +500,14 @@ func probeInfraItem(ctx context.Context, t infraTool) *model.Item {
 func applyInfraLatest(ctx context.Context, it *model.Item, t infraTool) {
 	out, err := execCommandBudget(ctx, infraLatestTimeout, t.latestCmd[0], t.latestCmd[1:]...)
 	if err != nil && len(out) == 0 {
-		return // probe unavailable — stay informational
+		it.Status = model.StatusUnverified
+		return
 	}
 	latest, hasUpdate := parseInfraLatest(t.latest, string(out))
 	if !hasUpdate {
+		if it.Status != model.StatusUnverified {
+			it.Status = model.StatusOK
+		}
 		return
 	}
 	it.Status = model.StatusOutdated

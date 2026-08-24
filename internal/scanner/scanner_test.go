@@ -37,6 +37,49 @@ func TestRunAll_BrewSource(t *testing.T) {
 	_ = items // brew source needs to run commands, tested via --check mode
 }
 
+func TestRunAllFiltered_OnlyRunsMatchingCategory(t *testing.T) {
+	plat := model.PlatformInfo{OS: "linux", HasNpm: true, HasPnpm: true}
+	results := RunAllFiltered(t.Context(), plat, false, []model.Category{model.CatNpm})
+	for _, result := range results {
+		if result.Category != model.CatNpm {
+			t.Fatalf("unfiltered source ran: %s", result.Category)
+		}
+	}
+}
+
+func TestCanonicalCategory_RoutesEmittedAndCleanupCategories(t *testing.T) {
+	plat := model.PlatformInfo{OS: "linux", HasBrew: true, HasDocker: true}
+	cases := map[string]model.Category{
+		"gh-ext": model.CatGHExt,
+		"BReW":   model.CatBrew,
+		"docker": model.CatDocker,
+	}
+	for raw, want := range cases {
+		got, ok := CanonicalCategory(plat, true, raw)
+		if !ok || got != want {
+			t.Fatalf("CanonicalCategory(%q)=(%q,%v), want (%q,true)", raw, got, ok, want)
+		}
+	}
+}
+
+func TestFilterSources_CleanupAliasSelectsOnlyPhysicalCleaner(t *testing.T) {
+	sources := []Source{&BrewSource{}, &BrewCleanSource{}, &DockerCleanSource{}, &AIInfraSource{}}
+	got := filterSources(sources, []model.Category{model.CatBrew}, true)
+	if len(got) != 1 {
+		t.Fatalf("got %d sources, want one", len(got))
+	}
+	if _, ok := got[0].(*BrewCleanSource); !ok {
+		t.Fatalf("selected %T, want BrewCleanSource", got[0])
+	}
+	got = filterSources(sources, []model.Category{model.CatGHExt}, false)
+	if len(got) != 1 {
+		t.Fatalf("gh-ext got %d sources, want one", len(got))
+	}
+	if _, ok := got[0].(*AIInfraSource); !ok {
+		t.Fatalf("selected %T, want AIInfraSource", got[0])
+	}
+}
+
 func TestSources_AllHaveCategoryLabelIcon(t *testing.T) {
 	sources := []Source{
 		&BrewSource{},

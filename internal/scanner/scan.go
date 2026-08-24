@@ -103,9 +103,9 @@ func buildSummary(src Source, items []*model.Item, err error) *model.SourceSumma
 		Icon:     src.Icon(),
 		Items:    items,
 	}
-	if err != nil {
-		summary.ErrorCount = 1
-	}
+	// A source error is represented by an error item when possible. Count the
+	// source-level error only when no item already communicates it.
+	hasItemError := false
 	for _, it := range items {
 		summary.Total++
 		switch it.Status {
@@ -114,7 +114,12 @@ func buildSummary(src Source, items []*model.Item, err error) *model.SourceSumma
 		case model.StatusOK:
 			summary.OK++
 		case model.StatusError:
+			hasItemError = true
 			summary.ErrorCount++
+		case model.StatusUnverified:
+			summary.Unverified++
+		case model.StatusInfo:
+			summary.Info++
 		}
 		if it.Reclaimable != "" && it.Reclaimable != "0 versions" {
 			if summary.Reclaimable != "" {
@@ -123,6 +128,9 @@ func buildSummary(src Source, items []*model.Item, err error) *model.SourceSumma
 				summary.Reclaimable = it.Reclaimable
 			}
 		}
+	}
+	if err != nil && !hasItemError {
+		summary.ErrorCount++
 	}
 	return summary
 }

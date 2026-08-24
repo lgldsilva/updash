@@ -11,13 +11,17 @@ import (
 
 // CheckReport is the machine-readable form of --check (and --check --json).
 type CheckReport struct {
-	Platform  string         `json:"platform,omitempty"`
-	Outdated  int            `json:"outdated"`
-	Cleanable int            `json:"cleanable"`
-	Updates   []ReportItem   `json:"updates"`
-	Cleanup   []ReportItem   `json:"cleanup"`
-	Sources   []ReportSource `json:"sources,omitempty"`
-	ElapsedMS int64          `json:"elapsed_ms,omitempty"`
+	Platform   string         `json:"platform,omitempty"`
+	Outdated   int            `json:"outdated"`
+	Cleanable  int            `json:"cleanable"`
+	Errors     int            `json:"errors"`
+	Unverified int            `json:"unverified"`
+	Info       int            `json:"info"`
+	Problems   []ReportItem   `json:"problems,omitempty"`
+	Updates    []ReportItem   `json:"updates"`
+	Cleanup    []ReportItem   `json:"cleanup"`
+	Sources    []ReportSource `json:"sources,omitempty"`
+	ElapsedMS  int64          `json:"elapsed_ms,omitempty"`
 }
 
 // ReportItem is one outdated or cleanable entity.
@@ -35,23 +39,87 @@ type ReportItem struct {
 
 // ReportSource summarizes one scanner category.
 type ReportSource struct {
-	Category string `json:"category"`
-	Label    string `json:"label"`
-	Outdated int    `json:"outdated"`
-	Total    int    `json:"total"`
-	Kind     string `json:"kind"` // "update" or "cleanup"
+	Category   string `json:"category"`
+	Label      string `json:"label"`
+	Outdated   int    `json:"outdated"`
+	Total      int    `json:"total"`
+	Kind       string `json:"kind"` // "update" or "cleanup"
+	Errors     int    `json:"errors"`
+	Unverified int    `json:"unverified"`
+	Info       int    `json:"info"`
 }
 
 // BuildCheckReport aggregates scan results into a stable JSON structure.
 func BuildCheckReport(updates, cleanup []*model.SourceSummary) CheckReport {
 	rep := CheckReport{
-		Updates: make([]ReportItem, 0),
-		Cleanup: make([]ReportItem, 0),
-		Sources: make([]ReportSource, 0),
+		Updates:  make([]ReportItem, 0),
+		Cleanup:  make([]ReportItem, 0),
+		Problems: make([]ReportItem, 0),
+		Sources:  make([]ReportSource, 0),
 	}
 	rep.Outdated = appendStatusItems(&rep.Updates, &rep.Sources, updates, model.StatusOutdated, "update")
 	rep.Cleanable = appendStatusItems(&rep.Cleanup, &rep.Sources, cleanup, model.StatusCleanCandidate, "cleanup")
+	rep.Errors, rep.Unverified = appendProblems(&rep.Problems, updates, cleanup)
+	rep.Info = countStatus(model.StatusInfo, updates, cleanup)
 	return rep
+}
+
+func countStatus(status model.Status, groups ...[]*model.SourceSummary) int {
+	n := 0
+	for _, summaries := range groups {
+		for _, s := range summaries {
+			if s != nil {
+				for _, it := range s.Items {
+					if it != nil && it.Status == status {
+						n++
+					}
+				}
+			}
+		}
+	}
+	return n
+}
+
+func appendProblems(dest *[]ReportItem, groups ...[]*model.SourceSummary) (errors, unverified int) {
+	for _, summaries := range groups {
+		for _, s := range summaries {
+			if s == nil {
+				continue
+			}
+			for _, it := range s.Items {
+				if it == nil {
+					continue
+				}
+				switch it.Status {
+				case model.StatusError:
+					errors++
+					*dest = append(*dest, itemToReport(it))
+				case model.StatusUnverified:
+					unverified++
+					*dest = append(*dest, itemToReport(it))
+				}
+			}
+			// A source error without an error item is still a reportable problem.
+			if s.ErrorCount > 0 && !summaryHasStatus(s, model.StatusError) {
+				errors += s.ErrorCount
+				*dest = append(*dest, ReportItem{Name: s.Label, Category: string(s.Category), Status: model.StatusError.String()})
+			}
+			if s.Unverified > 0 && !summaryHasStatus(s, model.StatusUnverified) {
+				unverified += s.Unverified
+				*dest = append(*dest, ReportItem{Name: s.Label, Category: string(s.Category), Status: model.StatusUnverified.String()})
+			}
+		}
+	}
+	return errors, unverified
+}
+
+func summaryHasStatus(s *model.SourceSummary, status model.Status) bool {
+	for _, it := range s.Items {
+		if it != nil && it.Status == status {
+			return true
+		}
+	}
+	return false
 }
 
 // appendStatusItems collects items matching status from summaries into dest and sources.
@@ -69,11 +137,14 @@ func appendStatusItems(
 			continue
 		}
 		*sources = append(*sources, ReportSource{
-			Category: string(s.Category),
-			Label:    s.Label,
-			Outdated: n,
-			Total:    s.Total,
-			Kind:     kind,
+			Category:   string(s.Category),
+			Label:      s.Label,
+			Outdated:   n,
+			Total:      s.Total,
+			Kind:       kind,
+			Errors:     s.ErrorCount,
+			Unverified: s.Unverified,
+			Info:       s.Info,
 		})
 		total += n
 	}
@@ -141,6 +212,18 @@ func ExitCodeForCheck(cfg Config, outdated, cleanable int) int {
 		return 1
 	}
 	return 0
+}
+
+// ExitCodeForReport applies inconclusive scan precedence over strict findings.
+func ExitCodeForReport(cfg Config, rep CheckReport) int {
+	if rep.Errors > 0 || rep.Unverified > 0 {
+		return 2
+	}
+	return ExitCodeForCheck(cfg, rep.Outdated, rep.Cleanable)
+}
+
+func ExitCodeForSummaries(cfg Config, updates, cleanup []*model.SourceSummary) int {
+	return ExitCodeForReport(cfg, BuildCheckReport(updates, cleanup))
 }
 
 // ValidateJSONMode reports whether --json is only valid with check (or alone defaults).

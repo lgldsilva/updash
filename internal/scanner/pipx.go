@@ -26,7 +26,7 @@ func (s *PipxSource) Scan(ctx context.Context, plat model.PlatformInfo) ([]*mode
 
 	output := string(out)
 	if !strings.Contains(output, "venvs") {
-		return []*model.Item{okItem(binPipx, model.CatPipx)}, nil
+		return []*model.Item{{Name: binPipx, Category: model.CatPipx, Status: model.StatusError, CurrentVer: "invalid pipx JSON"}}, nil
 	}
 
 	// Parse JSON manually since structure is nested
@@ -38,7 +38,7 @@ func (s *PipxSource) Scan(ctx context.Context, plat model.PlatformInfo) ([]*mode
 		} `json:"venvs"`
 	}
 	if err := json.Unmarshal([]byte(output), &data); err != nil {
-		return []*model.Item{okItem(binPipx, model.CatPipx)}, nil
+		return []*model.Item{{Name: binPipx, Category: model.CatPipx, Status: model.StatusError, CurrentVer: "invalid pipx JSON"}}, nil
 	}
 
 	var items []*model.Item
@@ -47,12 +47,12 @@ func (s *PipxSource) Scan(ctx context.Context, plat model.PlatformInfo) ([]*mode
 			Name:       name,
 			Category:   model.CatPipx,
 			CurrentVer: venv.Metadata.ItemVersion,
-			Status:     model.StatusOK, // We'll mark all as OK; upgrade-all is simple
+			Status:     model.StatusInfo,
 		})
 	}
 
 	if len(items) == 0 {
-		items = append(items, okItem(binPipx, model.CatPipx))
+		items = append(items, &model.Item{Name: binPipx, Category: model.CatPipx, Status: model.StatusInfo, CurrentVer: statusUpToDate})
 	}
 
 	return items, nil

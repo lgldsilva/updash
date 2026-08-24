@@ -78,6 +78,33 @@ func TestApplyUpdateResults_SurvivesRescan(t *testing.T) {
 	}
 }
 
+func TestApplyUpdateResultsForSource_UsesStableIdentityAndBlocksCollisions(t *testing.T) {
+	s := New()
+	first := &model.Item{Name: "first name", PackageID: "pkg-id", Category: model.CatNpm, Status: model.StatusOutdated}
+	second := &model.Item{Name: "second name", PackageID: "pkg-id", Category: model.CatNpm, Status: model.StatusOutdated}
+	s.Summaries = []*model.SourceSummary{
+		{Category: model.CatNpm, Label: "first", Items: []*model.Item{first}},
+		{Category: model.CatNpm, Label: "second", Items: []*model.Item{second}},
+	}
+
+	result := &model.Item{Name: "renamed", PackageID: "pkg-id", Category: model.CatNpm, Status: model.StatusDone}
+	if ambiguous := s.ApplyUpdateResultsForSource([]*updater.Result{{Item: result, Success: true}}, SourceIdentity{Category: model.CatNpm, Label: "first"}); ambiguous != 0 {
+		t.Fatalf("source-qualified result unexpectedly ambiguous: %d", ambiguous)
+	}
+	if first.Status != model.StatusDone || second.Status != model.StatusOutdated {
+		t.Fatalf("source-qualified result updated wrong row: first=%v second=%v", first.Status, second.Status)
+	}
+
+	second.Status = model.StatusOutdated
+	first.Status = model.StatusOutdated
+	if ambiguous := s.ApplyUpdateResultsForSource([]*updater.Result{{Item: result, Success: true}}, SourceIdentity{}); ambiguous != 1 {
+		t.Fatalf("unqualified duplicate must be blocked, ambiguous=%d", ambiguous)
+	}
+	if first.Status != model.StatusOutdated || second.Status != model.StatusOutdated {
+		t.Fatal("ambiguous result must not mutate either row")
+	}
+}
+
 func TestApplyCleanResults(t *testing.T) {
 	s := New()
 	it := &model.Item{Name: "brew-cache", Category: model.CatCache, Status: model.StatusCleanCandidate}
@@ -95,12 +122,26 @@ func TestApplyCleanResults(t *testing.T) {
 
 func TestMarkItemsUpdating(t *testing.T) {
 	s, items := seedSummaries(2)
-	s.MarkItemsUpdating(model.CatNpm, []string{items[0].Name, "missing"})
+	s.MarkItemsUpdating(SourceIdentity{Category: model.CatNpm, Label: "npm"}, []ItemIdentity{itemIdentity(items[0]), {Category: model.CatNpm, Name: "missing"}})
 	if items[0].Status != model.StatusUpdating {
 		t.Fatal("live item should be marked updating")
 	}
 	if items[1].Status != model.StatusOutdated {
 		t.Fatal("untouched item must stay outdated")
+	}
+}
+
+func TestResolveSource_SeparatesSourceAndOperationalCategories(t *testing.T) {
+	item := &model.Item{Name: "gh-ext", PackageID: "owner/ext", Category: model.CatGHExt, Status: model.StatusOutdated}
+	summaries := []*model.SourceSummary{{
+		Category: model.CatAI,
+		Label:    "AI tools",
+		Items:    []*model.Item{item},
+	}}
+
+	source, ok := resolveSource(summaries, copyItems([]*model.Item{item})[0])
+	if !ok || source.Category != model.CatAI || source.Label != "AI tools" {
+		t.Fatalf("source identity must be independent from operational category: source=%+v ok=%v", source, ok)
 	}
 }
 

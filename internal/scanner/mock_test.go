@@ -268,6 +268,9 @@ func TestWingetScan_Outdated(t *testing.T) {
 	if items[0].Name != "7zip" || items[0].AvailableVer != "24.01" {
 		t.Errorf("item[0] = %+v", items[0])
 	}
+	if items[0].PackageID != "7zip.7zip" {
+		t.Errorf("PackageID = %q", items[0].PackageID)
+	}
 }
 
 // --- Choco Scanner ---
@@ -528,6 +531,16 @@ func TestGoScan_GupUpToDate(t *testing.T) {
 	items, _ := src.Scan(context.Background(), model.PlatformInfo{HasGup: true})
 	if len(items) != 1 || items[0].Status != model.StatusOK {
 		t.Errorf("expected OK, got %+v", items)
+	}
+}
+
+func TestGoScan_GupFailureIsError(t *testing.T) {
+	enableMocks()
+	defer disableMocks()
+	setMock("gup", []string{"update", "--dry-run"}, "", errors.New("gup unavailable"))
+	items, _ := (&GoSource{}).Scan(t.Context(), model.PlatformInfo{HasGup: true})
+	if len(items) != 1 || items[0].Status != model.StatusError {
+		t.Fatalf("gup failure=%+v", items)
 	}
 }
 
@@ -882,8 +895,8 @@ func TestGoScan_NoGup_Empty(t *testing.T) {
 
 	src := &GoSource{}
 	items, _ := src.Scan(context.Background(), model.PlatformInfo{HasGo: true, HasGup: false})
-	if len(items) != 1 || items[0].Status != model.StatusOK {
-		t.Errorf("expected OK, got %+v", items)
+	if len(items) != 1 || items[0].Status != model.StatusInfo {
+		t.Errorf("expected informational inventory, got %+v", items)
 	}
 }
 
@@ -998,8 +1011,8 @@ func TestNpmScan_ParseError(t *testing.T) {
 
 	src := &NpmSource{}
 	items, _ := src.Scan(context.Background(), model.PlatformInfo{})
-	if len(items) != 1 || items[0].Status != model.StatusOK {
-		t.Errorf("expected OK on parse error, got %+v", items)
+	if len(items) != 1 || items[0].Status != model.StatusError {
+		t.Errorf("expected error on parse error, got %+v", items)
 	}
 }
 
@@ -1016,8 +1029,8 @@ func TestWingetScan_TextFallback(t *testing.T) {
 	setMock("winget", []string{"upgrade", "--json"}, "error", jsonErr)
 	// The text fallback
 	out := `Name   Id          Version    Available   Source
-7zip   7zip.7zip   23.01      24.01       winget
-git    Git.Git     2.42.0     2.45.0      winget`
+	7-Zip Utility  7zip.7zip   23.01      24.01       winget
+	Git             Git.Git     2.42.0     2.45.0      winget`
 	setMock("winget", []string{"upgrade"}, out, nil)
 
 	src := &WingetSource{}
@@ -1028,6 +1041,9 @@ git    Git.Git     2.42.0     2.45.0      winget`
 
 	if len(items) != 2 {
 		t.Fatalf("expected 2 items, got %d", len(items))
+	}
+	if items[0].Name != "7-Zip Utility" || items[0].PackageID != "7zip.7zip" {
+		t.Fatalf("text item lost name/id: %+v", items[0])
 	}
 }
 

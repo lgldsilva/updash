@@ -20,6 +20,8 @@ func TestStatus_String(t *testing.T) {
 		{model.StatusCleanCandidate, "clean-candidate"},
 		{model.StatusCleaning, "cleaning"},
 		{model.StatusCleaned, "cleaned"},
+		{model.StatusInfo, "info"},
+		{model.StatusUnverified, "unverified"},
 	}
 
 	for _, tt := range tests {

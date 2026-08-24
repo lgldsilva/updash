@@ -14,9 +14,9 @@ import (
 
 func restoreHooks(t *testing.T) {
 	t.Helper()
-	od, os, oc, ou, op, oe, on, opm, of, oi := detectPlatform, runScannerAll, cleanOneFn, updateCategory, primeMacSudo, canElevateNP, nativeMacAvail, promptMacSess, formatBytesFn, stdinIsTTYFn
+	od, os, osf, osfc, oc, ou, opb, epb, op, oe, on, opm, of, oi := detectPlatform, runScannerAll, runScannerFiltered, runScannerFilteredForCleanup, cleanOneFn, updateCategory, prepareUpdateBatch, executePreparedBatch, primeMacSudo, canElevateNP, nativeMacAvail, promptMacSess, formatBytesFn, stdinIsTTYFn
 	t.Cleanup(func() {
-		detectPlatform, runScannerAll, cleanOneFn, updateCategory = od, os, oc, ou
+		detectPlatform, runScannerAll, runScannerFiltered, runScannerFilteredForCleanup, cleanOneFn, updateCategory, prepareUpdateBatch, executePreparedBatch = od, os, osf, osfc, oc, ou, opb, epb
 		primeMacSudo, canElevateNP, nativeMacAvail, promptMacSess = op, oe, on, opm
 		formatBytesFn, stdinIsTTYFn = of, oi
 	})
@@ -30,6 +30,15 @@ func fakeScan(updates, cleanup []*model.SourceSummary) {
 			all = append(all, cleanup...)
 		}
 		return all
+	}
+	runScannerFiltered = func(ctx context.Context, plat model.PlatformInfo, withCleanup bool, _ []model.Category) []*model.SourceSummary {
+		return runScannerAll(ctx, plat, withCleanup)
+	}
+	runScannerFilteredForCleanup = func(ctx context.Context, plat model.PlatformInfo, _ []model.Category) []*model.SourceSummary {
+		return runScannerAll(ctx, plat, true)
+	}
+	executePreparedBatch = func(ctx context.Context, batch *updater.PreparedUpdateBatch, opts updater.Options) []*updater.Result {
+		return updateCategory(ctx, batch.Category(), batch.Items(), opts)
 	}
 	detectPlatform = func() model.PlatformInfo { return model.PlatformInfo{OS: "linux", Distro: "ubuntu"} }
 }
@@ -133,6 +142,29 @@ func TestRunUpdate_emptyAndDryRun(t *testing.T) {
 	}
 }
 
+func TestRunUpdate_InfoOnlyUsesTruthfulNoopWording(t *testing.T) {
+	restoreHooks(t)
+	fakeScan([]*model.SourceSummary{{Category: model.CatBun, Items: []*model.Item{{Name: "typescript", Category: model.CatBun, Status: model.StatusInfo}}}}, nil)
+	out := captureStdout(t, func() { _, _, _ = RunUpdate(t.Context(), Config{}) })
+	if strings.Contains(out, "✓ Nothing to update") || !strings.Contains(out, "not affirmatively verified") {
+		t.Fatalf("output=%q", out)
+	}
+}
+
+func TestRunUpdate_InconclusivePreflightBlocksDryRunAndMutation(t *testing.T) {
+	restoreHooks(t)
+	item := &model.Item{Name: "git", Category: model.CatBrew, Status: model.StatusOutdated}
+	fakeScan([]*model.SourceSummary{{Category: model.CatBrew, Items: []*model.Item{item}}, {Category: model.CatNpm, Items: []*model.Item{{Name: "npm", Category: model.CatNpm, Status: model.StatusError}}}}, nil)
+	updateCategory = func(context.Context, model.Category, []*model.Item, updater.Options) []*updater.Result {
+		t.Fatal("mutation must not run after inconclusive preflight")
+		return nil
+	}
+	_, _, err := RunUpdate(t.Context(), Config{DryRun: true})
+	if ExitCode(err) != 2 {
+		t.Fatalf("ExitCode(%v) = %d, want 2", err, ExitCode(err))
+	}
+}
+
 func TestRunUpdate_withBatches(t *testing.T) {
 	restoreHooks(t)
 	item := &model.Item{Name: "ripgrep", Status: model.StatusOutdated, Category: model.CatBrew}
@@ -151,6 +183,12 @@ func TestRunUpdate_withBatches(t *testing.T) {
 	}
 	updateCategory = func(ctx context.Context, cat model.Category, items []*model.Item, opts updater.Options) []*updater.Result {
 		return []*updater.Result{{Item: items[0], Success: true}}
+	}
+	executePreparedBatch = func(ctx context.Context, batch *updater.PreparedUpdateBatch, opts updater.Options) []*updater.Result {
+		return updateCategory(ctx, batch.Category(), batch.Items(), opts)
+	}
+	executePreparedBatch = func(ctx context.Context, batch *updater.PreparedUpdateBatch, opts updater.Options) []*updater.Result {
+		return updateCategory(ctx, batch.Category(), batch.Items(), opts)
 	}
 	canElevateNP = func(ctx context.Context) bool { return true }
 
@@ -237,6 +275,29 @@ func TestRunClean_emptyDryRunAndSuccess(t *testing.T) {
 	})
 	if !strings.Contains(out, "freed") {
 		t.Fatalf("%q", out)
+	}
+}
+
+func TestRunClean_InfoOnlyUsesTruthfulNoopWording(t *testing.T) {
+	restoreHooks(t)
+	fakeScan(nil, []*model.SourceSummary{{Category: model.CatCache, Items: []*model.Item{{Name: "cache", Category: model.CatCache, Status: model.StatusInfo}}}})
+	out := captureStdout(t, func() { _, _, _ = RunClean(t.Context(), Config{}) })
+	if strings.Contains(out, "✓ Nothing to clean") || !strings.Contains(out, "not affirmatively verified") {
+		t.Fatalf("output=%q", out)
+	}
+}
+
+func TestRunClean_InconclusivePreflightBlocksDryRunAndMutation(t *testing.T) {
+	restoreHooks(t)
+	clean := &model.Item{Name: "cache", Category: model.CatCache, Status: model.StatusCleanCandidate}
+	fakeScan([]*model.SourceSummary{{Category: model.CatNpm, Items: []*model.Item{{Name: "npm", Category: model.CatNpm, Status: model.StatusUnverified}}}}, []*model.SourceSummary{{Category: model.CatCache, Items: []*model.Item{clean}}})
+	cleanOneFn = func(context.Context, *model.Item, cleaner.Options) *cleaner.Result {
+		t.Fatal("cleanup must not run after inconclusive preflight")
+		return nil
+	}
+	_, _, err := RunClean(t.Context(), Config{DryRun: true})
+	if ExitCode(err) != 2 {
+		t.Fatalf("ExitCode(%v) = %d, want 2", err, ExitCode(err))
 	}
 }
 
@@ -425,23 +486,32 @@ func TestRunCategoryUpdateSection_updatePath(t *testing.T) {
 	updateCategory = func(ctx context.Context, cat model.Category, items []*model.Item, opts updater.Options) []*updater.Result {
 		return []*updater.Result{{Item: items[0], Success: true}}
 	}
+	executePreparedBatch = func(ctx context.Context, batch *updater.PreparedUpdateBatch, opts updater.Options) []*updater.Result {
+		return updateCategory(ctx, batch.Category(), batch.Items(), opts)
+	}
 	var sess *elevate.Session
+	items := []*model.Item{{Name: "curl", Category: model.CatApt}}
+	batch, err := updater.PrepareUpdateBatch(context.Background(), model.CatApt, items)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sess = elevate.NewSession()
+	sess.SetPasswordless()
 	env := updateBatchEnv{
 		plat: model.PlatformInfo{OS: "linux"},
 		summaries: []*model.SourceSummary{
-			{Category: model.CatNpm, Icon: "📦", Label: "npm"},
+			{Category: model.CatApt, Icon: "📦", Label: "apt"},
 		},
+		prepared:    map[model.Category]*updater.PreparedUpdateBatch{model.CatApt: batch},
 		elevSession: &sess,
 	}
 	out := captureStdout(t, func() {
-		ok, _, _, _ := runCategoryUpdateSection(context.Background(), env, model.CatNpm, []*model.Item{
-			{Name: "left-pad", Category: model.CatNpm},
-		})
+		ok, _, _, _ := runCategoryUpdateSection(context.Background(), env, model.CatApt, items)
 		if ok != 1 {
 			t.Fatalf("ok=%d", ok)
 		}
 	})
-	if !strings.Contains(out, "npm") {
+	if !strings.Contains(out, "apt") {
 		t.Fatalf("%q", out)
 	}
 }
@@ -474,12 +544,17 @@ func TestRunUpdateBatches_linux(t *testing.T) {
 		return []*updater.Result{{Item: items[0], Success: true}}
 	}
 	canElevateNP = func(context.Context) bool { return true }
+	batch, err := updater.PrepareUpdateBatch(context.Background(), model.CatNpm, []*model.Item{{Name: "x", Category: model.CatNpm}})
+	if err != nil {
+		t.Fatal(err)
+	}
 	out := captureStdout(t, func() {
 		ok, _, _, _ := runUpdateBatches(
 			context.Background(),
 			model.PlatformInfo{OS: "linux"},
 			[]*model.SourceSummary{{Category: model.CatNpm, Icon: "n", Label: "npm"}},
 			[]*model.Item{{Name: "x", Category: model.CatNpm}},
+			map[model.Category]*updater.PreparedUpdateBatch{model.CatNpm: batch},
 			updater.Options{},
 			Config{},
 		)

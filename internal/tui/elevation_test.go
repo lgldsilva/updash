@@ -81,8 +81,37 @@ func TestGroupOutdatedByCategory(t *testing.T) {
 	if groups[0].category != model.CatBrew || len(groups[0].items) != 1 {
 		t.Fatalf("brew group: %+v", groups[0])
 	}
-	if label := categoryLabel(summaries, model.CatMAS); label != "Mac App Store" {
+	if label := groupOutdatedByCategory(summaries, copyItems(summaries[1].Items))[0].label(); label != "Mac App Store" {
 		t.Fatalf("label = %q", label)
+	}
+}
+
+func TestGroupOutdatedByCategory_CopiedItems(t *testing.T) {
+	// startUpdateAll gives workers copies so they cannot race the renderer.
+	// Grouping those copies by pointer identity against the live summaries used
+	// to yield no batches, making Update All silently do nothing.
+	summaries := []*model.SourceSummary{{
+		Category: model.CatBrew,
+		Label:    "Homebrew",
+		Items: []*model.Item{{
+			Name: "git", Category: model.CatBrew, Status: model.StatusOutdated,
+		}},
+	}}
+
+	groups := groupOutdatedByCategory(summaries, copyItems(summaries[0].Items))
+	if len(groups) != 1 || len(groups[0].items) != 1 {
+		t.Fatalf("copied targets must produce one update group, got %+v", groups)
+	}
+}
+
+func TestGroupOutdatedByCategory_BlocksAmbiguousIdentity(t *testing.T) {
+	item := &model.Item{Name: "same", PackageID: "stable-id", Category: model.CatNpm, Status: model.StatusOutdated}
+	summaries := []*model.SourceSummary{
+		{Category: model.CatNpm, Label: "first", Items: []*model.Item{item}},
+		{Category: model.CatNpm, Label: "second", Items: []*model.Item{{Name: "renamed", PackageID: "stable-id", Category: model.CatNpm, Status: model.StatusOutdated}}},
+	}
+	if groups := groupOutdatedByCategory(summaries, copyItems([]*model.Item{item})); len(groups) != 0 {
+		t.Fatalf("ambiguous source identity must be blocked, got %+v", groups)
 	}
 }
 

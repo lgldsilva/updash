@@ -20,8 +20,15 @@ func primeElevationSession(
 	items []*model.Item,
 	cfg Config,
 	sess **elevate.Session,
+	neededOverride ...bool,
 ) context.Context {
-	if !itemsNeedPasswordElevation(items, plat) {
+	needed := false
+	if len(neededOverride) > 0 {
+		needed = neededOverride[0]
+	} else {
+		needed = plannedItemsNeedElevation(items)
+	}
+	if !needed {
 		return ctx
 	}
 
@@ -66,6 +73,34 @@ func primeElevationSession(
 	return elevate.WithSession(ctx, s)
 }
 
+func plannedItemsNeedElevation(items []*model.Item) bool {
+	for cat, group := range groupByCategory(items) {
+		plans, err := updater.PlanUpdateCommands(cat, group)
+		if err == nil && updater.PlansRequireElevation(plans) {
+			return true
+		}
+	}
+	return false
+}
+
+func primeElevationSessionForBatches(ctx context.Context, plat model.PlatformInfo, batches map[model.Category]*updater.PreparedUpdateBatch, cfg Config, sess **elevate.Session) context.Context {
+	for _, batch := range batches {
+		if updater.PlansRequireElevation(batch.Plans()) {
+			return primeElevationSessionWithNeed(ctx, plat, true, cfg, sess)
+		}
+	}
+	return ctx
+}
+
+func primeElevationSessionWithNeed(ctx context.Context, plat model.PlatformInfo, needed bool, cfg Config, sess **elevate.Session) context.Context {
+	if !needed {
+		return ctx
+	}
+	// Delegate to the existing session path with a synthetic elevated item is
+	// avoided; its remaining behavior is intentionally shared below.
+	return primeElevationSession(ctx, plat, nil, cfg, sess, true)
+}
+
 func itemsNeedPasswordElevation(items []*model.Item, plat model.PlatformInfo) bool {
 	return elevate.ItemsNeedElevation(items, plat, false)
 }
@@ -93,6 +128,22 @@ func ensureCategoryElevation(
 		return elevate.WithSession(ctx, *sess), false, ""
 	}
 
+	return ctx, true, elevationSkipReason(cfg)
+}
+
+// ensurePlannedElevation follows the command plan rather than inferring
+// privilege from a category. This keeps --skip-password truthful for commands
+// such as npm whose elevation depends on the configured installation prefix.
+func ensurePlannedElevation(ctx context.Context, needed bool, cfg Config, sess **elevate.Session) (context.Context, bool, string) {
+	if !needed {
+		return ctx, false, ""
+	}
+	if *sess != nil && (*sess).Ready() {
+		if err := (*sess).Refresh(ctx); err != nil {
+			return ctx, true, fmt.Sprintf("sudo expired: %v", err)
+		}
+		return elevate.WithSession(ctx, *sess), false, ""
+	}
 	return ctx, true, elevationSkipReason(cfg)
 }
 

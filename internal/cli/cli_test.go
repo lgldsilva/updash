@@ -414,6 +414,11 @@ func TestRunCategoryUpdateSection_skipElevated(t *testing.T) {
 		elevSession: &sess,
 	}
 	items := []*model.Item{{Name: "curl", Category: model.CatApt}}
+	batch, err := updater.PrepareUpdateBatch(context.Background(), model.CatApt, items)
+	if err != nil {
+		t.Fatal(err)
+	}
+	env.prepared = map[model.Category]*updater.PreparedUpdateBatch{model.CatApt: batch}
 	out := captureStdout(t, func() {
 		ok, fail, skipped, res := runCategoryUpdateSection(context.Background(), env, model.CatApt, items)
 		if ok != 0 || fail != 0 || skipped != 1 || len(res) != 1 {

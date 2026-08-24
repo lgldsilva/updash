@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"os/exec"
+
+	"github.com/lgldsilva/updash/internal/elevate"
 )
 
 // outputRunner runs a command capturing stdout. Used by health/version probes
@@ -11,6 +13,12 @@ import (
 // execution without spinning up real CLIs.
 var outputRunner = func(ctx context.Context, name string, args ...string) ([]byte, error) {
 	return exec.CommandContext(ctx, name, args...).Output()
+}
+
+// npmPrefixRunner reports npm's global prefix. It is separate from
+// outputRunner so tests can verify sudo selection without affecting health probes.
+var npmPrefixRunner = func(ctx context.Context) ([]byte, error) {
+	return exec.CommandContext(ctx, npmCommand, "config", "get", "prefix").Output()
 }
 
 // lookPath resolves a binary on PATH. Variable so tests can stub it.
@@ -27,7 +35,23 @@ var lookPath = exec.LookPath
 var runUpdateCmd = func(ctx context.Context, opts Options, name string, args ...string) (stdout, stderr string, err error) {
 	cmd := exec.CommandContext(ctx, name, args...)
 	var out, er bytes.Buffer
-	if opts.Verbose || opts.Interactive {
+	if opts.Output != nil || opts.Verbose || opts.Interactive {
+		opts.ConfigureCmd(cmd)
+	} else {
+		cmd.Stdout = &out
+		cmd.Stderr = &er
+	}
+	err = cmd.Run()
+	return out.String(), er.String(), err
+}
+
+// runElevatedUpdateCmd is the equivalent subprocess seam for commands that
+// require sudo. It receives the unwrapped command so dry-run and execution
+// share the same CommandPlan representation.
+var runElevatedUpdateCmd = func(ctx context.Context, opts Options, name string, args ...string) (stdout, stderr string, err error) {
+	cmd := elevate.Sudo(ctx, name, args...)
+	var out, er bytes.Buffer
+	if opts.Output != nil || opts.Verbose || opts.Interactive {
 		opts.ConfigureCmd(cmd)
 	} else {
 		cmd.Stdout = &out

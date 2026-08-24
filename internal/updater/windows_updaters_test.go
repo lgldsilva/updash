@@ -13,9 +13,9 @@ func TestWingetUpgradeArgs(t *testing.T) {
 		want  []string
 	}{
 		{
-			name:  "empty falls back to --all",
+			name:  "empty is a no-op",
 			items: nil,
-			want:  []string{"--all"},
+			want:  nil,
 		},
 		{
 			name: "uses PackageID when present",
@@ -25,11 +25,9 @@ func TestWingetUpgradeArgs(t *testing.T) {
 			want: []string{"--exact", "--id", "Git.Git"},
 		},
 		{
-			name: "falls back to Name when PackageID empty",
-			items: []*model.Item{
-				{Name: "Notepad++"},
-			},
-			want: []string{"--exact", "--id", "Notepad++"},
+			name:  "does not use display name when PackageID is absent",
+			items: []*model.Item{{Name: "Notepad++"}},
+			want:  nil,
 		},
 		{
 			name: "multiple items",
@@ -37,7 +35,7 @@ func TestWingetUpgradeArgs(t *testing.T) {
 				{Name: "a", PackageID: "A.A"},
 				{Name: "b"},
 			},
-			want: []string{"--exact", "--id", "A.A", "--exact", "--id", "b"},
+			want: []string{"--exact", "--id", "A.A"},
 		},
 	}
 

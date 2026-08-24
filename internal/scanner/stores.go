@@ -22,7 +22,11 @@ func (s *PnpmSource) Scan(ctx context.Context, plat model.PlatformInfo) ([]*mode
 	if err != nil && len(out) == 0 {
 		return []*model.Item{errItem(binPnpm, model.CatPnpm)}, nil
 	}
-	return okOrOutdated(binPnpm, model.CatPnpm, ParsePnpmOutdatedGlobal(out)), nil
+	items, parseErr := parsePnpmOutdatedGlobal(out)
+	if parseErr != nil {
+		return []*model.Item{errItem(binPnpm, model.CatPnpm)}, nil
+	}
+	return okOrOutdated(binPnpm, model.CatPnpm, items), nil
 }
 
 // pnpmOutdatedEntry is one package from `pnpm outdated --json`.
@@ -35,9 +39,17 @@ type pnpmOutdatedEntry struct {
 // ParsePnpmOutdatedGlobal converts `pnpm outdated -g --json` into items.
 // The global-dir row (path key, empty metadata) and up-to-date entries are skipped.
 func ParsePnpmOutdatedGlobal(out []byte) []*model.Item {
+	items, _ := parsePnpmOutdatedGlobal(out)
+	return items
+}
+
+func parsePnpmOutdatedGlobal(out []byte) ([]*model.Item, error) {
 	var data map[string]pnpmOutdatedEntry
-	if err := json.Unmarshal(out, &data); err != nil || len(data) == 0 {
-		return nil
+	if err := json.Unmarshal(out, &data); err != nil {
+		return nil, err
+	}
+	if len(data) == 0 {
+		return nil, nil
 	}
 	var items []*model.Item
 	for name, pkg := range data {
@@ -55,7 +67,7 @@ func ParsePnpmOutdatedGlobal(out []byte) []*model.Item {
 			Status:       model.StatusOutdated,
 		})
 	}
-	return items
+	return items, nil
 }
 
 // BunSource lists bun global packages (presence + versions; bun has no
@@ -97,7 +109,7 @@ func ParseBunPmLsGlobal(output string) []*model.Item {
 			Name:       name,
 			Category:   model.CatBun,
 			CurrentVer: ver,
-			Status:     model.StatusOK,
+			Status:     model.StatusInfo,
 		})
 	}
 	return items

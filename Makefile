@@ -10,6 +10,7 @@ LDFLAGS := -X main.version=$(VERSION)
 
 # Coverage gate packages (≥90%) — keep in sync with .ai-standards.env and ci.yml
 COVER_PKGS=./internal/model/... ./internal/config/... ./internal/sizefmt/... ./internal/cli/... ./internal/retention/... ./internal/upgrade/...
+COVERAGE_MIN ?= 90
 
 all: build test lint fmt
 
@@ -26,7 +27,9 @@ test-race:
 
 test-gate:
 	go test -race -shuffle=on -count=1 -coverprofile=coverage.out $(COVER_PKGS)
-	@go tool cover -func=coverage.out | tail -1
+	@pct=$$(go tool cover -func=coverage.out | awk '/^total:/ {gsub("%","",$$3); print $$3}'); \
+		test -n "$$pct"; echo "coverage=$${pct}% (minimum $(COVERAGE_MIN)%)"; \
+		awk -v p="$$pct" -v min="$(COVERAGE_MIN)" 'BEGIN { exit (p+0 < min+0) }' || { echo "coverage below minimum" >&2; exit 1; }
 
 coverage: test-gate
 	@go tool cover -func=coverage.out

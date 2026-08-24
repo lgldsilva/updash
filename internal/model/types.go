@@ -57,6 +57,8 @@ const (
 	StatusCleanCandidate               // remove candidate (cleanup)
 	StatusCleaning                     // cleanup in progress
 	StatusCleaned                      // cleaned successfully
+	StatusInfo                         // informative result; no affirmative update check
+	StatusUnverified                   // source could not establish a trustworthy state
 )
 
 func (s Status) String() string {
@@ -79,6 +81,10 @@ func (s Status) String() string {
 		return "cleaning"
 	case StatusCleaned:
 		return "cleaned"
+	case StatusInfo:
+		return "info"
+	case StatusUnverified:
+		return "unverified"
 	default:
 		return "unknown"
 	}
@@ -111,6 +117,8 @@ type SourceSummary struct {
 	Outdated    int
 	OK          int
 	ErrorCount  int
+	Unverified  int
+	Info        int
 	Reclaimable string // total reclaimable for cleanup items
 	Icon        string // emoji/icon for the category
 }

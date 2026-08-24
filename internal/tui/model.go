@@ -52,8 +52,10 @@ type State struct {
 	DetailItem *model.Item
 
 	// Pending items for async operations (cleared after confirm/cancel)
-	PendingUpdateItems []*model.Item
-	PendingCleanItems  []*model.Item
+	PendingUpdateItems             []*model.Item
+	PendingUpdateBatches           []*preparedUpdateGroup
+	PendingCleanItems              []*model.Item
+	PendingUpdateRequiresElevation bool
 
 	// Elevation (sudo password cached for the session)
 	PasswordInput string
@@ -86,6 +88,9 @@ type State struct {
 	// Context for cancellation
 	Ctx    context.Context
 	Cancel context.CancelFunc
+	// Generation invalidates every async message from a cancelled or replaced
+	// operation before a handler can mutate UI state.
+	Generation uint64
 
 	// Window dimensions
 	Width  int
@@ -121,7 +126,7 @@ func NewWithVersion(version, latest string) *State {
 // isUpdateNavigable reports items shown and selectable on the Updates tab.
 func isUpdateNavigable(status model.Status) bool {
 	switch status {
-	case model.StatusOutdated, model.StatusUpdating, model.StatusError, model.StatusDone:
+	case model.StatusOutdated, model.StatusUpdating, model.StatusError, model.StatusDone, model.StatusInfo, model.StatusUnverified:
 		return true
 	default:
 		return false
@@ -188,7 +193,7 @@ func (s *State) FlattenUpdateItems() []*model.Item {
 // isCleanupNavigable reports items shown and selectable on the Cleanup tab.
 func isCleanupNavigable(status model.Status) bool {
 	switch status {
-	case model.StatusCleanCandidate, model.StatusCleaning, model.StatusCleaned, model.StatusError:
+	case model.StatusCleanCandidate, model.StatusCleaning, model.StatusCleaned, model.StatusError, model.StatusInfo, model.StatusUnverified:
 		return true
 	default:
 		return false
@@ -262,12 +267,34 @@ func (s *State) TotalOutdated() int {
 
 // TotalScanErrors counts scan failures across Updates and Cleanup tabs.
 func (s *State) TotalScanErrors() int {
+	return s.TotalScanInconclusive()
+}
+
+// TotalScanInconclusive counts sources that failed or could not establish a
+// trustworthy state. Informational rows are intentionally not failures.
+func (s *State) TotalScanInconclusive() int {
 	var n int
 	for _, summary := range s.Summaries {
 		n += countStatus(summary.Items, model.StatusError)
+		n += countStatus(summary.Items, model.StatusUnverified)
 	}
 	for _, summary := range s.CleanItems {
 		n += countStatus(summary.Items, model.StatusError)
+		n += countStatus(summary.Items, model.StatusUnverified)
+	}
+	return n
+}
+
+// TotalScanNonAffirmative also includes informational sources: they are not
+// errors, but they cannot support an "all up to date" conclusion.
+func (s *State) TotalScanNonAffirmative() int {
+	return s.TotalScanInconclusive() + countSummariesStatus(s.Summaries, model.StatusInfo) + countSummariesStatus(s.CleanItems, model.StatusInfo)
+}
+
+func countSummariesStatus(summaries []*model.SourceSummary, want model.Status) int {
+	var n int
+	for _, summary := range summaries {
+		n += countStatus(summary.Items, want)
 	}
 	return n
 }
@@ -286,15 +313,26 @@ func countStatus(items []*model.Item, want model.Status) int {
 func (s *State) LogScanErrors() {
 	logScanErrors := func(summaries []*model.SourceSummary) {
 		for _, sum := range summaries {
+			source := SourceIdentity{Category: sum.Category, Label: sum.Label}
+			if !sourceIsNonAffirmative(summaries, source) {
+				continue
+			}
 			for _, it := range sum.Items {
-				if it.Status != model.StatusError {
+				if it.Status != model.StatusError && it.Status != model.StatusUnverified && it.Status != model.StatusInfo {
 					continue
 				}
 				detail := it.CurrentVer
 				if detail == "" {
 					detail = "scan failed"
 				}
-				s.AddLog(fmt.Sprintf("✘ %s %s — %s: %s", sum.Icon, sum.Label, it.Name, detail), false)
+				prefix := "✘"
+				if it.Status == model.StatusUnverified {
+					prefix = "⚠"
+				}
+				if it.Status == model.StatusInfo {
+					prefix = "ⓘ"
+				}
+				s.AddLog(fmt.Sprintf("%s %s %s — %s: %s", prefix, sum.Icon, sum.Label, it.Name, detail), false)
 			}
 		}
 	}
@@ -324,6 +362,17 @@ func (s *State) AddLog(msg string, success bool) {
 	}
 }
 
+func (s *State) nextGeneration() uint64 {
+	s.Generation++
+	return s.Generation
+}
+
+// IsCurrentGeneration reports whether an async message belongs to the live
+// operation. Bubble Tea handlers must check it before changing State.
+func (s *State) IsCurrentGeneration(generation uint64) bool {
+	return s.Generation == generation
+}
+
 func (s *State) pendingItemsForConfirm() ([]*model.Item, bool) {
 	if len(s.PendingUpdateItems) > 0 {
 		return s.PendingUpdateItems, false
@@ -339,13 +388,13 @@ func (s *State) needsElevationPrompt() bool {
 	if len(items) == 0 {
 		return false
 	}
-	if !elevate.ItemsNeedElevation(items, s.Platform, cleanup) {
+	if !cleanup {
+		return s.PendingUpdateRequiresElevation && !s.elevationSessionReady()
+	}
+	if !elevate.ItemsNeedElevation(items, s.Platform, true) {
 		return false
 	}
 	if s.elevationSessionReady() {
-		return false
-	}
-	if !cleanup && s.canDeferMASElevation(items) {
 		return false
 	}
 	return true
@@ -377,12 +426,12 @@ func (s *State) canDeferMASElevation(items []*model.Item) bool {
 // cancelled. It prompts via ElevRequiredMsg carrying the wait channel; the
 // event loop delivers the validated session (or nil on cancel) through
 // that channel — the channel handoff keeps the worker off State fields.
-func waitForElevation(ctx context.Context, program *tea.Program, reason string, sess *elevate.Session) (*elevate.Session, error) {
+func waitForElevation(ctx context.Context, program *tea.Program, generation uint64, reason string, sess *elevate.Session) (*elevate.Session, error) {
 	if sess != nil && sess.Ready() {
 		return sess, nil
 	}
 	wait := make(chan *elevate.Session, 1)
-	program.Send(ElevRequiredMsg{Reason: reason, Wait: wait})
+	program.Send(ElevRequiredMsg{Generation: generation, Reason: reason, Wait: wait})
 	select {
 	case got := <-wait:
 		if got == nil || !got.Ready() {
@@ -427,14 +476,16 @@ func (s *State) ConsumeConfirmCmd(program *tea.Program) tea.Cmd {
 	}
 	if s.needsElevationPrompt() {
 		s.ShowConfirm = false
-		return checkPasswordlessElevation
+		return checkPasswordlessElevation(s.Generation)
 	}
 	return s.finishConfirm(program)
 }
 
 // checkPasswordlessElevation probes sudo -n off the event loop.
-func checkPasswordlessElevation() tea.Msg {
-	return PasswordlessResultMsg{OK: elevate.CanElevateWithoutPassword(context.Background())}
+func checkPasswordlessElevation(generation uint64) tea.Cmd {
+	return func() tea.Msg {
+		return PasswordlessResultMsg{Generation: generation, OK: elevate.CanElevateWithoutPassword(context.Background())}
+	}
 }
 
 // HandlePasswordless resumes the pending confirmation after the sudo -n
@@ -468,6 +519,8 @@ func (s *State) finishConfirm(program *tea.Program) tea.Cmd {
 	cmd := s.ConfirmCmd(program)
 	s.ConfirmCmd = nil
 	s.PendingUpdateItems = nil
+	s.PendingUpdateBatches = nil
+	s.PendingUpdateRequiresElevation = false
 	s.PendingCleanItems = nil
 	s.ShowConfirm = false
 	return cmd
@@ -481,6 +534,8 @@ func (s *State) CancelPassword() {
 	s.deliverElevation(nil)
 	s.ConfirmCmd = nil
 	s.PendingUpdateItems = nil
+	s.PendingUpdateBatches = nil
+	s.PendingUpdateRequiresElevation = false
 	s.PendingCleanItems = nil
 }
 

@@ -3,6 +3,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"sort"
@@ -28,6 +29,28 @@ type Config struct {
 	JSON            bool   // machine-readable --check output
 }
 
+// ExitError carries the process class without changing the public command
+// functions' error-returning API. cmd/updash maps it to the documented code.
+type ExitError struct {
+	Code int
+	Err  error
+}
+
+func (e *ExitError) Error() string { return e.Err.Error() }
+func (e *ExitError) Unwrap() error { return e.Err }
+
+// ExitCode classifies CLI errors with the documented 2 > 1 > 0 precedence.
+func ExitCode(err error) int {
+	if err == nil {
+		return 0
+	}
+	var exitErr *ExitError
+	if errors.As(err, &exitErr) && exitErr.Code == 2 {
+		return 2
+	}
+	return 1
+}
+
 // Scan runs a single full scan and splits update vs cleanup summaries.
 func Scan(ctx context.Context) (updates, cleanup []*model.SourceSummary, elapsed time.Duration, err error) {
 	plat := detectPlatform()
@@ -43,6 +66,48 @@ func Scan(ctx context.Context) (updates, cleanup []*model.SourceSummary, elapsed
 	return updates, cleanup, time.Since(start).Round(time.Millisecond), nil
 }
 
+func scanForConfig(ctx context.Context, cfg Config, includeCleanup bool, cleanupOnlyArg ...bool) (updates, cleanup []*model.SourceSummary, elapsed time.Duration, err error) {
+	cleanupOnly := len(cleanupOnlyArg) > 0 && cleanupOnlyArg[0]
+	plat := detectPlatform()
+	var categories []model.Category
+	if strings.TrimSpace(cfg.Only) != "" {
+		cat, ok := scanner.CanonicalCategory(plat, includeCleanup, cfg.Only)
+		if !ok {
+			return nil, nil, 0, &ExitError{Code: 2, Err: fmt.Errorf("invalid or unavailable --only category: %q", cfg.Only)}
+		}
+		categories = []model.Category{cat}
+		cfg.Only = string(cat)
+	}
+	start := time.Now()
+	var all []*model.SourceSummary
+	if len(categories) == 0 {
+		all = runScannerAll(ctx, plat, includeCleanup)
+	} else {
+		if cleanupOnly {
+			all = runScannerFilteredForCleanup(ctx, plat, categories)
+		} else {
+			all = runScannerFiltered(ctx, plat, includeCleanup, categories)
+		}
+	}
+	for _, s := range all {
+		if scanner.IsCleanupCategory(s.Category) {
+			cleanup = append(cleanup, s)
+		} else {
+			updates = append(updates, s)
+		}
+	}
+	return updates, cleanup, time.Since(start).Round(time.Millisecond), nil
+}
+
+func requireConclusive(summaries ...[]*model.SourceSummary) error {
+	for _, group := range summaries {
+		if hasInconclusive(group) {
+			return &ExitError{Code: 2, Err: fmt.Errorf("scan contains errors or unverified sources")}
+		}
+	}
+	return nil
+}
+
 // PrintCheck renders scan results to stdout.
 func PrintCheck(updates, cleanup []*model.SourceSummary) (outdated, cleanable int) {
 	outdated, cleanable, _, _ = printCheckEnhanced(updates, cleanup)
@@ -56,7 +121,7 @@ const (
 
 // RunCheck scans and prints results.
 func RunCheck(ctx context.Context, cfg Config) error {
-	updates, cleanup, elapsed, err := Scan(ctx)
+	updates, cleanup, elapsed, err := scanForConfig(ctx, cfg, true, false)
 	if err != nil {
 		return err
 	}
@@ -72,7 +137,10 @@ func RunCheck(ctx context.Context, cfg Config) error {
 		if err := WriteCheckJSON(os.Stdout, rep); err != nil {
 			return err
 		}
-		if ExitCodeForCheck(cfg, rep.Outdated, rep.Cleanable) != 0 {
+		if code := ExitCodeForReport(cfg, rep); code != 0 {
+			if code == 2 {
+				return &ExitError{Code: 2, Err: fmt.Errorf("scan contains errors or unverified sources")}
+			}
 			return fmt.Errorf("%d outdated, %d cleanable", rep.Outdated, rep.Cleanable)
 		}
 		return nil
@@ -82,7 +150,10 @@ func RunCheck(ctx context.Context, cfg Config) error {
 	if elapsed > 0 {
 		fmt.Printf("⏱ scan %s\n", elapsed)
 	}
-	if ExitCodeForCheck(cfg, countOutdated(updates), countCleanable(cleanup)) != 0 {
+	if code := ExitCodeForSummaries(cfg, updates, cleanup); code != 0 {
+		if code == 2 {
+			return &ExitError{Code: 2, Err: fmt.Errorf("scan contains errors or unverified sources")}
+		}
 		return fmt.Errorf("strict: remaining outdated/cleanable items")
 	}
 	return nil
@@ -116,14 +187,21 @@ func countCleanable(summaries []*model.SourceSummary) int {
 func RunUpdate(ctx context.Context, cfg Config) (int, int, error) {
 	plat := detectPlatform()
 	fmt.Printf(msgScanning, platformLabel(plat))
-	updates, _, _, err := Scan(ctx)
+	updates, _, _, err := scanForConfig(ctx, cfg, false, false)
 	if err != nil {
+		return 0, 0, err
+	}
+	if err := requireConclusive(updates); err != nil {
 		return 0, 0, err
 	}
 
 	items := collectOutdated(updates, cfg.Only)
 	if len(items) == 0 {
-		fmt.Println("✓ Nothing to update")
+		if hasInformational(updates) {
+			fmt.Println("ℹ No update selected; installed inventory was not affirmatively verified")
+		} else {
+			fmt.Println("✓ Nothing to update")
+		}
 		return 0, 0, nil
 	}
 
@@ -135,9 +213,13 @@ func RunUpdate(ctx context.Context, cfg Config) (int, int, error) {
 	if len(manualOnly) > 0 {
 		fmt.Printf("ℹ %d item(s) require manual update — skipping\n", len(manualOnly))
 	}
+	prepared, err := prepareBatches(ctx, updatable)
+	if err != nil {
+		return 0, 0, err
+	}
 
 	if cfg.DryRun {
-		printDryRun("update", updatable)
+		printPreparedDryRun(prepared)
 		return 0, 0, nil
 	}
 
@@ -148,13 +230,19 @@ func RunUpdate(ctx context.Context, cfg Config) (int, int, error) {
 
 	fmt.Printf("\n📦 Updating %d item(s)...\n", len(updatable))
 	start := time.Now()
-	ok, fail, skipped, results := runUpdateBatches(ctx, plat, updates, updatable, opts, cfg)
+	ok, fail, skipped, results := runUpdateBatches(ctx, plat, updates, updatable, prepared, opts, cfg)
 	results = append(results, manualOnlyResults(manualOnly)...)
 	fmt.Printf("\n⏱ update %s — %d ok, %d skipped, %d failed\n",
 		time.Since(start).Round(time.Second), ok, skipped, fail)
 
 	fmt.Println("\n🔍 Verifying...")
-	updates2, _, _, _ := Scan(ctx)
+	updates2, _, _, verifyErr := scanForConfig(ctx, cfg, false, false)
+	if verifyErr != nil {
+		return ok, fail, verifyErr
+	}
+	if hasInconclusive(updates2) {
+		return ok, fail, &ExitError{Code: 2, Err: fmt.Errorf("post-update scan contains errors or unverified sources")}
+	}
 	stats := PrintVerifyReport(updates2, results, ok, fail, skipped)
 
 	if shouldFailExit(cfg, stats) {
@@ -166,18 +254,65 @@ func RunUpdate(ctx context.Context, cfg Config) (int, int, error) {
 	return ok, fail, nil
 }
 
+func prepareBatches(ctx context.Context, items []*model.Item) (map[model.Category]*updater.PreparedUpdateBatch, error) {
+	batches := make(map[model.Category]*updater.PreparedUpdateBatch)
+	for cat, group := range groupByCategory(items) {
+		batch, err := prepareUpdateBatch(ctx, cat, group)
+		if err != nil {
+			return nil, fmt.Errorf("plan update commands for %s: %w", cat, err)
+		}
+		batches[cat] = batch
+	}
+	return batches, nil
+}
+
+func printPreparedDryRun(batches map[model.Category]*updater.PreparedUpdateBatch) {
+	fmt.Println("dry-run: planned update commands:")
+	for _, cat := range sortedPreparedCategories(batches) {
+		prepared := batches[cat]
+		plans := prepared.Plans()
+		for _, plan := range plans {
+			prefix := ""
+			if plan.Elevated {
+				prefix = "sudo "
+			}
+			if plan.Manual != "" {
+				fmt.Printf("  • %s: manual — %s\n", cat, plan.Manual)
+				continue
+			}
+			fmt.Printf("  • [%s] %s%s %s\n", plan.Scope, prefix, plan.Name, strings.Join(plan.Args, " "))
+		}
+	}
+}
+
+func sortedPreparedCategories(batches map[model.Category]*updater.PreparedUpdateBatch) []model.Category {
+	cats := make([]model.Category, 0, len(batches))
+	for cat := range batches {
+		cats = append(cats, cat)
+	}
+	sort.Slice(cats, func(i, j int) bool { return cats[i] < cats[j] })
+	return cats
+}
+
 // RunClean runs cleanup operations.
 func RunClean(ctx context.Context, cfg Config) (int, int, error) {
 	plat := detectPlatform()
 	fmt.Printf(msgScanning, platformLabel(plat))
-	_, cleanup, _, err := Scan(ctx)
+	updates, cleanup, _, err := scanForConfig(ctx, cfg, true, true)
 	if err != nil {
+		return 0, 0, err
+	}
+	if err := requireConclusive(updates, cleanup); err != nil {
 		return 0, 0, err
 	}
 
 	items := collectCleanable(cleanup, cfg.Only)
 	if len(items) == 0 {
-		fmt.Println("✓ Nothing to clean")
+		if hasInformational(updates, cleanup) {
+			fmt.Println("ℹ No cleanup selected; installed inventory was not affirmatively verified")
+		} else {
+			fmt.Println("✓ Nothing to clean")
+		}
 		return 0, 0, nil
 	}
 
@@ -206,10 +341,32 @@ func RunClean(ctx context.Context, cfg Config) (int, int, error) {
 	return ok, fail, nil
 }
 
+func hasInformational(groups ...[]*model.SourceSummary) bool {
+	for _, summaries := range groups {
+		for _, summary := range summaries {
+			if summary != nil {
+				for _, item := range summary.Items {
+					if item != nil && item.Status == model.StatusInfo {
+						return true
+					}
+				}
+			}
+		}
+	}
+	return false
+}
+
 // RunAll updates then cleans.
 func RunAll(ctx context.Context, cfg Config) error {
+	updates, cleanup, _, err := scanForConfig(ctx, cfg, true, false)
+	if err != nil {
+		return err
+	}
+	if hasInconclusive(updates) || hasInconclusive(cleanup) {
+		return &ExitError{Code: 2, Err: fmt.Errorf("scan contains errors or unverified sources")}
+	}
 	uok, ufail, err := RunUpdate(ctx, cfg)
-	if err != nil && ufail == 0 {
+	if err != nil {
 		return err
 	}
 	cok, cfail, cerr := RunClean(ctx, cfg)
@@ -219,10 +376,29 @@ func RunAll(ctx context.Context, cfg Config) error {
 	if ufail > 0 || cfail > 0 {
 		return fmt.Errorf("finished with %d update fail(s), %d clean fail(s)", ufail, cfail)
 	}
-	if uok == 0 && cok == 0 {
+	if uok == 0 && cok == 0 && !hasInformational(updates, cleanup) {
 		fmt.Println("✓ Everything is up to date and clean!")
+	} else if uok == 0 && cok == 0 {
+		fmt.Println("ℹ No action selected; installed inventory was not affirmatively verified")
 	}
 	return nil
+}
+
+func hasInconclusive(summaries []*model.SourceSummary) bool {
+	for _, summary := range summaries {
+		if summary == nil {
+			continue
+		}
+		if summary.ErrorCount > 0 || summary.Unverified > 0 {
+			return true
+		}
+		for _, item := range summary.Items {
+			if item != nil && (item.Status == model.StatusError || item.Status == model.StatusUnverified) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 type cleanGroup struct {
@@ -304,6 +480,7 @@ func groupCleanBySummary(summaries []*model.SourceSummary, items []*model.Item) 
 type updateBatchEnv struct {
 	plat        model.PlatformInfo
 	summaries   []*model.SourceSummary
+	prepared    map[model.Category]*updater.PreparedUpdateBatch
 	opts        updater.Options
 	cfg         Config
 	elevSession **elevate.Session
@@ -314,16 +491,18 @@ func runUpdateBatches(
 	plat model.PlatformInfo,
 	summaries []*model.SourceSummary,
 	items []*model.Item,
+	prepared map[model.Category]*updater.PreparedUpdateBatch,
 	opts updater.Options,
 	cfg Config,
 ) (ok, fail, skipped int, allResults []*updater.Result) {
 	nativeItems, normalItems := partitionNativeElevated(plat, items, cfg)
 	var elevSession *elevate.Session
-	ctx = primeElevationSession(ctx, plat, normalItems, cfg, &elevSession)
+	ctx = primeElevationSessionForBatches(ctx, plat, prepared, cfg, &elevSession)
 
 	env := updateBatchEnv{
 		plat:        plat,
 		summaries:   summaries,
+		prepared:    prepared,
 		opts:        opts,
 		cfg:         cfg,
 		elevSession: &elevSession,
@@ -397,15 +576,30 @@ func runCategoryUpdateSection(
 	if cat == model.CatBrew {
 		results = runBrewUpdateBatch(batchCtx, groupItems, env.opts, env.cfg, env.elevSession)
 	} else {
-		elevCtx, batchSkipped, skipReason := ensureCategoryElevation(batchCtx, env.plat, cat, env.cfg, env.elevSession)
-		if batchSkipped {
-			results = skipBatchResults(groupItems, skipReason)
+		prepared := env.prepared[cat]
+		if prepared == nil {
+			results = updatePlanErrorResults(groupItems, fmt.Errorf("missing prepared update batch"))
+		} else if !updater.PlansRequireElevation(prepared.Plans()) {
+			results = executePreparedBatch(batchCtx, prepared, env.opts)
 		} else {
-			results = updateCategory(elevCtx, cat, groupItems, env.opts)
+			elevCtx, batchSkipped, skipReason := ensurePlannedElevation(batchCtx, updater.PlansRequireElevation(prepared.Plans()), env.cfg, env.elevSession)
+			if batchSkipped {
+				results = skipBatchResults(groupItems, skipReason)
+			} else {
+				results = executePreparedBatch(elevCtx, prepared, env.opts)
+			}
 		}
 	}
 	ok, fail, skipped = tallyUpdateResults(results)
 	return ok, fail, skipped, results
+}
+
+func updatePlanErrorResults(items []*model.Item, err error) []*updater.Result {
+	results := make([]*updater.Result, 0, len(items))
+	for _, item := range items {
+		results = append(results, &updater.Result{Item: item, Error: err.Error()})
+	}
+	return results
 }
 
 func collectOutdated(summaries []*model.SourceSummary, only string) []*model.Item {

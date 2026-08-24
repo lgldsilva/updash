@@ -54,6 +54,7 @@ func (s *State) startScan() tea.Cmd {
 	}
 
 	s.Scanning = true
+	generation := s.nextGeneration()
 	s.ScanDone = 0
 	s.LastSummary = ""
 	s.OperationLabel = "system"
@@ -82,14 +83,15 @@ func (s *State) startScan() tea.Cmd {
 				isCleanup := scanner.IsCleanupCategory(summary.Category)
 
 				program.Send(ScanSourceDoneMsg{
-					Summary:   summary,
-					IsCleanup: isCleanup,
+					Generation: generation,
+					Summary:    summary,
+					IsCleanup:  isCleanup,
 				})
 			}()
 		}
 
 		wg.Wait()
-		program.Send(ScanFinishedMsg{Elapsed: time.Since(start).Round(time.Millisecond)})
+		program.Send(ScanFinishedMsg{Generation: generation, Elapsed: time.Since(start).Round(time.Millisecond)})
 	}()
 
 	return nil // spinner animation runs on the single tick chain (see onTick)
@@ -98,7 +100,7 @@ func (s *State) startScan() tea.Cmd {
 // rescanCategory re-probes one package manager and pushes a fresh summary
 // to the TUI. Runs on worker goroutines: it must only use the caller's
 // snapshot (ctx/plat), never State — the event loop may be swapping fields.
-func rescanCategory(ctx context.Context, plat model.PlatformInfo, program *tea.Program, cat model.Category, cleanup bool) {
+func rescanCategory(ctx context.Context, plat model.PlatformInfo, program *tea.Program, generation uint64, cat model.Category, cleanup bool) {
 	if program == nil {
 		return
 	}
@@ -114,9 +116,10 @@ func rescanCategory(ctx context.Context, plat model.PlatformInfo, program *tea.P
 		}
 		summary := scanner.ScanSource(ctx, src, plat)
 		program.Send(ScanSourceDoneMsg{
-			Summary:   summary,
-			IsCleanup: scanner.IsCleanupCategory(summary.Category),
-			Rescan:    true,
+			Generation: generation,
+			Summary:    summary,
+			IsCleanup:  scanner.IsCleanupCategory(summary.Category),
+			Rescan:     true,
 		})
 	}
 }
