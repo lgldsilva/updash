@@ -84,15 +84,20 @@ func TestArchiveNameVariants(t *testing.T) {
 }
 
 func TestFindChecksum(t *testing.T) {
-	checksums := []byte("abc123  updash_1.0.0_linux_amd64.tar.gz\ndef456  updash_1.0.0_darwin_arm64.tar.gz\n")
-	if got := findChecksum(checksums, "updash_1.0.0_linux_amd64.tar.gz"); got != "abc123" {
-		t.Fatalf("got %q", got)
+	linuxHash := strings.Repeat("a", 64)
+	darwinHash := strings.Repeat("d", 64)
+	checksums := []byte(linuxHash + "  updash_1.0.0_linux_amd64.tar.gz\n" + darwinHash + "  updash_1.0.0_darwin_arm64.tar.gz\n")
+	got, err := findChecksum(checksums, "updash_1.0.0_linux_amd64.tar.gz")
+	if err != nil || got != linuxHash {
+		t.Fatalf("got %q err=%v", got, err)
 	}
-	if got := findChecksum(checksums, "updash_1.0.0_darwin_arm64.tar.gz"); got != "def456" {
-		t.Fatalf("got %q", got)
+	got, err = findChecksum(checksums, "updash_1.0.0_darwin_arm64.tar.gz")
+	if err != nil || got != darwinHash {
+		t.Fatalf("got %q err=%v", got, err)
 	}
-	if got := findChecksum(checksums, "nonexistent.tar.gz"); got != "" {
-		t.Fatalf("got %q, want empty", got)
+	got, err = findChecksum(checksums, "nonexistent.tar.gz")
+	if err != nil || got != "" {
+		t.Fatalf("got %q err=%v, want empty", got, err)
 	}
 }
 
@@ -732,7 +737,7 @@ func TestExtractBinary_dispatch(t *testing.T) {
 	}
 
 	// zip path
-	z := makeZip(t, map[string][]byte{"updash.exe": {'M', 'Z'}})
+	z := makeZip(t, map[string][]byte{"updash.exe": {'M', 'Z', 0x90, 0x00}})
 	bin, err = extractBinary(z, "updash_1.0.0_windows_amd64.zip", "windows")
 	if err != nil || len(bin) == 0 {
 		t.Fatalf("zip: bin=%d err=%v", len(bin), err)

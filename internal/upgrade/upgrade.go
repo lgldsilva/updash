@@ -19,6 +19,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"path"
 	"path/filepath"
 	"regexp"
 	"runtime"
@@ -34,6 +35,24 @@ const (
 	DefaultUpdateDL  = "https://github.com/lgldsilva/updash/releases/download"
 	versionPrefix    = "v"
 	pathSeparator    = "/"
+	// maxRedirects bounds the redirect chain a release download may follow.
+	maxRedirects = 5
+)
+
+// Transfer/decompression budgets. A release archive for a single Go CLI is a
+// few megabytes; these ceilings leave generous headroom while keeping a
+// hostile or broken host from streaming an unbounded body into memory or
+// expanding a compression bomb. They are vars so hermetic tests can shrink
+// them instead of generating multi-megabyte fixtures.
+//
+// Because tests mutate these package-level vars (see withArchiveLimit /
+// withExtractLimit in hardening_test.go), tests in this package MUST NOT call
+// t.Parallel(): a parallel test would observe another test's shrunken budget.
+var (
+	maxAPIResponseBytes = int64(8 << 20)   // 8 MiB  — release JSON
+	maxChecksumsBytes   = int64(1 << 20)   // 1 MiB  — checksums.txt
+	maxArchiveBytes     = int64(64 << 20)  // 64 MiB — tar.gz/zip asset
+	maxExtractedBytes   = int64(192 << 20) // 192 MiB — total decompressed
 )
 
 // Config holds upgrade configuration, sourced from env vars.
@@ -191,23 +210,27 @@ func downloadReleaseBinary(ctx context.Context, hc *http.Client, dlURL, tag, goo
 	archiveURL := fmt.Sprintf("%s/%s/%s", strings.TrimRight(dlURL, pathSeparator), tag, archName)
 	fmt.Printf("download: %s\n", archiveURL)
 
-	// Download archive
-	archiveData, err := httpGet(ctx, hc, archiveURL, token)
+	// Download archive (bounded: a hostile host must not be able to stream an
+	// unbounded body into memory).
+	archiveData, err := httpGetLimited(ctx, hc, archiveURL, token, maxArchiveBytes)
 	if err != nil {
 		return nil, fmt.Errorf("download archive: %w", err)
 	}
 
 	// Download checksum
 	checksumsURL := fmt.Sprintf("%s/%s/checksums.txt", strings.TrimRight(dlURL, pathSeparator), tag)
-	checksumsData, err := httpGet(ctx, hc, checksumsURL, token)
+	checksumsData, err := httpGetLimited(ctx, hc, checksumsURL, token, maxChecksumsBytes)
 	if err != nil {
 		return nil, fmt.Errorf("download checksums: %w", err)
 	}
 
-	// Verify SHA-256. A missing entry must fail closed: installing an
-	// unverified release would turn a malformed checksum manifest into a
-	// supply-chain bypass.
-	expectedHash := findChecksum(checksumsData, archName)
+	// Verify SHA-256. A missing, malformed, or ambiguous entry must fail
+	// closed: installing an unverified release would turn a broken checksum
+	// manifest into a supply-chain bypass.
+	expectedHash, err := findChecksum(checksumsData, archName)
+	if err != nil {
+		return nil, fmt.Errorf("verify checksums: %w", err)
+	}
 	if expectedHash == "" {
 		return nil, fmt.Errorf("no checksum entry for %s", archName)
 	}
@@ -237,17 +260,35 @@ func archiveName(tag, goos, goarch string) string {
 	}
 }
 
-func findChecksum(checksums []byte, filename string) string {
+var sha256HexRE = regexp.MustCompile(`^[0-9a-f]{64}$`)
+
+// findChecksum returns the lowercase SHA-256 digest published for filename.
+// A digest that is not a well-formed SHA-256, or two entries for the same
+// file that disagree, are hard errors: silently taking the first line would
+// let a tampered manifest choose which digest the client trusts.
+func findChecksum(checksums []byte, filename string) (string, error) {
+	var found string
 	for _, line := range strings.Split(string(checksums), "\n") {
 		line = strings.TrimSpace(line)
-		if strings.HasSuffix(line, "  "+filename) {
-			parts := strings.Fields(line)
-			if len(parts) >= 2 {
-				return parts[0]
-			}
+		if !strings.HasSuffix(line, "  "+filename) {
+			continue
 		}
+		parts := strings.Fields(line)
+		if len(parts) < 2 {
+			// Defensive: a suffix match implies a digest and a filename, but
+			// the parse must not depend on that implicit invariant.
+			continue
+		}
+		hash := strings.ToLower(parts[0])
+		if !sha256HexRE.MatchString(hash) {
+			return "", fmt.Errorf("malformed sha256 digest for %s", filename)
+		}
+		if found != "" && found != hash {
+			return "", fmt.Errorf("conflicting checksum entries for %s", filename)
+		}
+		found = hash
 	}
-	return ""
+	return found, nil
 }
 
 func extractBinary(data []byte, archName, goos string) ([]byte, error) {
@@ -272,6 +313,7 @@ func extractFromTarGz(data []byte) ([]byte, error) {
 
 	tr := tar.NewReader(gzr)
 	var members []archiveMember
+	budget := maxExtractedBytes
 	for {
 		hdr, err := tr.Next()
 		if errors.Is(err, io.EOF) {
@@ -280,12 +322,17 @@ func extractFromTarGz(data []byte) ([]byte, error) {
 		if err != nil {
 			return nil, fmt.Errorf("tar: %w", err)
 		}
+		if err := safeArchiveMemberName(hdr.Name); err != nil {
+			return nil, err
+		}
+		// Only regular files are candidates: symlinks/hardlinks in a release
+		// archive would point outside the archive by definition.
 		if hdr.Typeflag != tar.TypeReg {
 			continue
 		}
-		body, err := io.ReadAll(tr)
+		body, err := readArchiveMember(tr, hdr.Name, &budget)
 		if err != nil {
-			return nil, fmt.Errorf("read %s: %w", hdr.Name, err)
+			return nil, err
 		}
 		members = append(members, archiveMember{name: hdr.Name, data: body})
 	}
@@ -298,22 +345,65 @@ func extractFromZip(data []byte) ([]byte, error) {
 		return nil, fmt.Errorf("zip: %w", err)
 	}
 	var members []archiveMember
+	budget := maxExtractedBytes
 	for _, f := range zr.File {
-		if f.FileInfo().IsDir() {
+		if err := safeArchiveMemberName(f.Name); err != nil {
+			return nil, err
+		}
+		if f.FileInfo().IsDir() || !f.FileInfo().Mode().IsRegular() {
 			continue
 		}
-		r, err := f.Open()
+		body, err := readZipMember(f, &budget)
 		if err != nil {
-			return nil, fmt.Errorf("open %s: %w", f.Name, err)
-		}
-		body, err := io.ReadAll(r)
-		_ = r.Close()
-		if err != nil {
-			return nil, fmt.Errorf("read %s: %w", f.Name, err)
+			return nil, err
 		}
 		members = append(members, archiveMember{name: f.Name, data: body})
 	}
 	return pickReleaseBinary(members)
+}
+
+func readZipMember(f *zip.File, budget *int64) ([]byte, error) {
+	r, err := f.Open()
+	if err != nil {
+		return nil, fmt.Errorf("open %s: %w", f.Name, err)
+	}
+	defer func() { _ = r.Close() }()
+	return readArchiveMember(r, f.Name, budget)
+}
+
+// safeArchiveMemberName rejects members that escape the archive root. Nothing
+// from the archive is written to disk by path, but an entry named
+// "../../updash" would still let a crafted release masquerade as the release
+// binary once the name is reduced to its base.
+func safeArchiveMemberName(name string) error {
+	if strings.TrimSpace(name) == "" {
+		return errors.New("archive contains an unnamed member")
+	}
+	if len(name) >= 2 && name[1] == ':' {
+		return fmt.Errorf("absolute path in archive: %q", name)
+	}
+	clean := path.Clean(strings.ReplaceAll(name, `\`, pathSeparator))
+	if strings.HasPrefix(clean, pathSeparator) {
+		return fmt.Errorf("absolute path in archive: %q", name)
+	}
+	if clean == ".." || strings.HasPrefix(clean, "../") {
+		return fmt.Errorf("path traversal in archive: %q", name)
+	}
+	return nil
+}
+
+// readArchiveMember reads one member against a shared decompression budget
+// instead of trusting the size the archive declares (zip/tar bomb defense).
+func readArchiveMember(r io.Reader, name string, budget *int64) ([]byte, error) {
+	data, err := io.ReadAll(io.LimitReader(r, *budget+1))
+	if err != nil {
+		return nil, fmt.Errorf("read %s: %w", name, err)
+	}
+	if int64(len(data)) > *budget {
+		return nil, fmt.Errorf("archive exceeds the %d byte decompression budget at %s", maxExtractedBytes, name)
+	}
+	*budget -= int64(len(data))
+	return data, nil
 }
 
 // pickReleaseBinary selects the updash executable from release archive members.
@@ -327,6 +417,11 @@ func pickReleaseBinary(members []archiveMember) ([]byte, error) {
 	for _, m := range members {
 		base := filepath.Base(m.name)
 		if isReleaseBinaryName(base) {
+			// The name alone is not proof: refuse to install a script or text
+			// file that merely claims to be the release binary.
+			if !looksLikeExecutable(m.data) {
+				return nil, fmt.Errorf("archive member %q is not an executable image", m.name)
+			}
 			return m.data, nil
 		}
 		if isSkippableArchiveFile(base) {
@@ -395,6 +490,11 @@ func replaceRunningBinary(newBin []byte) error {
 }
 
 func replaceRunningBinaryWithOS(newBin []byte, goos string) error {
+	// An empty payload would truncate a working installation into a
+	// zero-byte file that can never self-heal.
+	if len(newBin) == 0 {
+		return errors.New("refusing to install an empty binary")
+	}
 	self, err := osExecutable()
 	if err != nil {
 		return fmt.Errorf("resolve self path: %w", err)
@@ -404,12 +504,13 @@ func replaceRunningBinaryWithOS(newBin []byte, goos string) error {
 		return fmt.Errorf("resolve symlink: %w", err)
 	}
 	dir := filepath.Dir(self)
-	tmp := filepath.Join(dir, ".updash.upgrade.tmp")
 	old := self + ".old"
 
-	// 0755: the downloaded artifact is an executable binary.
-	if err := os.WriteFile(tmp, newBin, 0755); err != nil {
-		return fmt.Errorf("write temp binary: %w", err)
+	// Stage next to the destination (same filesystem => the rename is atomic)
+	// and only then swap. The running binary is never truncated in place.
+	tmp, err := writeStagedBinary(dir, newBin, currentBinaryMode(self))
+	if err != nil {
+		return err
 	}
 
 	if err := os.Rename(tmp, self); err != nil {
@@ -423,6 +524,54 @@ func replaceRunningBinaryWithOS(newBin []byte, goos string) error {
 		if err := performWindowsReplace(tmp, self, old); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+// currentBinaryMode preserves the permissions of the installed binary: an
+// install deliberately restricted to 0700 must not be widened by a self
+// update. 0755 is the fallback when the current mode cannot be read; the
+// executable bit is always forced on.
+func currentBinaryMode(self string) os.FileMode {
+	fi, err := os.Stat(self)
+	if err != nil {
+		return 0o755
+	}
+	return fi.Mode().Perm() | 0o100
+}
+
+// writeStagedBinary writes the verified payload into a fresh, unpredictable
+// file in dir. os.CreateTemp uses O_CREATE|O_EXCL, so a pre-planted symlink
+// at a guessable staging path cannot redirect the write outside dir. The
+// content is fsynced before the caller may rename it over the running binary,
+// so a crash mid-upgrade cannot leave a half-written executable in place.
+func writeStagedBinary(dir string, newBin []byte, mode os.FileMode) (string, error) {
+	f, err := os.CreateTemp(dir, ".updash.upgrade-*")
+	if err != nil {
+		return "", fmt.Errorf("write temp binary: %w", err)
+	}
+	tmp := f.Name()
+	if err := stageBinaryContents(f, newBin, mode); err != nil {
+		_ = f.Close()
+		_ = os.Remove(tmp)
+		return "", err
+	}
+	if err := f.Close(); err != nil {
+		_ = os.Remove(tmp)
+		return "", fmt.Errorf("close temp binary: %w", err)
+	}
+	return tmp, nil
+}
+
+func stageBinaryContents(f *os.File, newBin []byte, mode os.FileMode) error {
+	if _, err := f.Write(newBin); err != nil {
+		return fmt.Errorf("write temp binary: %w", err)
+	}
+	if err := f.Sync(); err != nil {
+		return fmt.Errorf("flush temp binary: %w", err)
+	}
+	if err := f.Chmod(mode); err != nil {
+		return fmt.Errorf("chmod temp binary: %w", err)
 	}
 	return nil
 }
@@ -533,9 +682,24 @@ func isHTTP404(err error) bool {
 
 func httpClient(cfg Config) *http.Client {
 	return &http.Client{
-		Timeout:   120 * time.Second,
-		Transport: &http.Transport{TLSClientConfig: tlsConfigFor(cfg)},
+		Timeout:       120 * time.Second,
+		Transport:     &http.Transport{TLSClientConfig: tlsConfigFor(cfg)},
+		CheckRedirect: checkRedirect,
 	}
+}
+
+// checkRedirect keeps a release download on a verified transport: bounded hop
+// count, and never a downgrade from https to a plaintext scheme (which would
+// expose the artifact and any Authorization header to a network attacker).
+func checkRedirect(req *http.Request, via []*http.Request) error {
+	if len(via) >= maxRedirects {
+		return fmt.Errorf("stopped after %d redirects", maxRedirects)
+	}
+	prev := via[len(via)-1]
+	if prev.URL.Scheme == "https" && req.URL.Scheme != "https" {
+		return fmt.Errorf("refusing redirect from https to %s", req.URL.Scheme)
+	}
+	return nil
 }
 
 // tlsConfigFor builds TLS settings (TLS 1.2+). Self-signed hosts use CAFile
@@ -566,7 +730,14 @@ func tlsConfigFor(cfg Config) *tls.Config {
 	return tlsCfg
 }
 
+// httpGet reads a release-metadata response under the API size budget.
 func httpGet(ctx context.Context, hc *http.Client, url, token string) ([]byte, error) {
+	return httpGetLimited(ctx, hc, url, token, maxAPIResponseBytes)
+}
+
+// httpGetLimited fails closed when the response is larger than limit, both by
+// the declared Content-Length and by what is actually streamed.
+func httpGetLimited(ctx context.Context, hc *http.Client, url, token string, limit int64) ([]byte, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, err
@@ -582,9 +753,15 @@ func httpGet(ctx context.Context, hc *http.Client, url, token string) ([]byte, e
 	if resp.StatusCode >= 400 {
 		return nil, &httpError{StatusCode: resp.StatusCode, URL: url}
 	}
-	body, err := io.ReadAll(resp.Body)
+	if resp.ContentLength > limit {
+		return nil, fmt.Errorf("GET %s: declared %d bytes, over the %d byte limit", url, resp.ContentLength, limit)
+	}
+	body, err := io.ReadAll(io.LimitReader(resp.Body, limit+1))
 	if err != nil {
 		return nil, fmt.Errorf("read response: %w", err)
+	}
+	if int64(len(body)) > limit {
+		return nil, fmt.Errorf("GET %s: response exceeds the %d byte limit", url, limit)
 	}
 	return body, nil
 }

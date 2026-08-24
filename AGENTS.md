@@ -51,9 +51,22 @@ model/types.go       → Item, Category, Status, PlatformInfo
 4. Add cleanup in `internal/cleaner` if needed
 5. Unit-test pure parse helpers; mock `execCombined` / `execCommand` for I/O
 
+## Shell install/staging
+
+`install.sh` and `internal/upgrade` share one staging discipline: stage under an
+unpredictable name created inside the destination directory (`mktemp` /
+`os.CreateTemp` with `O_EXCL`), apply the destination's existing permissions
+with the exec bit forced on (`dest_mode` / `currentBinaryMode`, never a blanket
+`0755` over a `0700` install), then atomic rename. A fixed staging path is an
+arbitrary-write primitive under `curl | sudo bash`. Regression harnesses:
+`scripts/install_test.sh` and `internal/upgrade/hardening_test.go`.
+
+`install.sh` can be sourced with `UPDASH_INSTALL_LIB=1` to call a single
+function without running an install (test seam used by `scripts/install_test.sh`).
+
 ## Coverage / CI gates
 
-- **COVER_PKGS (≥90%)**: `./internal/model/... ./internal/config/... ./internal/sizefmt/... ./internal/cli/... ./internal/retention/...`
+- **COVER_PKGS (≥90%)**: `./internal/model/... ./internal/config/... ./internal/sizefmt/... ./internal/cli/... ./internal/retention/... ./internal/upgrade/...`
 - **TEST_IO_PKGS** (race, no floor): scanner, tui, cleaner
 - Sonar excludes the same I/O packages from coverage measurement
 - Keep complexity low (Sonar S3776); prefer small helpers over large switches
@@ -96,6 +109,47 @@ model/types.go       → Item, Category, Status, PlatformInfo
   partial errors (item `Unverified` when nothing trustworthy was collected).
 
 Homelab clean category: `homelab-clean` (`--only homelab-clean`).
+
+## Self-update trust model (`internal/upgrade`)
+
+Fail-closed; every step must succeed or the installed binary is untouched.
+Full table in [docs/DISTRIBUTION.md](./docs/DISTRIBUTION.md).
+
+- TLS 1.2+, system trust store, verification never disabled. `UPDASH_TLS_CA_CERT`
+  only *adds* a CA. `checkRedirect` bounds the chain to `maxRedirects` (5) and
+  refuses an `https` → plaintext downgrade.
+- `httpGetLimited` enforces a per-request ceiling on both the declared
+  `Content-Length` and the streamed body. Budgets are the `max*Bytes` vars
+  (API 8 MiB, checksums 1 MiB, archive 64 MiB, decompressed 192 MiB) — they are
+  vars so tests shrink them instead of building huge fixtures.
+- `findChecksum` returns an error for a malformed (non-64-hex) or ambiguous
+  digest; a missing entry is an empty result that `downloadReleaseBinary`
+  rejects. There is no "install anyway" path.
+- `safeArchiveMemberName` rejects absolute paths, Windows volume prefixes, and
+  `..` components. Only `tar.TypeReg`/regular zip entries are candidates, so
+  symlink/hardlink members can never be installed. `readArchiveMember` shares
+  one decompression budget across all members.
+- `pickReleaseBinary` requires an ELF/Mach-O/PE magic number even when the
+  member is literally named `updash` — a script cannot impersonate the release.
+- `replaceRunningBinaryWithOS` refuses an empty payload, stages via
+  `os.CreateTemp` (`O_EXCL`, unpredictable name) in the destination directory,
+  `Sync`s, applies `currentBinaryMode` (existing perms, exec bit forced), and
+  atomically renames. Windows uses the `<name>.old` staging fallback.
+- `canSelfUpdate`/`selfUpdateAllowed` resolve symlinks first, then allow only
+  `~/.local/bin` (plus documented Windows user dirs). `UPDASH_ALLOW_SELF_UPDATE=1`
+  is the only override.
+
+## Release chain
+
+`ci.yml` (all gates green on `main`) → dispatch `autotag.yml` with the tested
+SHA → tag → dispatch `release.yml`. `release.yml` re-validates the tag shape,
+verifies the tag commit is contained in `origin/main`, **exports that SHA and
+pins every downstream checkout to it** (a tag can be force-moved during the
+build window), and refuses to overwrite
+a release that already published `checksums.txt` unless dispatched with
+`force_rerelease=true`. Workflow tokens default to `contents: read`; only the
+publishing job elevates. Workflow inputs reach shell steps through `env:`,
+never `${{ }}` interpolation inside `run`.
 
 **Builder mode note:** `age` + `until=` frequently reclaims 0B on active build hosts. Prefer `all` there; keep shell `builder prune -af` as belt-and-suspenders if desired.
 

@@ -10,9 +10,9 @@ on:
 
 concurrency: autotag-main
 
+# Least privilege by default; the tagging job elevates explicitly.
 permissions:
-  actions: write
-  contents: write
+  contents: read
 
 env:
   GO_VERSION: '1.26'
@@ -24,6 +24,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     if: github.repository == 'lgldsilva/updash'
+    permissions:
+      actions: write
+      contents: write
     steps:
       - uses: actions/checkout@v4
         with:
@@ -67,9 +70,10 @@ jobs:
       - name: Create and push tag
         id: create_tag
         if: steps.svu.outputs.tag != ''
+        env:
+          VERSION: ${{ steps.svu.outputs.tag }}
         run: |
           set -eu
-          VERSION="${{ steps.svu.outputs.tag }}"
           if git rev-parse -q --verify "refs/tags/$VERSION" >/dev/null; then
             echo "Tag $VERSION already exists — skipping"
             echo "created=false" >> "$GITHUB_OUTPUT"

@@ -42,6 +42,7 @@ step "Tests gate+cover" go test -race -count=1 -coverprofile="$LOG_DIR/coverage.
 step "Coverage >=90%" bash -o pipefail -c 'pct=$(go tool cover -func="$1" | awk '\''/^total:/ {gsub("%","",$3); print $3}'\''); test -n "$pct"; printf "coverage=%s%%\n" "$pct"; awk -v p="$pct" -v min="${COVERAGE_MIN:-90}" "BEGIN { exit (p+0 < min+0) }"' _ "$LOG_DIR/coverage.out"
 step "Lint (0 issues)" bash -o pipefail -c 'GOTOOLCHAIN=go1.26.6 go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.12.2 run ./...'
 step "gosec" bash -o pipefail -c 'GOTOOLCHAIN=go1.26.6 go run github.com/securego/gosec/v2/cmd/gosec@v2.27.1 -quiet -exclude=G204,G306,G703,G118 ./...'
+step "Shell/CI regressions" bash -o pipefail -c 'bash "$(dirname "$0")/install_test.sh" && bash "$(dirname "$0")/release_chain_test.sh"' "$0"
 step "Vulncheck" bash -o pipefail -c 'GOTOOLCHAIN=go1.26.6 go run golang.org/x/vuln/cmd/govulncheck@latest ./...'
 
 echo
