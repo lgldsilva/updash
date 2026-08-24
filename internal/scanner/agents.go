@@ -154,8 +154,20 @@ func (s *AgentSource) Scan(ctx context.Context, plat model.PlatformInfo) ([]*mod
 	}
 	items := probeAgentsConcurrently(ctx, plat, installed)
 	if plat.HasNpm {
+		// `npm ls -g` runs concurrently with `npm outdated -g`: both are
+		// independent npm invocations with ~1s cold start each.
+		var (
+			wg        sync.WaitGroup
+			npmGlobal map[string]bool
+		)
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			npmGlobal = npmInstalledPackages(ctx)
+		}()
 		applyNpmOutdatedToAgents(ctx, items, catalog)
-		resolveRegistryLatest(ctx, items, catalog)
+		wg.Wait()
+		resolveRegistryLatestFrom(ctx, items, catalog, npmGlobal)
 	}
 	return items, nil
 }
@@ -253,11 +265,24 @@ func applyNpmOutdatedToAgents(ctx context.Context, items []*model.Item, catalog 
 // for the latest version. Agents already handled by `npm outdated -g` or
 // without an npmPackage are skipped.
 func resolveRegistryLatest(ctx context.Context, items []*model.Item, catalog []agentDef) {
-	installed := npmInstalledPackages(ctx)
+	resolveRegistryLatestFrom(ctx, items, catalog, npmInstalledPackages(ctx))
+}
+
+// resolveRegistryLatestFrom is resolveRegistryLatest with a pre-fetched
+// global-npm package set (allows callers to overlap it with other npm work).
+// Registry probes fan out bounded-parallel: they are network-bound with a
+// per-probe budget, and a serial loop over many non-npm agents sums several
+// seconds of avoidable latency.
+func resolveRegistryLatestFrom(ctx context.Context, items []*model.Item, catalog []agentDef, installed map[string]bool) {
 	defByName := make(map[string]agentDef, len(catalog))
 	for _, a := range catalog {
 		defByName[a.name] = a
 	}
+	type probeTarget struct {
+		it *model.Item
+		a  agentDef
+	}
+	targets := make([]probeTarget, 0, len(items))
 	for _, it := range items {
 		if it.Status == model.StatusOutdated {
 			continue // already flagged by the npm-outdated merge
@@ -266,11 +291,14 @@ func resolveRegistryLatest(ctx context.Context, items []*model.Item, catalog []a
 		if !ok || a.npmPackage == "" || installed[a.npmPackage] {
 			continue
 		}
-		latest := registryLatest(ctx, a)
-		if latest != "" {
-			ApplyAgentOutdated(it, latest)
-		}
+		targets = append(targets, probeTarget{it: it, a: a})
 	}
+	probeBounded(len(targets), registryProbeConcurrency, func(i int) {
+		t := targets[i]
+		if latest := registryLatest(ctx, t.a); latest != "" {
+			ApplyAgentOutdated(t.it, latest)
+		}
+	})
 }
 
 // registryLatest returns the newest published version of the agent's npm
