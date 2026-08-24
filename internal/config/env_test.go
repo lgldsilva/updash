@@ -1,6 +1,8 @@
 package config
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -120,10 +122,80 @@ func TestEnvDefaultsListing(t *testing.T) {
 		"UPDASH_HOST_LOG_MAX_DAYS",
 		"UPDASH_DISK_PRESSURE_PCT",
 		"UPDASH_DEV_CACHE_MAX_DAYS",
+		"UPDASH_DEV_PROJECTS_CLEAN",
+		"UPDASH_DEV_PROJECTS_DIR",
 		"UPDASH_AI_OUTPUT_MAX_DAYS",
 	} {
 		if !strings.Contains(out, key+"=") {
 			t.Errorf("EnvDefaults missing %s:\n%s", key, out)
 		}
+	}
+}
+
+func TestDevProjectsCleanEnabled(t *testing.T) {
+	cases := []struct {
+		env  string
+		want bool
+	}{
+		{"", false},
+		{"0", false},
+		{"false", false},
+		{"off", false},
+		{"1", true},
+		{"true", true},
+		{"TRUE", true},
+		{"on", true},
+		{"yes", true},
+	}
+	for _, tc := range cases {
+		t.Setenv("UPDASH_DEV_PROJECTS_CLEAN", tc.env)
+		if got := DevProjectsCleanEnabled(); got != tc.want {
+			t.Errorf("DevProjectsCleanEnabled(env=%q) = %v, want %v", tc.env, got, tc.want)
+		}
+	}
+}
+
+func TestDevProjectsDir(t *testing.T) {
+	t.Run("env override wins", func(t *testing.T) {
+		t.Setenv("UPDASH_DEV_PROJECTS_DIR", "/custom/projects")
+		if got := DevProjectsDir(); got != "/custom/projects" {
+			t.Errorf("DevProjectsDir() = %q", got)
+		}
+	})
+
+	t.Run("prefers existing Projetos", func(t *testing.T) {
+		home := t.TempDir()
+		t.Setenv("UPDASH_DEV_PROJECTS_DIR", "")
+		t.Setenv("HOME", home)
+		mustMkdir(t, filepath.Join(home, "Projetos"))
+		if got := DevProjectsDir(); got != filepath.Join(home, "Projetos") {
+			t.Errorf("DevProjectsDir() = %q", got)
+		}
+	})
+
+	t.Run("falls back to Projects then plain Projetos", func(t *testing.T) {
+		home := t.TempDir()
+		t.Setenv("UPDASH_DEV_PROJECTS_DIR", "")
+		t.Setenv("HOME", home)
+		mustMkdir(t, filepath.Join(home, "Projects"))
+		if got := DevProjectsDir(); got != filepath.Join(home, "Projects") {
+			t.Errorf("DevProjectsDir() = %q", got)
+		}
+	})
+
+	t.Run("no candidates returns default under HOME", func(t *testing.T) {
+		home := t.TempDir()
+		t.Setenv("UPDASH_DEV_PROJECTS_DIR", "")
+		t.Setenv("HOME", home)
+		if got := DevProjectsDir(); got != filepath.Join(home, "Projetos") {
+			t.Errorf("DevProjectsDir() = %q", got)
+		}
+	})
+}
+
+func mustMkdir(t *testing.T, dir string) {
+	t.Helper()
+	if err := os.MkdirAll(dir, 0o750); err != nil {
+		t.Fatal(err)
 	}
 }

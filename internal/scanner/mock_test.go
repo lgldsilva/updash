@@ -653,10 +653,11 @@ func TestBrewCleanSource(t *testing.T) {
 	macCache := filepath.Join(tmpDir, "Library", "Caches", "Homebrew")
 	_ = os.MkdirAll(macCache, 0755)
 
-	// Mock du command
+	// Mock du command (and the brew dry-run probe, so no real brew runs)
 	enableMocks()
 	defer disableMocks()
 	setMock("du", []string{"-sh", macCache}, "13G\t"+macCache, nil)
+	setMock("brew", []string{"cleanup", "-n", "-s"}, "", nil)
 
 	src := &BrewCleanSource{}
 	items, err := src.Scan(context.Background(), model.PlatformInfo{OS: "darwin"})
@@ -699,6 +700,7 @@ func TestBrewCleanSource_DuFailsOrEmpty_NoPanic(t *testing.T) {
 		enableMocks()
 		defer disableMocks()
 		setMock("du", []string{"-sh", macCache}, "", errors.New("du: permission denied"))
+		setMock("brew", []string{"cleanup", "-n", "-s"}, "", errors.New("brew: unavailable"))
 
 		items, err := src.Scan(context.Background(), model.PlatformInfo{OS: "darwin"})
 		if err != nil {
@@ -713,6 +715,7 @@ func TestBrewCleanSource_DuFailsOrEmpty_NoPanic(t *testing.T) {
 		enableMocks()
 		defer disableMocks()
 		setMock("du", []string{"-sh", macCache}, "", nil)
+		setMock("brew", []string{"cleanup", "-n", "-s"}, "", nil)
 
 		items, err := src.Scan(context.Background(), model.PlatformInfo{OS: "darwin"})
 		if err != nil {

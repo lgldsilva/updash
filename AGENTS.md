@@ -25,7 +25,7 @@ Entry modes in `cmd/updash/main.go`:
 
 ```
 platform/detect.go   → OS + available package managers (+ HasOpenCode)
-scanner/             → Source interface + RunAll() (parallel)
+scanner/             → Source interface + RunAll() (parallel, max 6 workers)
   ├── brew, apt, mas, winget, … package managers
   ├── opencode.go    → npm outdated --prefix ~/.config/opencode
   ├── agents.go      → AI CLIs + npm global outdated merge
@@ -85,6 +85,15 @@ model/types.go       → Item, Category, Status, PlatformInfo
 - Container log truncate: `50` MB
 - Host logs / AI outputs / dev caches: age in days (30 / 7 / 90)
 - Disk pressure: prune aggressively when used% ≥ 85
+- Project build cleanup (`dev-cache:projects-builds`) is **opt-in**: it is only
+  scanned/cleaned with `UPDASH_DEV_PROJECTS_CLEAN=1` (also `true`/`on`/`yes`).
+  Root dir: `UPDASH_DEV_PROJECTS_DIR` (fallback `~/Projetos` → `~/Projects`).
+  Build dirs (`target`/`build`/`dist`/`.next`/`out`/`.turbo`/`__pycache__`/`.pytest_cache`)
+  are always collected; `node_modules` only when the project shows no activity
+  newer than `UPDASH_DEV_CACHE_MAX_DAYS` (newest mtime of first-level entries).
+  Walk never follows symlinks, never collects the projects root itself, stays
+  under the canonicalized root, and reports per-project walk/stat failures as
+  partial errors (item `Unverified` when nothing trustworthy was collected).
 
 Homelab clean category: `homelab-clean` (`--only homelab-clean`).
 

@@ -17,6 +17,11 @@ Thumbs.db
 # Deepwork session state (git-local, readable by OpenCode)
 .slim/deepwork/
 
+# BEGIN oh-my-opencode-slim worktrees
+.slim/worktrees/
+.slim/worktrees.json
+# END oh-my-opencode-slim worktrees
+
 # Local env / tooling
 .env
 .scannerwork/

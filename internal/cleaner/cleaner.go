@@ -193,6 +193,8 @@ func dockerPruneArgsForItem(name string) []string {
 // cleanHomelab applies retention policies for logs, caches, AI outputs, and disk pressure.
 func cleanHomelab(ctx context.Context, item *model.Item, opts Options) *Result {
 	switch {
+	case item.Name == "dev-cache:projects-builds":
+		return cleanProjectBuildsPaths(ctx, item, config.DevCacheMaxDays())
 	case strings.HasPrefix(item.Name, "dev-cache:"),
 		strings.HasPrefix(item.Name, "ai-output:"),
 		strings.HasPrefix(item.Name, "host-logs:"):
@@ -205,6 +207,50 @@ func cleanHomelab(ctx context.Context, item *model.Item, opts Options) *Result {
 	default:
 		return &Result{Item: item, Success: true, Output: item.Name + ": nothing to do"}
 	}
+}
+
+func cleanProjectBuildsPaths(ctx context.Context, item *model.Item, maxDays int) *Result {
+	if !config.DevProjectsCleanEnabled() {
+		// Defense in depth: never remove project build paths without opt-in,
+		// even if a crafted item reaches the cleaner. Non-affirmative status:
+		// nothing was cleaned, this is policy information only.
+		item.Status = model.StatusInfo
+		return &Result{Item: item, Success: true, Output: "projects-builds cleanup disabled (set UPDASH_DEV_PROJECTS_CLEAN=1 to opt in)"}
+	}
+	root := item.PackageID
+	if root == "" {
+		item.Status = model.StatusError
+		return &Result{Item: item, Success: false, Error: "missing projects path"}
+	}
+	cands, _, partialErrs, err := retention.CollectProjectBuildPaths(ctx, root, maxDays, time.Now())
+	if err != nil {
+		item.Status = model.StatusError
+		return &Result{Item: item, Success: false, Error: err.Error()}
+	}
+	if len(cands) == 0 {
+		item.Status = model.StatusCleaned
+		return &Result{Item: item, Success: true, Output: "nothing older than retention"}
+	}
+	paths := make([]string, len(cands))
+	for i, c := range cands {
+		paths[i] = c.Path
+	}
+	freed, errs := retention.RemovePaths(paths)
+	var b strings.Builder
+	fmt.Fprintf(&b, "removed %d project build path(s)\n", len(paths)-len(errs))
+	for _, e := range partialErrs {
+		fmt.Fprintf(&b, "scan warning: %s\n", e)
+	}
+	for _, e := range errs {
+		fmt.Fprintf(&b, "error: %s\n", e)
+	}
+	if len(errs) > 0 && freed == 0 {
+		item.Status = model.StatusError
+		return &Result{Item: item, Success: false, Error: "cleanup errors", Output: b.String()}
+	}
+	item.Status = model.StatusCleaned
+	item.Freed = FormatBytes(freed)
+	return &Result{Item: item, Success: true, Output: b.String(), BytesFreed: freed}
 }
 
 func ageDaysForHomelab(name string) int {
