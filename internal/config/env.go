@@ -6,6 +6,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 )
@@ -85,6 +86,38 @@ func DevCacheMaxDays() int {
 	return envInt("UPDASH_DEV_CACHE_MAX_DAYS", DefaultDevCacheMaxDays)
 }
 
+// DevProjectsDir returns the root projects folder to scan for build artifacts.
+func DevProjectsDir() string {
+	if v := strings.TrimSpace(os.Getenv("UPDASH_DEV_PROJECTS_DIR")); v != "" {
+		return v
+	}
+	home := os.Getenv("HOME")
+	if home == "" {
+		return ""
+	}
+	p := filepath.Join(home, "Projetos")
+	if _, err := os.Stat(p); err == nil {
+		return p
+	}
+	p2 := filepath.Join(home, "Projects")
+	if _, err := os.Stat(p2); err == nil {
+		return p2
+	}
+	return filepath.Join(home, "Projetos")
+}
+
+// DevProjectsCleanEnabled gates the dev-cache:projects-builds cleanup. It is
+// an explicit opt-in (default off): the scanner only lists the item and the
+// cleaner only removes project build paths when this is set.
+func DevProjectsCleanEnabled() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("UPDASH_DEV_PROJECTS_CLEAN"))) {
+	case "1", "true", "on", "yes":
+		return true
+	default:
+		return false
+	}
+}
+
 // AIOutputMaxDays is the mtime age for AI tool-output cleanup.
 func AIOutputMaxDays() int {
 	return envInt("UPDASH_AI_OUTPUT_MAX_DAYS", DefaultAIOutputMaxDays)
@@ -105,6 +138,8 @@ func EnvDefaults() string {
 		{"UPDASH_HOST_LOG_MAX_DAYS", strconv.Itoa(HostLogMaxDays()), "host log mtime age"},
 		{"UPDASH_DISK_PRESSURE_PCT", strconv.Itoa(DiskPressurePct()), "disk % for aggressive prune"},
 		{"UPDASH_DEV_CACHE_MAX_DAYS", strconv.Itoa(DevCacheMaxDays()), "maven/gradle cache atime age"},
+		{"UPDASH_DEV_PROJECTS_CLEAN", strconv.FormatBool(DevProjectsCleanEnabled()), "opt-in: project build-dir cleanup (1/true/on/yes)"},
+		{"UPDASH_DEV_PROJECTS_DIR", DevProjectsDir(), "root projects directory for build cleanup"},
 		{"UPDASH_AI_OUTPUT_MAX_DAYS", strconv.Itoa(AIOutputMaxDays()), "AI tool-output mtime age"},
 	}
 	for _, r := range rows {

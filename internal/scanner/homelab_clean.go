@@ -35,7 +35,6 @@ var HomelabHome = func() string {
 var DiskUsedPercent = diskUsedPercentDefault
 
 func (s *HomelabCleanSource) Scan(ctx context.Context, plat model.PlatformInfo) ([]*model.Item, error) {
-	_ = ctx
 	now := time.Now()
 	home := HomelabHome()
 	var items []*model.Item
@@ -55,6 +54,15 @@ func (s *HomelabCleanSource) Scan(ctx context.Context, plat model.PlatformInfo) 
 		now,
 		fmt.Sprintf(policyMtimeDays, devDays),
 	)...)
+	// dev-cache:projects-builds is an explicit opt-in (UPDASH_DEV_PROJECTS_CLEAN).
+	if config.DevProjectsCleanEnabled() {
+		items = append(items, scanProjectBuilds(
+			ctx,
+			config.DevProjectsDir(),
+			devDays,
+			now,
+		)...)
+	}
 
 	aiDays := config.AIOutputMaxDays()
 	for _, pair := range aiOutputTargets(home) {
@@ -250,4 +258,49 @@ func trimSuffix(s, suf string) string {
 		return s[:len(s)-len(suf)]
 	}
 	return s
+}
+
+func scanProjectBuilds(ctx context.Context, projectsDir string, maxDays int, now time.Time) []*model.Item {
+	if projectsDir == "" {
+		return nil
+	}
+	cands, total, partialErrs, err := retention.CollectProjectBuildPaths(ctx, projectsDir, maxDays, now)
+	policy := fmt.Sprintf("build dirs always; node_modules idle > %dd", maxDays)
+	if err != nil {
+		return []*model.Item{{
+			Name:       "dev-cache:projects-builds",
+			Category:   model.CatHomelabClean,
+			PackageID:  projectsDir,
+			Status:     model.StatusUnverified,
+			CurrentVer: "scan failed: " + err.Error(),
+			KeepPolicy: policy,
+		}}
+	}
+	if len(partialErrs) > 0 {
+		policy += fmt.Sprintf("; %d unreadable path(s) skipped", len(partialErrs))
+	}
+	if len(cands) == 0 || total <= 0 {
+		if len(partialErrs) > 0 {
+			return []*model.Item{{
+				Name:       "dev-cache:projects-builds",
+				Category:   model.CatHomelabClean,
+				PackageID:  projectsDir,
+				Status:     model.StatusUnverified,
+				CurrentVer: "no candidates; some projects unreadable",
+				KeepPolicy: policy,
+			}}
+		}
+		return nil
+	}
+	return []*model.Item{{
+		Name:         "dev-cache:projects-builds",
+		Category:     model.CatHomelabClean,
+		PackageID:    projectsDir,
+		CurrentVer:   sizefmt.Format(total),
+		Status:       model.StatusCleanCandidate,
+		Reclaimable:  sizefmt.Format(total),
+		RemoveCount:  len(cands),
+		KeepPolicy:   policy,
+		AvailableVer: fmt.Sprintf("%d path(s)", len(cands)),
+	}}
 }
