@@ -15,6 +15,14 @@ REPO="lgldsilva/updash"
 GITHUB_API="https://api.github.com/repos/${REPO}/releases/latest"
 GITHUB_DL="https://github.com/${REPO}/releases/download"
 
+# Fail-closed transport for every download: https only (no plaintext even
+# after a redirect), TLS 1.2+, bounded redirects, and a size ceiling so a
+# hostile or broken host cannot stream an unbounded body onto the disk.
+CURL_SECURE_OPTS="--proto =https --proto-redir =https --tlsv1.2 --location \
+  --max-redirs 5 --max-time 300 --retry 2 --fail --silent --show-error"
+CURL_MAX_ARCHIVE_BYTES=67108864   # 64 MiB
+CURL_MAX_TEXT_BYTES=8388608       # 8 MiB
+
 INSTALL_DIR="${INSTALL_DIR:-$HOME/.local/bin}"
 
 usage() {
@@ -48,7 +56,16 @@ warn() { printf '⚠ %s\n' "$*" >&2; }
 die()  { printf '✘ %s\n' "$*" >&2; exit 1; }
 
 _UPDASH_TMP=""
-_cleanup_tmp() { [ -n "$_UPDASH_TMP" ] && [ -d "$_UPDASH_TMP" ] && rm -rf "$_UPDASH_TMP"; }
+_UPDASH_STAGE=""
+# One cleanup entry point: install_binary registers its own trap, and a second
+# EXIT trap would otherwise replace (not add to) the download-tempdir cleanup.
+_cleanup_tmp() {
+  [ -n "$_UPDASH_STAGE" ] && rm -f "$_UPDASH_STAGE"
+  _UPDASH_STAGE=""
+  [ -n "$_UPDASH_TMP" ] && [ -d "$_UPDASH_TMP" ] && rm -rf "$_UPDASH_TMP"
+  return 0
+}
+_cleanup_stage() { [ -n "$_UPDASH_STAGE" ] && rm -f "$_UPDASH_STAGE"; _UPDASH_STAGE=""; return 0; }
 
 # ── Arg parsing ────────────────────────────────────────────────────────────
 MODE="binary"
@@ -156,7 +173,9 @@ install_from_release() {
   else
     log "→ Querying latest release from GitHub…"
     local body
-    body="$(curl -fsSL "$GITHUB_API")" || die "failed to fetch $GITHUB_API"
+    # shellcheck disable=SC2086 # CURL_SECURE_OPTS is a deliberate option list
+    body="$(curl $CURL_SECURE_OPTS --max-filesize "$CURL_MAX_TEXT_BYTES" "$GITHUB_API")" \
+      || die "failed to fetch $GITHUB_API"
     tag="$(printf '%s' "$body" \
       | grep -o '"tag_name"[[:space:]]*:[[:space:]]*"[^"]*"' \
       | head -n1 \
@@ -175,15 +194,16 @@ install_from_release() {
   trap _cleanup_tmp EXIT
 
   log "→ Downloading $archive ($tag) for ${GOOS}/${GOARCH}…"
-  curl -fsSL -o "$tmp/$archive" "$url_archive" \
+  # shellcheck disable=SC2086 # CURL_SECURE_OPTS is a deliberate option list
+  curl $CURL_SECURE_OPTS --max-filesize "$CURL_MAX_ARCHIVE_BYTES" -o "$tmp/$archive" "$url_archive" \
     || die "download failed: $url_archive"
-  curl -fsSL -o "$tmp/checksums.txt" "$url_checksums" \
+  # shellcheck disable=SC2086 # CURL_SECURE_OPTS is a deliberate option list
+  curl $CURL_SECURE_OPTS --max-filesize "$CURL_MAX_TEXT_BYTES" -o "$tmp/checksums.txt" "$url_checksums" \
     || die "download failed: $url_checksums"
 
   local expected actual
-  expected="$(grep -E "  ${archive}\$" "$tmp/checksums.txt" | awk '{print $1}' | head -n1)"
-  [ -n "$expected" ] || die "no checksum entry found for $archive in checksums.txt"
-  actual="$(sha256_file "$tmp/$archive")"
+  expected="$(checksum_for "$tmp/checksums.txt" "$archive")" || die "$expected"
+  actual="$(sha256_file "$tmp/$archive" | tr 'A-F' 'a-f')"
   if [ "$expected" != "$actual" ]; then
     die "sha256 mismatch for $archive: expected $expected, got $actual"
   fi
@@ -200,15 +220,69 @@ install_from_release() {
   install_binary "$tmp/$bin" "$tag"
 }
 
+# checksum_for <manifest> <filename> — echoes the single lowercase SHA-256
+# published for <filename>, or exits non-zero with a message on stdout.
+# The filename is compared as a literal field, never interpolated into a
+# regex: the dots in "updash_1.2.3_linux_amd64.tar.gz" would otherwise be
+# wildcards and could match a different entry.
+checksum_for() {
+  local manifest="$1" want="$2" entries count
+  entries="$(awk -v want="$want" '
+    $2 == want && length($1) == 64 && $1 ~ /^[0-9a-fA-F]+$/ { print tolower($1) }
+  ' "$manifest" | sort -u)"
+  if [ -z "$entries" ]; then
+    printf 'no valid sha256 entry found for %s in checksums.txt' "$want"
+    return 1
+  fi
+  count="$(printf '%s\n' "$entries" | wc -l | tr -d ' ')"
+  if [ "$count" != "1" ]; then
+    printf 'conflicting checksum entries for %s in checksums.txt' "$want"
+    return 1
+  fi
+  printf '%s' "$entries"
+}
+
 # ── Common install step ───────────────────────────────────────────────────
+# dest_mode echoes the permissions to install with: the current mode of the
+# destination with the owner-execute bit forced on, or 0755 for a fresh
+# install. A destination deliberately restricted to 0700 must not be widened.
+dest_mode() {
+  local dest="$1" mode=""
+  [ -f "$dest" ] || { printf '0755'; return 0; }
+  if mode="$(stat -f '%Lp' "$dest" 2>/dev/null)" && [ -n "$mode" ]; then
+    :
+  elif mode="$(stat -c '%a' "$dest" 2>/dev/null)" && [ -n "$mode" ]; then
+    :
+  else
+    printf '0755'
+    return 0
+  fi
+  # Pad to four digits and force u+x; the installed file must be runnable.
+  printf '0%03o' "$(( 8#$mode | 0100 ))"
+}
+
 install_binary() {
   local src="$1" label="$2"
   mkdir -p "$INSTALL_DIR" || die "could not create $INSTALL_DIR"
 
-  local stage="$INSTALL_DIR/.updash.install.tmp"
-  cp "$src" "$stage" || die "copy to $stage failed"
-  chmod 0755 "$stage"   || die "chmod $stage failed"
-  mv "$stage" "$INSTALL_DIR/updash" || die "install to $INSTALL_DIR/updash failed"
+  local dest="$INSTALL_DIR/updash"
+  local mode
+  mode="$(dest_mode "$dest")"
+
+  # Stage under an unpredictable name created by mktemp (which fails rather
+  # than reusing an existing path). A fixed name such as
+  # ".updash.install.tmp" is an arbitrary-write primitive: a pre-planted
+  # symlink there would be written through by cp, chmod'ed, and then moved
+  # into place as the "installed binary" — as root under `curl | sudo bash`.
+  local stage
+  stage="$(mktemp "$INSTALL_DIR/.updash.install.XXXXXX")" || die "could not stage in $INSTALL_DIR"
+  _UPDASH_STAGE="$stage"
+  trap _cleanup_tmp EXIT INT TERM
+
+  cat "$src" >"$stage" 2>/dev/null || { _cleanup_stage; die "copy of $src failed"; }
+  chmod "$mode" "$stage" || { _cleanup_stage; die "chmod $stage failed"; }
+  mv "$stage" "$dest" || { _cleanup_stage; die "install to $dest failed"; }
+  _UPDASH_STAGE=""
 
   log ""
   log "✓ Installed updash ($label) → $INSTALL_DIR/updash"
@@ -226,6 +300,14 @@ install_binary() {
 }
 
 # ── Dispatch ──────────────────────────────────────────────────────────────
+# UPDASH_INSTALL_LIB=1 lets scripts/install_test.sh source this file and call a
+# single function without performing an install (same idea as the exec seams in
+# the Go packages).
+if [ "${UPDASH_INSTALL_LIB:-}" = "1" ]; then
+  # shellcheck disable=SC2317 # reached only when this file is executed, not sourced
+  return 0 2>/dev/null || exit 0
+fi
+
 case "$MODE" in
   source) install_from_source ;;
   binary) install_from_release ;;
