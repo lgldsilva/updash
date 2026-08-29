@@ -46,10 +46,15 @@ func (s *BrewCleanSource) Scan(ctx context.Context, plat model.PlatformInfo) ([]
 	// Estimate cache size
 	home := os.Getenv("HOME")
 	cacheDir := filepath.Join(home, "Library", "Caches", "Homebrew")
-	if _, err := os.Stat(cacheDir); err != nil {
+	if _, err := os.Stat(cacheDir); err != nil && !os.IsNotExist(err) {
+		return []*model.Item{infoItem("brew-cache", model.CatCache, "unable to inspect cache")}, nil
+	} else if os.IsNotExist(err) {
 		// Linux: /home/user/.cache/Homebrew
 		cacheDir = filepath.Join(home, ".cache", "Homebrew")
 		if _, err := os.Stat(cacheDir); err != nil {
+			if !os.IsNotExist(err) {
+				return []*model.Item{infoItem("brew-cache", model.CatCache, "unable to inspect cache")}, nil
+			}
 			return []*model.Item{
 				{Name: "brew-cache", Category: model.CatCache, Status: model.StatusOK, CurrentVer: verNoCache},
 			}, nil
@@ -58,7 +63,12 @@ func (s *BrewCleanSource) Scan(ctx context.Context, plat model.PlatformInfo) ([]
 
 	size := "0B"
 	if sizeOut, err := execCommand(ctx, binDu, flagDuShort, cacheDir); err == nil {
+		if strings.TrimSpace(string(sizeOut)) == "" {
+			return []*model.Item{infoItem("brew-cache", model.CatCache, "unable to inspect cache")}, nil
+		}
 		size = firstField(sizeOut, size)
+	} else {
+		return []*model.Item{infoItem("brew-cache", model.CatCache, "unable to inspect cache")}, nil
 	}
 
 	reclaimable := "~0B"
@@ -91,11 +101,18 @@ func (s *AptCleanSource) Label() string            { return "apt Cache" }
 func (s *AptCleanSource) Icon() string             { return cleanupIcon }
 
 func (s *AptCleanSource) Scan(ctx context.Context, plat model.PlatformInfo) ([]*model.Item, error) {
+	if _, statErr := os.Stat("/var/cache/apt"); statErr != nil {
+		if os.IsNotExist(statErr) {
+			return []*model.Item{{Name: "apt-cache", Category: model.CatCache, Status: model.StatusOK, CurrentVer: verNoCache}}, nil
+		}
+		return []*model.Item{infoItem("apt-cache", model.CatCache, "unable to inspect cache")}, nil
+	}
 	out, err := execCommand(ctx, binDu, flagDuShort, "/var/cache/apt")
 	if err != nil {
-		return []*model.Item{
-			{Name: "apt-cache", Category: model.CatCache, Status: model.StatusOK, CurrentVer: verNoCache},
-		}, nil
+		return []*model.Item{infoItem("apt-cache", model.CatCache, "unable to inspect cache")}, nil
+	}
+	if strings.TrimSpace(string(out)) == "" {
+		return []*model.Item{infoItem("apt-cache", model.CatCache, "unable to inspect cache")}, nil
 	}
 	size := firstField(out, "0B")
 	return []*model.Item{
@@ -120,9 +137,7 @@ func (s *DockerCleanSource) Icon() string             { return cleanupIcon }
 func (s *DockerCleanSource) Scan(ctx context.Context, plat model.PlatformInfo) ([]*model.Item, error) {
 	out, err := execCommand(ctx, binDocker, "system", "df", "--format", "{{.Type}}\t{{.Size}}\t{{.Reclaimable}}")
 	if err != nil {
-		return []*model.Item{
-			{Name: binDocker, Category: model.CatDockerClean, Status: model.StatusOK, CurrentVer: "daemon not running"},
-		}, nil
+		return []*model.Item{infoItem(binDocker, model.CatDockerClean, "daemon not running")}, nil
 	}
 
 	var items []*model.Item
@@ -166,17 +181,19 @@ func (s *GoCleanSource) Icon() string             { return cleanupIcon }
 func (s *GoCleanSource) Scan(ctx context.Context, plat model.PlatformInfo) ([]*model.Item, error) {
 	out, err := execCommand(ctx, binGo, "env", "GOCACHE")
 	if err != nil {
-		return []*model.Item{
-			{Name: nameGoCache, Category: model.CatCache, Status: model.StatusOK, CurrentVer: "error"},
-		}, nil
+		return []*model.Item{infoItem(nameGoCache, model.CatCache, "unable to determine cache path")}, nil
 	}
 	cacheDir := strings.TrimSpace(string(out))
+	if cacheDir == "" {
+		return []*model.Item{infoItem(nameGoCache, model.CatCache, "unable to determine cache path")}, nil
+	}
 
 	sizeOut, err := execCommand(ctx, binDu, flagDuShort, cacheDir)
 	if err != nil {
-		return []*model.Item{
-			{Name: nameGoCache, Category: model.CatCache, Status: model.StatusOK, CurrentVer: verNoCache},
-		}, nil
+		return []*model.Item{infoItem(nameGoCache, model.CatCache, "unable to inspect cache")}, nil
+	}
+	if strings.TrimSpace(string(sizeOut)) == "" {
+		return []*model.Item{infoItem(nameGoCache, model.CatCache, "unable to inspect cache")}, nil
 	}
 	size := firstField(sizeOut, "0B")
 
@@ -205,6 +222,9 @@ func (s *NpmCleanSource) Scan(ctx context.Context, plat model.PlatformInfo) ([]*
 	cacheDir := filepath.Join(home, ".npm")
 	_, err := os.Stat(cacheDir)
 	if err != nil {
+		if !os.IsNotExist(err) {
+			return []*model.Item{infoItem(nameNpmCache, model.CatCache, "unable to inspect cache")}, nil
+		}
 		return []*model.Item{
 			{Name: nameNpmCache, Category: model.CatCache, Status: model.StatusOK, CurrentVer: verNoCache},
 		}, nil
@@ -212,21 +232,32 @@ func (s *NpmCleanSource) Scan(ctx context.Context, plat model.PlatformInfo) ([]*
 
 	totalOut, err := execCommand(ctx, binDu, flagDuShort, cacheDir)
 	if err != nil {
-		return []*model.Item{
-			{Name: nameNpmCache, Category: model.CatCache, Status: model.StatusOK, CurrentVer: verNoCache},
-		}, nil
+		return []*model.Item{infoItem(nameNpmCache, model.CatCache, "unable to inspect cache")}, nil
+	}
+	if strings.TrimSpace(string(totalOut)) == "" {
+		return []*model.Item{infoItem(nameNpmCache, model.CatCache, "unable to inspect cache")}, nil
 	}
 	total := firstField(totalOut, "0B")
 
 	var reclaimBytes int64
+	subErrors := 0
 	for _, sub := range []string{"_cacache", "_npx"} {
 		subDir := filepath.Join(cacheDir, sub)
 		if out, err := execCommand(ctx, binDu, "-sk", subDir); err == nil {
+			if strings.TrimSpace(string(out)) == "" {
+				subErrors++
+				continue
+			}
 			kb, _ := strconv.ParseInt(firstField(out, "0"), 10, 64)
 			reclaimBytes += kb * 1024
+		} else {
+			subErrors++
 		}
 	}
 	reclaimable := sizefmt.Format(reclaimBytes)
+	if reclaimBytes == 0 && subErrors > 0 {
+		return []*model.Item{infoItem(nameNpmCache, model.CatCache, total+" (cache details incomplete)")}, nil
+	}
 	if reclaimBytes == 0 {
 		return []*model.Item{
 			{Name: nameNpmCache, Category: model.CatCache, Status: model.StatusOK, CurrentVer: total},
@@ -257,9 +288,7 @@ func (s *SnapCleanSource) Scan(ctx context.Context, plat model.PlatformInfo) ([]
 	// Check if snap is available
 	_, err := exec.LookPath(binSnap)
 	if err != nil {
-		return []*model.Item{
-			{Name: binSnap, Category: model.CatCache, Status: model.StatusOK, CurrentVer: "not installed"},
-		}, nil
+		return []*model.Item{infoItem(binSnap, model.CatCache, "not installed")}, nil
 	}
 
 	return []*model.Item{
@@ -286,6 +315,9 @@ func (s *VSCodeCleanSource) Icon() string             { return cleanupIcon }
 func (s *VSCodeCleanSource) Scan(ctx context.Context, plat model.PlatformInfo) ([]*model.Item, error) {
 	_, err := os.Stat(s.ExtDir)
 	if err != nil {
+		if !os.IsNotExist(err) {
+			return []*model.Item{infoItem(s.LabelName, model.CatVSCodeClean, "unable to inspect extensions")}, nil
+		}
 		return []*model.Item{
 			{Name: s.LabelName, Category: model.CatVSCodeClean, Status: model.StatusOK, CurrentVer: "no extensions"},
 		}, nil
@@ -293,9 +325,7 @@ func (s *VSCodeCleanSource) Scan(ctx context.Context, plat model.PlatformInfo) (
 
 	entries, err := os.ReadDir(s.ExtDir)
 	if err != nil {
-		return []*model.Item{
-			{Name: s.LabelName, Category: model.CatVSCodeClean, Status: model.StatusOK, CurrentVer: "error reading"},
-		}, nil
+		return []*model.Item{infoItem(s.LabelName, model.CatVSCodeClean, "unable to inspect extensions")}, nil
 	}
 
 	// Group by publisher.name and find duplicates
@@ -363,14 +393,12 @@ func (s *WindowsTempSource) Icon() string             { return cleanupIcon }
 func (s *WindowsTempSource) Scan(ctx context.Context, plat model.PlatformInfo) ([]*model.Item, error) {
 	out, err := execCommand(ctx, "cmd", "/c", "dir %TEMP% /s /a:-d /w 2>nul | findstr /b \"Total\"")
 	if err != nil {
-		return []*model.Item{
-			{Name: "win-temp", Category: model.CatCache, Status: model.StatusOK, CurrentVer: "unable to scan"},
-		}, nil
+		return []*model.Item{infoItem("win-temp", model.CatCache, "unable to scan")}, nil
 	}
 
 	size := strings.TrimSpace(string(out))
 	if size == "" {
-		size = "?"
+		return []*model.Item{infoItem("win-temp", model.CatCache, "unable to scan")}, nil
 	}
 
 	return []*model.Item{

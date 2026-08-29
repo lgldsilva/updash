@@ -26,6 +26,22 @@ func errItem(name string, cat model.Category) *model.Item {
 	}
 }
 
+func infoItem(name string, cat model.Category, current string) *model.Item {
+	return &model.Item{
+		Name:       name,
+		Category:   cat,
+		Status:     model.StatusInfo,
+		CurrentVer: current,
+	}
+}
+
+func infoOrOutdated(name string, cat model.Category, items []*model.Item) []*model.Item {
+	if len(items) == 0 {
+		return []*model.Item{infoItem(name, cat, "inventory only")}
+	}
+	return items
+}
+
 func okOrOutdated(name string, cat model.Category, items []*model.Item) []*model.Item {
 	if len(items) == 0 {
 		return []*model.Item{okItem(name, cat)}

@@ -228,6 +228,10 @@ func cleanProjectBuildsPaths(ctx context.Context, item *model.Item, maxDays int)
 		return &Result{Item: item, Success: false, Error: err.Error()}
 	}
 	if len(cands) == 0 {
+		if len(partialErrs) > 0 {
+			item.Status = model.StatusError
+			return &Result{Item: item, Success: false, Error: "cleanup scan incomplete", Output: strings.Join(partialErrs, "\n")}
+		}
 		item.Status = model.StatusCleaned
 		return &Result{Item: item, Success: true, Output: "nothing older than retention"}
 	}
@@ -244,9 +248,9 @@ func cleanProjectBuildsPaths(ctx context.Context, item *model.Item, maxDays int)
 	for _, e := range errs {
 		fmt.Fprintf(&b, "error: %s\n", e)
 	}
-	if len(errs) > 0 && freed == 0 {
+	if len(partialErrs) > 0 || len(errs) > 0 {
 		item.Status = model.StatusError
-		return &Result{Item: item, Success: false, Error: "cleanup errors", Output: b.String()}
+		return &Result{Item: item, Success: false, Error: "cleanup incomplete", Output: b.String(), BytesFreed: freed}
 	}
 	item.Status = model.StatusCleaned
 	item.Freed = FormatBytes(freed)
@@ -291,9 +295,9 @@ func cleanAgePaths(item *model.Item, maxDays int) *Result {
 	for _, e := range errs {
 		fmt.Fprintf(&b, "error: %s\n", e)
 	}
-	if len(errs) > 0 && freed == 0 {
+	if len(errs) > 0 {
 		item.Status = model.StatusError
-		return &Result{Item: item, Success: false, Error: "cleanup errors", Output: b.String()}
+		return &Result{Item: item, Success: false, Error: "cleanup incomplete", Output: b.String(), BytesFreed: freed}
 	}
 	item.Status = model.StatusCleaned
 	item.Freed = FormatBytes(freed)
@@ -305,20 +309,27 @@ func cleanContainerLogs(ctx context.Context, item *model.Item, opts Options) *Re
 	// List running+stopped container IDs; truncate oversized json-file logs when discoverable.
 	out, err := exec.CommandContext(ctx, cleanerDocker, "ps", "-aq").CombinedOutput()
 	if err != nil {
-		// No docker or daemon down — not a hard failure for optional cleanup.
-		item.Status = model.StatusCleaned
+		// No docker or daemon down — this optional cleanup was not performed.
+		item.Status = model.StatusInfo
 		return &Result{Item: item, Success: true, Output: "docker unavailable: " + err.Error()}
 	}
 	ids := strings.Fields(string(out))
 	var freed int64
+	failures := 0
 	var b strings.Builder
 	for _, id := range ids {
 		logPath, err := containerLogPath(ctx, id)
 		if err != nil || logPath == "" {
+			failures++
+			if err == nil {
+				err = fmt.Errorf("empty log path")
+			}
+			fmt.Fprintf(&b, "skip %s: %v\n", id, err)
 			continue
 		}
 		ok, before, err := retention.TruncateFileIfOver(logPath, maxBytes)
 		if err != nil {
+			failures++
 			fmt.Fprintf(&b, "skip %s: %v\n", id, err)
 			continue
 		}
@@ -329,6 +340,11 @@ func cleanContainerLogs(ctx context.Context, item *model.Item, opts Options) *Re
 	}
 	if opts.Verbose && b.Len() == 0 {
 		b.WriteString("no oversized container logs\n")
+	}
+	if failures > 0 {
+		item.Status = model.StatusError
+		item.Freed = FormatBytes(freed)
+		return &Result{Item: item, Success: false, Error: "some container logs could not be inspected or truncated", Output: b.String(), BytesFreed: freed}
 	}
 	item.Status = model.StatusCleaned
 	item.Freed = FormatBytes(freed)

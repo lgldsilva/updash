@@ -99,3 +99,29 @@ func TestUpdateAgent_OpenCode(t *testing.T) {
 		t.Fatalf("dispatched = %v, want [opencode upgrade]", dispatched)
 	}
 }
+
+func TestExecutePreparedBatch_OpenCodeKeepsHealthCheck(t *testing.T) {
+	exe := tempExecutable(t)
+	item := &model.Item{Name: agentOpenCode, Category: model.CatAgent}
+	batch, err := PrepareUpdateBatch(context.Background(), model.CatAgent, []*model.Item{item})
+	if err != nil {
+		t.Fatal(err)
+	}
+	prevRun, prevRunner, prevLook := runUpdateCmd, outputRunner, lookPath
+	runUpdateCmd = func(context.Context, Options, string, ...string) (string, string, error) {
+		return "upgrade done", "", nil
+	}
+	outputRunner = func(context.Context, string, ...string) ([]byte, error) {
+		return []byte("1.18.16"), nil
+	}
+	lookPath = func(string) (string, error) { return exe, nil }
+	t.Cleanup(func() { runUpdateCmd, outputRunner, lookPath = prevRun, prevRunner, prevLook })
+
+	results := ExecutePreparedBatch(context.Background(), batch, SilentOptions())
+	if len(results) != 1 || !results[0].Success || item.Status != model.StatusDone {
+		t.Fatalf("prepared OpenCode update lost health validation: results=%+v status=%v", results, item.Status)
+	}
+	if !strings.Contains(results[0].Output, "opencode healthy") {
+		t.Fatalf("health validation output missing: %q", results[0].Output)
+	}
+}

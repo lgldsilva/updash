@@ -471,7 +471,8 @@ func TestPrimeElevationSession_passwordlessAndPrompt(t *testing.T) {
 
 func TestRunBrewUpdateBatch_plain(t *testing.T) {
 	restoreHooks(t)
-	updateCategory = func(ctx context.Context, cat model.Category, items []*model.Item, opts updater.Options) []*updater.Result {
+	executePreparedBatch = func(_ context.Context, batch *updater.PreparedUpdateBatch, _ updater.Options) []*updater.Result {
+		items := batch.Items()
 		return []*updater.Result{{Item: items[0], Success: true}}
 	}
 	var sess *elevate.Session

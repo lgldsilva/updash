@@ -296,7 +296,7 @@ func (s *State) writeOpProgress(b *strings.Builder, active bool, verb string, to
 }
 
 func (s *State) writeAgentUpToDate(b *strings.Builder, summary *model.SourceSummary) {
-	if summary.Total == 0 {
+	if summary.Total == 0 || !summaryItemsAffirmativelyOK(summary.Items) {
 		return
 	}
 	var msg string
@@ -314,6 +314,18 @@ func (s *State) writeAgentUpToDate(b *strings.Builder, summary *model.SourceSumm
 		ItemOKStyle.Render(msg),
 	))
 	b.WriteString(tuiNewline)
+}
+
+func summaryItemsAffirmativelyOK(items []*model.Item) bool {
+	if len(items) == 0 {
+		return false
+	}
+	for _, item := range items {
+		if item == nil || item.Status != model.StatusOK {
+			return false
+		}
+	}
+	return true
 }
 
 func (s *State) writeUpdateItems(b *strings.Builder, summary *model.SourceSummary, flatIdx int) int {

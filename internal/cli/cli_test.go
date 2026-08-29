@@ -442,6 +442,11 @@ func TestRunCategoryUpdateSection_brewPasswordSkip(t *testing.T) {
 	}
 	// microsoft-* is on the brew password list; without a session the batch is skipped.
 	items := []*model.Item{{Name: "microsoft-office", Category: model.CatBrew}}
+	batch, err := updater.PrepareUpdateBatch(context.Background(), model.CatBrew, items)
+	if err != nil {
+		t.Fatal(err)
+	}
+	env.prepared = map[model.Category]*updater.PreparedUpdateBatch{model.CatBrew: batch}
 	out := captureStdout(t, func() {
 		ok, fail, skipped, res := runCategoryUpdateSection(context.Background(), env, model.CatBrew, items)
 		if ok != 0 || fail != 0 || skipped != 1 || len(res) != 1 {
@@ -450,6 +455,35 @@ func TestRunCategoryUpdateSection_brewPasswordSkip(t *testing.T) {
 	})
 	if !strings.Contains(out, "Brew") {
 		t.Fatalf("output=%q", out)
+	}
+}
+
+func TestRunCategoryUpdateSection_brewUsesPreparedPlan(t *testing.T) {
+	restoreHooks(t)
+	items := []*model.Item{{Name: "wget", Category: model.CatBrew}}
+	batch, err := updater.PrepareUpdateBatch(context.Background(), model.CatBrew, items)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var executed []*model.Item
+	executePreparedBatch = func(_ context.Context, batch *updater.PreparedUpdateBatch, _ updater.Options) []*updater.Result {
+		executed = append(executed, batch.Items()...)
+		return []*updater.Result{{Item: items[0], Success: true}}
+	}
+	updateCategory = func(context.Context, model.Category, []*model.Item, updater.Options) []*updater.Result {
+		t.Fatal("legacy updateCategory must not be used after preflight")
+		return nil
+	}
+	var sess *elevate.Session
+	env := updateBatchEnv{
+		plat:        model.PlatformInfo{OS: "linux"},
+		summaries:   []*model.SourceSummary{{Category: model.CatBrew, Label: "Brew"}},
+		prepared:    map[model.Category]*updater.PreparedUpdateBatch{model.CatBrew: batch},
+		elevSession: &sess,
+	}
+	ok, fail, skipped, _ := runCategoryUpdateSection(context.Background(), env, model.CatBrew, items)
+	if ok != 1 || fail != 0 || skipped != 0 || len(executed) != 1 || executed[0] != items[0] {
+		t.Fatalf("ok=%d fail=%d skipped=%d executed=%v", ok, fail, skipped, executed)
 	}
 }
 

@@ -12,6 +12,8 @@ set -uo pipefail
 
 root=$(cd "$(dirname "$0")/.." && pwd)
 wf="${1:-$root/.github/workflows/release.yml}"
+codeql_wf="$root/.github/workflows/codeql.yml"
+autotag_wf="$root/.github/workflows/autotag.yml"
 
 FAIL=0
 pass() { printf '  ✓ %s\n' "$1"; }
@@ -52,6 +54,24 @@ if grep -qF 'GORELEASER_CURRENT_TAG' "$wf"; then
   pass "GoReleaser is given the tag explicitly (HEAD is a detached SHA)"
 else
   fail "GoReleaser would have to re-derive the tag from a detached checkout"
+fi
+
+if grep -qF 'continue-on-error: true' "$wf"; then
+  fail "release workflow allows a material release step to continue after failure"
+else
+  pass "release workflow does not ignore material release failures"
+fi
+
+if grep -qF 'continue-on-error: true' "$codeql_wf"; then
+  fail "CodeQL workflow allows security analysis to continue after failure"
+else
+  pass "CodeQL failures remain blocking"
+fi
+
+if grep -qF 'required: false' "$autotag_wf"; then
+  fail "autotag workflow allows dispatch without the tested commit SHA"
+else
+  pass "autotag requires the tested commit SHA"
 fi
 
 if awk '/^permissions:/{f=1;next} f&&/^  contents: read/{print;exit}' "$wf" | grep -q .; then

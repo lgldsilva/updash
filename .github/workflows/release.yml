@@ -186,9 +186,18 @@ jobs:
             echo "force_rerelease=true — overwriting assets of $TAG on purpose"
             exit 0
           fi
-          if ! gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets > /tmp/rel.json 2>/dev/null; then
-            echo "✓ no existing release for $TAG"
-            exit 0
+          set +e
+          gh api "repos/$GITHUB_REPOSITORY/releases/tags/$TAG" --jq '{assets: [.assets[].name]}' > /tmp/rel.json 2>/tmp/rel.err
+          status=$?
+          set -e
+          if [ "$status" -ne 0 ]; then
+            if grep -qE 'HTTP 404|404 Not Found' /tmp/rel.err; then
+              echo "✓ no existing release for $TAG"
+              exit 0
+            fi
+            cat /tmp/rel.err >&2
+            echo "❌ could not determine whether release $TAG already exists" >&2
+            exit "$status"
           fi
           if jq -e '.assets[] | select(.name == "checksums.txt")' /tmp/rel.json >/dev/null; then
             echo "❌ $TAG already has a published checksums.txt — re-releasing would replace signed-off artifacts." >&2

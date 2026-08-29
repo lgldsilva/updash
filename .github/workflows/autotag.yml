@@ -5,7 +5,7 @@ on:
     inputs:
       tested_sha:
         description: 'Validated main commit to tag.'
-        required: false
+        required: true
         type: string
 
 concurrency: autotag-main

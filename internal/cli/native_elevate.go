@@ -49,6 +49,7 @@ func runNativeElevatedItems(
 	opts updater.Options,
 	cfg Config,
 	sess **elevate.Session,
+	preparedBatches ...map[model.Category]*updater.PreparedUpdateBatch,
 ) []*updater.Result {
 	if !stdinIsTTYFn() {
 		fmt.Fprintln(os.Stderr, "⚠ Run in Terminal.app (not a pipe/CI) for the native macOS dialog to appear")
@@ -75,7 +76,20 @@ func runNativeElevatedItems(
 
 	var results []*updater.Result
 	groups := groupByCategory(items)
+	var prepared map[model.Category]*updater.PreparedUpdateBatch
+	if len(preparedBatches) > 0 {
+		prepared = preparedBatches[0]
+	}
 	for _, cat := range sortedCategories(groups) {
+		if batch := prepared[cat]; batch != nil {
+			subset, err := batch.Subset(groups[cat])
+			if err != nil {
+				results = append(results, updatePlanErrorResults(groups[cat], err)...)
+			} else {
+				results = append(results, executePreparedBatch(ctx, subset, opts)...)
+			}
+			continue
+		}
 		if cat == model.CatBrew {
 			results = append(results, updateCategory(ctx, cat, groups[cat], opts)...)
 			continue

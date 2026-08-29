@@ -52,6 +52,9 @@ func TestHomelabCleanSource_Scan_ageDirs(t *testing.T) {
 	if err := os.Chtimes(m2, old, old); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.Chtimes(filepath.Join(m2, "x.jar"), old, old); err != nil {
+		t.Fatal(err)
+	}
 
 	// no docker → no container-logs / disk-pressure
 	items, err := (&HomelabCleanSource{}).Scan(context.Background(), model.PlatformInfo{})
@@ -69,6 +72,17 @@ func TestHomelabCleanSource_Scan_ageDirs(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("expected maven clean candidate, got %+v", items)
+	}
+}
+
+func TestScanAgeDir_ReportsInspectionFailure(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "not-a-directory")
+	if err := os.WriteFile(path, []byte("file"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	items := scanAgeDir("dev-cache:test", path, 14, time.Now(), "mtime > 14d")
+	if len(items) != 1 || items[0].Status != model.StatusUnverified {
+		t.Fatalf("expected unverified age scan, got %+v", items)
 	}
 }
 

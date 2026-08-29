@@ -171,6 +171,30 @@ func TestPlanUpdateCommands_AptRefreshesOnceThenTargetsSelection(t *testing.T) {
 	}
 }
 
+func TestPreparedBatchSubsetKeepsStoredPlans(t *testing.T) {
+	first := &model.Item{Name: "first"}
+	second := &model.Item{Name: "second"}
+	batch, err := PrepareUpdateBatch(context.Background(), model.CatBrew, []*model.Item{first, second})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	subset, err := batch.Subset([]*model.Item{second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := subset.Items(); len(got) != 1 || got[0] != second {
+		t.Fatalf("subset items = %#v", got)
+	}
+	plans := subset.Plans()
+	if len(plans) != 1 || !reflect.DeepEqual(plans[0].Args, []string{"upgrade", "--greedy", "second"}) {
+		t.Fatalf("subset plans = %#v", plans)
+	}
+	if _, err := batch.Subset([]*model.Item{{Name: "missing"}}); err == nil {
+		t.Fatal("subset must reject an item outside the prepared batch")
+	}
+}
+
 func TestPlanUpdateCommands_EmptyAndMissingIDsDoNotBroadenScope(t *testing.T) {
 	for _, category := range []model.Category{model.CatBrew, model.CatWinget, model.CatFlatpak, model.CatAgent} {
 		plans, err := PlanUpdateCommands(category, nil)
@@ -263,6 +287,40 @@ func TestPreparedNpmBatch_PlansOnceAndExecutesStoredPlan(t *testing.T) {
 	want := []string{"npm", "update", "-g", "example", "--allow-scripts=example"}
 	if !reflect.DeepEqual(executed, want) {
 		t.Fatalf("executed=%v want=%v", executed, want)
+	}
+}
+
+func TestPreparedBatch_ExecutesStoredPlanWhenEnvironmentChanges(t *testing.T) {
+	originalLookPath, originalRun := lookPath, runUpdateCmd
+	t.Cleanup(func() { lookPath, runUpdateCmd = originalLookPath, originalRun })
+	lookPath = func(name string) (string, error) {
+		if name == "yay" {
+			return "/usr/bin/yay", nil
+		}
+		return originalLookPath(name)
+	}
+	batch, err := PrepareUpdateBatch(context.Background(), model.CatPacman, []*model.Item{{Name: "btop"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	lookPath = func(name string) (string, error) {
+		if name == "yay" {
+			return "", errors.New("yay disappeared")
+		}
+		return originalLookPath(name)
+	}
+	var executed []string
+	runUpdateCmd = func(_ context.Context, _ Options, name string, args ...string) (string, string, error) {
+		executed = append([]string{name}, args...)
+		return "ok", "", nil
+	}
+	results := ExecutePreparedBatch(context.Background(), batch, SilentOptions())
+	if len(results) != 1 || !results[0].Success {
+		t.Fatalf("results=%#v", results)
+	}
+	want := []string{"yay", "-Syu", "--noconfirm"}
+	if !reflect.DeepEqual(executed, want) {
+		t.Fatalf("executed=%v want stored plan %v", executed, want)
 	}
 }
 

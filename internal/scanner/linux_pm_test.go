@@ -1,6 +1,11 @@
 package scanner
 
-import "testing"
+import (
+	"errors"
+	"testing"
+
+	"github.com/lgldsilva/updash/internal/model"
+)
 
 func TestParseDnfCheckUpdate(t *testing.T) {
 	out := `
@@ -66,6 +71,17 @@ func TestParseZypperListUpdatesEmpty(t *testing.T) {
 	}
 }
 
+func TestZypperScanFailureWithOutputIsError(t *testing.T) {
+	enableMocks()
+	defer disableMocks()
+	setMock("zypper", []string{"--quiet", "--non-interactive", "list-updates"}, "warning: repository unavailable", errors.New("zypper failed"))
+
+	items, _ := (&ZypperSource{}).Scan(t.Context(), model.PlatformInfo{})
+	if len(items) != 1 || items[0].Status != model.StatusError {
+		t.Fatalf("expected error for failed zypper command, got %+v", items)
+	}
+}
+
 func TestParseApkVersion(t *testing.T) {
 	out := `Installed:                                Available:
 openssl-3.1.4-r5                        < openssl-3.1.5-r0
@@ -95,6 +111,17 @@ func TestApkSplitNameVer(t *testing.T) {
 		if name != c.name || ver != c.ver {
 			t.Errorf("apkSplitNameVer(%q) = (%q,%q), want (%q,%q)", c.in, name, ver, c.name, c.ver)
 		}
+	}
+}
+
+func TestApkScanFailureWithOutputIsError(t *testing.T) {
+	enableMocks()
+	defer disableMocks()
+	setMock("apk", []string{"version", "-l", "<"}, "WARNING: database is locked", errors.New("apk failed"))
+
+	items, _ := (&ApkSource{}).Scan(t.Context(), model.PlatformInfo{})
+	if len(items) != 1 || items[0].Status != model.StatusError {
+		t.Fatalf("expected error for failed apk command, got %+v", items)
 	}
 }
 

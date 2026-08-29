@@ -62,6 +62,9 @@ func TestCollectOldPaths_and_Remove(t *testing.T) {
 	if err := os.Chtimes(oldDir, oldTime, oldTime); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.Chtimes(oldFile, oldTime, oldTime); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.Chtimes(newDir, now, now); err != nil {
 		t.Fatal(err)
 	}
@@ -140,6 +143,9 @@ func TestCollectOldPaths_depthZero(t *testing.T) {
 	}
 	now := time.Now()
 	old := now.AddDate(0, 0, -10)
+	if err := os.Chtimes(filepath.Join(root, "f"), old, old); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.Chtimes(root, old, old); err != nil {
 		t.Fatal(err)
 	}
@@ -149,6 +155,9 @@ func TestCollectOldPaths_depthZero(t *testing.T) {
 	}
 	// fresh root should not qualify
 	if err := os.Chtimes(root, now, now); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(filepath.Join(root, "f"), now, now); err != nil {
 		t.Fatal(err)
 	}
 	cands, total, err = CollectOldPaths(root, 5, 0, now)
@@ -190,6 +199,54 @@ func TestCollectOldPaths_fileChildren(t *testing.T) {
 	cands, total, err := CollectOldPaths(root, 7, 1, now)
 	if err != nil || len(cands) != 1 || total != 7 {
 		t.Fatalf("cands=%v total=%d err=%v", cands, total, err)
+	}
+}
+
+func TestCollectOldPaths_protectsRecentDescendant(t *testing.T) {
+	root := t.TempDir()
+	oldDir := filepath.Join(root, "old-parent")
+	if err := os.MkdirAll(filepath.Join(oldDir, "nested"), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	old := time.Now().AddDate(0, 0, -30)
+	for _, name := range []string{"old-parent", "old-parent/nested", "old-parent/nested/old.txt"} {
+		path := filepath.Join(root, name)
+		if name == "old-parent/nested/old.txt" {
+			if err := os.WriteFile(path, []byte("old"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := os.Chtimes(path, old, old); err != nil {
+			t.Fatal(err)
+		}
+	}
+	recent := time.Now().AddDate(0, 0, -1)
+	recentFile := filepath.Join(oldDir, "nested", "recent.txt")
+	if err := os.WriteFile(recentFile, []byte("recent"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(recentFile, recent, recent); err != nil {
+		t.Fatal(err)
+	}
+
+	cands, total, err := CollectOldPaths(root, 14, 1, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cands) != 0 || total != 0 {
+		t.Fatalf("recent descendant must protect parent: cands=%v total=%d", cands, total)
+	}
+}
+
+func TestDirSizeCtxReturnsCancellation(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "file"), []byte("data"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := dirSizeCtx(ctx, root); !errors.Is(err, context.Canceled) {
+		t.Fatalf("dirSizeCtx error=%v, want context.Canceled", err)
 	}
 }
 

@@ -84,7 +84,7 @@ func (s *BunSource) Scan(ctx context.Context, plat model.PlatformInfo) ([]*model
 	if err != nil && len(out) == 0 {
 		return []*model.Item{errItem(binBun, model.CatBun)}, nil
 	}
-	return okOrOutdated(binBun, model.CatBun, ParseBunPmLsGlobal(string(out))), nil
+	return infoOrOutdated(binBun, model.CatBun, ParseBunPmLsGlobal(string(out))), nil
 }
 
 // ParseBunPmLsGlobal parses `bun pm ls -g` tree rows like:

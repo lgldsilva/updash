@@ -787,6 +787,24 @@ func TestReplaceRunningBinaryWithOS(t *testing.T) {
 	}
 }
 
+func TestReplaceBinaryAt_preservesExistingPermissions(t *testing.T) {
+	dest := filepath.Join(t.TempDir(), "updash")
+	if err := os.WriteFile(dest, []byte("old"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := ReplaceBinaryAt([]byte("new"), dest, "linux"); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(dest)
+	if err != nil || string(got) != "new" {
+		t.Fatalf("dest=%q err=%v", got, err)
+	}
+	info, err := os.Stat(dest)
+	if err != nil || info.Mode().Perm() != 0o700 {
+		t.Fatalf("mode=%o err=%v, want 700", info.Mode().Perm(), err)
+	}
+}
+
 func TestReplaceRunningBinaryWithOS_WindowsFallback(t *testing.T) {
 	dir := t.TempDir()
 	fakeBin := filepath.Join(dir, "fake-updash")

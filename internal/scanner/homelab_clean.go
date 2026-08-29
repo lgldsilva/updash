@@ -45,7 +45,7 @@ func (s *HomelabCleanSource) Scan(ctx context.Context, plat model.PlatformInfo) 
 		filepath.Join(home, ".m2", "repository"),
 		devDays,
 		now,
-		fmt.Sprintf("atime/"+policyMtimeDays, devDays),
+		fmt.Sprintf(policyMtimeDays, devDays),
 	)...)
 	items = append(items, scanAgeDir(
 		"dev-cache:gradle",
@@ -123,7 +123,17 @@ func hostLogTargets(home, goos string) []namedPath {
 
 func scanAgeDir(name, dir string, maxDays int, now time.Time, policy string) []*model.Item {
 	cands, total, err := retention.CollectOldPaths(dir, maxDays, 1, now)
-	if err != nil || len(cands) == 0 || total <= 0 {
+	if err != nil {
+		return []*model.Item{{
+			Name:       name,
+			Category:   model.CatHomelabClean,
+			PackageID:  dir,
+			CurrentVer: "scan failed: " + err.Error(),
+			Status:     model.StatusUnverified,
+			KeepPolicy: policy,
+		}}
+	}
+	if len(cands) == 0 || total <= 0 {
 		return nil
 	}
 	return []*model.Item{{

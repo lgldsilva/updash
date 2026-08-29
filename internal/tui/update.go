@@ -546,7 +546,7 @@ func (s *State) showUpdateConfirm(items []*model.Item) bool {
 		s.AddLog("Update blocked before confirmation: source state is inconclusive", false)
 		return false
 	}
-	groups, err := prepareUpdateGroups(s.Summaries, items)
+	groups, err := prepareUpdateGroups(s.Ctx, s.Summaries, items)
 	if err != nil {
 		s.LastSummary = fmt.Sprintf("⚠ Update blocked — cannot plan commands: %v", err)
 		s.AddLog(fmt.Sprintf("Update blocked before confirmation: %v", err), false)
@@ -831,11 +831,14 @@ func groupOutdatedByCategory(summaries []*model.SourceSummary, items []*model.It
 	return groups
 }
 
-func prepareUpdateGroups(summaries []*model.SourceSummary, items []*model.Item) ([]*preparedUpdateGroup, error) {
+func prepareUpdateGroups(ctx context.Context, summaries []*model.SourceSummary, items []*model.Item) ([]*preparedUpdateGroup, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	raw := groupOutdatedByCategory(summaries, copyItems(items))
 	groups := make([]*preparedUpdateGroup, 0, len(raw))
 	for _, group := range raw {
-		batch, err := prepareUpdateBatch(context.Background(), group.category, group.items)
+		batch, err := prepareUpdateBatch(ctx, group.category, group.items)
 		if err != nil {
 			return nil, err
 		}
