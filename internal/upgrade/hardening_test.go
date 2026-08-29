@@ -430,6 +430,66 @@ func TestWriteStagedBinary_createError(t *testing.T) {
 	}
 }
 
+func TestReplaceBinaryAt_refusesEmptyDestination(t *testing.T) {
+	if err := ReplaceBinaryAt([]byte("payload"), "", "linux"); err == nil {
+		t.Fatal("empty destination must fail closed")
+	}
+}
+
+func TestReplaceBinaryAt_refusesEmptyPayload(t *testing.T) {
+	dest := filepath.Join(t.TempDir(), "updash")
+	if err := os.WriteFile(dest, []byte("old"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := ReplaceBinaryAt(nil, dest, "linux"); err == nil {
+		t.Fatal("empty payload must fail closed")
+	}
+	got, err := os.ReadFile(dest)
+	if err != nil || string(got) != "old" {
+		t.Fatalf("destination must be untouched, got %q err=%v", got, err)
+	}
+}
+
+func TestReplaceBinaryAt_brokenSymlinkFailsClosed(t *testing.T) {
+	dest := filepath.Join(t.TempDir(), "updash")
+	if err := os.Symlink(filepath.Join(t.TempDir(), "missing"), dest); err != nil {
+		t.Fatal(err)
+	}
+	if err := ReplaceBinaryAt([]byte("payload"), dest, "linux"); err == nil {
+		t.Fatal("a dangling destination symlink must fail closed")
+	}
+}
+
+func TestReplaceBinaryAt_unreadableDestinationFailsClosed(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("permission-based lstat errors are not reliable as root")
+	}
+	dir := t.TempDir()
+	blocked := filepath.Join(dir, "blocked")
+	if err := os.Mkdir(blocked, 0o000); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(blocked, 0o750) })
+	dest := filepath.Join(blocked, "updash")
+	if err := ReplaceBinaryAt([]byte("payload"), dest, "linux"); err == nil {
+		t.Fatal("an uninspectable destination must fail closed")
+	}
+}
+
+func TestReplaceBinaryAt_firstInstall(t *testing.T) {
+	dest := filepath.Join(t.TempDir(), "bin", "updash")
+	if err := os.MkdirAll(filepath.Dir(dest), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := ReplaceBinaryAt([]byte("payload"), dest, "linux"); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(dest)
+	if err != nil || string(got) != "payload" {
+		t.Fatalf("got %q err=%v", got, err)
+	}
+}
+
 type errReader struct{}
 
 func (errReader) Read([]byte) (int, error) { return 0, fmt.Errorf("boom") }

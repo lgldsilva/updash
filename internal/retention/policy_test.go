@@ -616,3 +616,92 @@ func TestLatestProjectMtime_missingPath(t *testing.T) {
 		t.Fatal("undetermined recency must surface as a partial error")
 	}
 }
+
+func TestCollectOldPaths_skipsRecentFiles(t *testing.T) {
+	root := t.TempDir()
+	oldFile := filepath.Join(root, "old.log")
+	newFile := filepath.Join(root, "new.log")
+	if err := os.WriteFile(oldFile, []byte("old"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(newFile, []byte("new"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	old := now.AddDate(0, 0, -20)
+	if err := os.Chtimes(oldFile, old, old); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(newFile, now, now); err != nil {
+		t.Fatal(err)
+	}
+
+	cands, total, err := CollectOldPaths(root, 7, 1, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cands) != 1 || filepath.Base(cands[0].Path) != "old.log" || total != 3 {
+		t.Fatalf("cands=%v total=%d", cands, total)
+	}
+}
+
+func TestCollectOldPaths_unreadableTreeFailsClosed(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("permission-based walk errors are not reliable as root")
+	}
+	root := t.TempDir()
+	parent := filepath.Join(root, "cache-dir")
+	locked := filepath.Join(parent, "locked")
+	if err := os.MkdirAll(locked, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(locked, "blob"), []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	old := time.Now().AddDate(0, 0, -30)
+	ageTree(t, parent, old)
+	if err := os.Chmod(locked, 0o000); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(locked, 0o750) })
+
+	cands, total, err := CollectOldPaths(root, 14, 1, time.Now())
+	if err == nil {
+		t.Fatalf("incomplete inspection must fail closed, got cands=%v total=%d", cands, total)
+	}
+	if len(cands) != 0 || total != 0 {
+		t.Fatalf("fail-closed must not return deletion candidates: cands=%v total=%d", cands, total)
+	}
+}
+
+func TestLatestPathMtime_missingPath(t *testing.T) {
+	if _, err := latestPathMtime(filepath.Join(t.TempDir(), "gone")); err == nil {
+		t.Fatal("expected error for a missing path")
+	}
+	if _, _, err := collectLeaf(filepath.Join(t.TempDir(), "gone"), 7, time.Now()); err == nil {
+		t.Fatal("collectLeaf must surface inspection failures")
+	}
+}
+
+func TestCollectBuildDir_propagatesCancellation(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "proj", "target")
+	if err := os.MkdirAll(path, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(path, "app.bin"), []byte("bin"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	var out []PathCandidate
+	var total int64
+	var partial []string
+	err := collectBuildDir(ctx, root, path, &out, &total, &partial)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("collectBuildDir error=%v, want context.Canceled", err)
+	}
+	if len(out) != 0 || total != 0 {
+		t.Fatalf("cancelled sizing must not record candidates: out=%v total=%d", out, total)
+	}
+}
