@@ -41,13 +41,9 @@ func isDir(path string) bool {
 
 func (s *NvmSource) Scan(ctx context.Context, plat model.PlatformInfo) ([]*model.Item, error) {
 	if nvmInstalled(plat) {
-		return []*model.Item{
-			{Name: binNvm, Category: model.CatNvm, Status: model.StatusOK, CurrentVer: statusInstalled},
-		}, nil
+		return []*model.Item{infoItem(binNvm, model.CatNvm, statusInstalled)}, nil
 	}
-	return []*model.Item{
-		{Name: binNvm, Category: model.CatNvm, Status: model.StatusOK, CurrentVer: "not installed"},
-	}, nil
+	return []*model.Item{infoItem(binNvm, model.CatNvm, "not installed")}, nil
 }
 
 // OmzSource checks Oh My Zsh availability.
@@ -68,11 +64,7 @@ func omzInstalled() bool {
 
 func (s *OmzSource) Scan(ctx context.Context, plat model.PlatformInfo) ([]*model.Item, error) {
 	if omzInstalled() {
-		return []*model.Item{
-			{Name: "omz", Category: model.CatOmz, Status: model.StatusOK, CurrentVer: statusInstalled},
-		}, nil
+		return []*model.Item{infoItem("omz", model.CatOmz, statusInstalled)}, nil
 	}
-	return []*model.Item{
-		{Name: "omz", Category: model.CatOmz, Status: model.StatusOK, CurrentVer: "not installed"},
-	}, nil
+	return []*model.Item{infoItem("omz", model.CatOmz, "not installed")}, nil
 }

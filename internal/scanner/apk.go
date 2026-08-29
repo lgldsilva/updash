@@ -17,7 +17,7 @@ func (s *ApkSource) Icon() string             { return "🔷" }
 func (s *ApkSource) Scan(ctx context.Context, plat model.PlatformInfo) ([]*model.Item, error) {
 	// List installed packages older than the repository version.
 	out, err := execCombined(ctx, binApk, "version", "-l", "<")
-	if err != nil && len(out) == 0 {
+	if err != nil {
 		return []*model.Item{errItem(binApk, model.CatApk)}, nil
 	}
 	return okOrOutdated(binApk, model.CatApk, ParseApkVersion(string(out))), nil

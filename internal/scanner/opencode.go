@@ -26,9 +26,7 @@ func (s *OpenCodeSource) Scan(ctx context.Context, plat model.PlatformInfo) ([]*
 	dir := OpenCodeConfigDir()
 	pkgJSON := filepath.Join(dir, "package.json")
 	if _, err := os.Stat(pkgJSON); err != nil {
-		return []*model.Item{
-			{Name: nameOpenCodePlugins, Category: model.CatOpenCodePlugins, Status: model.StatusOK, CurrentVer: "no package.json"},
-		}, nil
+		return []*model.Item{infoItem(nameOpenCodePlugins, model.CatOpenCodePlugins, "no package.json")}, nil
 	}
 
 	out, err := execCommand(ctx, binNpm, "outdated", "--prefix", dir, "--json")

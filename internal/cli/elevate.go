@@ -194,28 +194,11 @@ func runBrewUpdateBatch(
 	cfg Config,
 	sess **elevate.Session,
 ) []*updater.Result {
-	var plain, password []*model.Item
-	for _, it := range items {
-		if brewItemNeedsPassword(it) {
-			password = append(password, it)
-		} else {
-			plain = append(plain, it)
-		}
+	prepared, err := prepareUpdateBatch(ctx, model.CatBrew, items)
+	if err != nil {
+		return updatePlanErrorResults(items, err)
 	}
-
-	var results []*updater.Result
-	if len(plain) > 0 {
-		results = append(results, updateCategory(ctx, model.CatBrew, plain, opts)...)
-	}
-	if len(password) > 0 {
-		passCtx, skipped, reason := ensureBrewPassword(ctx, password, cfg, sess)
-		if skipped {
-			results = append(results, skipBatchResults(password, reason)...)
-		} else {
-			results = append(results, updateCategory(passCtx, model.CatBrew, password, opts)...)
-		}
-	}
-	return results
+	return runPreparedBrewUpdateBatch(ctx, prepared, items, opts, cfg, sess)
 }
 
 func partitionUpdatable(items []*model.Item) (updatable, manual []*model.Item) {

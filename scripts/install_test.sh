@@ -166,6 +166,71 @@ else
   pass "conflicting checksum entries are rejected"
 fi
 
+printf '%s  updash_3.0.0_linux_amd64.tar.gz\nmalformed  updash_3.0.0_linux_amd64.tar.gz\n' "$good" >"$work/malformed-duplicate.txt"
+if run_lib checksum_for "$work/malformed-duplicate.txt" "updash_3.0.0_linux_amd64.tar.gz" >/dev/null 2>&1; then
+  fail "a valid plus malformed checksum entry was accepted"
+else
+  pass "a valid plus malformed checksum entry is rejected"
+fi
+
+# ── 7. explicit binary mode remains compatible with the documented command ─
+mode="$(UPDASH_INSTALL_LIB=1 bash -c 'script="$1"; set -- binary; . "$script"; printf "%s" "$MODE"' _ "$root/install.sh")"
+if [ "$mode" = "binary" ]; then
+  pass "explicit binary mode is accepted"
+else
+  fail "explicit binary mode resolved to '$mode'"
+fi
+
+# ── 8. archive members are validated before extraction ────────────────────
+tar_root="$work/tar-root"; mkdir -p "$tar_root"
+printf '\177ELFfixture' >"$tar_root/updash"
+ln -s "$victim" "$tar_root/planted-link"
+tar_archive="$work/members.tar.gz"
+tar -czf "$tar_archive" -C "$tar_root" updash planted-link
+if run_lib validate_tar_members "$tar_archive" >/dev/null 2>&1; then
+  fail "tar symlink member was accepted"
+else
+  pass "tar symlink member is rejected before extraction"
+fi
+
+if run_lib validate_archive_member_name "../escape" >/dev/null 2>&1; then
+  fail "parent traversal archive member was accepted"
+else
+  pass "parent traversal archive member is rejected"
+fi
+if run_lib validate_archive_member_name "/tmp/escape" >/dev/null 2>&1; then
+  fail "absolute archive member was accepted"
+else
+  pass "absolute archive member is rejected"
+fi
+
+# ── 9. payload must look like a native executable ─────────────────────────
+printf 'not an executable' >"$work/text-payload"
+if run_lib require_executable_image "$work/text-payload" >/dev/null 2>&1; then
+  fail "text payload was accepted as an executable"
+else
+  pass "text payload is rejected as an executable"
+fi
+printf '\177ELFfixture' >"$work/elf-payload"
+if run_lib require_executable_image "$work/elf-payload" >/dev/null 2>&1; then
+  pass "ELF payload is accepted"
+else
+  fail "ELF payload was rejected"
+fi
+printf 'MZ\000\000' >"$work/pe-payload"
+if run_lib require_executable_image "$work/pe-payload" >/dev/null 2>&1; then
+  pass "PE payload is accepted"
+else
+  fail "PE payload was rejected"
+fi
+
+extracted="$work/extracted"
+if run_lib extract_archive_member "$tar_archive" tar.gz updash "$extracted" >/dev/null 2>&1 && [ "$(od -An -tx1 -N4 "$extracted" | tr -d '[:space:]')" = "7f454c46" ]; then
+  pass "archive extraction returns only the selected member"
+else
+  fail "selected archive member was not extracted correctly"
+fi
+
 if [ "$FAIL" -eq 0 ]; then
   echo "install.sh staging is safe"
 else

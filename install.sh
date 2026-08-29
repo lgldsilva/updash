@@ -18,10 +18,14 @@ GITHUB_DL="https://github.com/${REPO}/releases/download"
 # Fail-closed transport for every download: https only (no plaintext even
 # after a redirect), TLS 1.2+, bounded redirects, and a size ceiling so a
 # hostile or broken host cannot stream an unbounded body onto the disk.
-CURL_SECURE_OPTS="--proto =https --proto-redir =https --tlsv1.2 --location \
-  --max-redirs 5 --max-time 300 --retry 2 --fail --silent --show-error"
+CURL_SECURE_OPTS=(
+  --proto "=https" --proto-redir "=https" --tlsv1.2 --location
+  --max-redirs 5 --max-time 300 --retry 2 --fail --silent --show-error
+)
 CURL_MAX_ARCHIVE_BYTES=67108864   # 64 MiB
-CURL_MAX_TEXT_BYTES=8388608       # 8 MiB
+CURL_MAX_API_BYTES=8388608        # 8 MiB
+CURL_MAX_CHECKSUM_BYTES=1048576   # 1 MiB
+CURL_MAX_EXTRACTED_BYTES=201326592 # 192 MiB
 
 INSTALL_DIR="${INSTALL_DIR:-$HOME/.local/bin}"
 
@@ -29,7 +33,7 @@ usage() {
   cat <<'EOF'
 updash installer — install the System Update Dashboard from GitHub.
 
-Usage: install.sh [options]
+Usage: install.sh [binary|options]
 
 Options:
   --from-source           Build from a local checkout instead of downloading
@@ -37,6 +41,9 @@ Options:
                           git working tree (go.mod + cmd/updash/ present).
   --version vX.Y.Z        Install a specific release (default: latest).
   --help                  Show this help and exit.
+
+The optional positional argument "binary" selects the default release-binary
+mode explicitly. "--from-source" selects source mode.
 
 Environment:
   INSTALL_DIR=...                Target bin directory (default: ~/.local/bin).
@@ -72,6 +79,7 @@ MODE="binary"
 PIN_VERSION=""
 while [ $# -gt 0 ]; do
   case "$1" in
+    binary)         MODE="binary" ;;
     --from-source) MODE="source" ;;
     --version)     PIN_VERSION="${2:-}"; [ -n "$PIN_VERSION" ] || die "--version requires a value"; shift ;;
     --version=*)   PIN_VERSION="${1#*=}" ;;
@@ -173,8 +181,7 @@ install_from_release() {
   else
     log "→ Querying latest release from GitHub…"
     local body
-    # shellcheck disable=SC2086 # CURL_SECURE_OPTS is a deliberate option list
-    body="$(curl $CURL_SECURE_OPTS --max-filesize "$CURL_MAX_TEXT_BYTES" "$GITHUB_API")" \
+    body="$(curl "${CURL_SECURE_OPTS[@]}" --max-filesize "$CURL_MAX_API_BYTES" "$GITHUB_API")" \
       || die "failed to fetch $GITHUB_API"
     tag="$(printf '%s' "$body" \
       | grep -o '"tag_name"[[:space:]]*:[[:space:]]*"[^"]*"' \
@@ -188,17 +195,14 @@ install_from_release() {
   local url_archive="${GITHUB_DL}/${tag}/${archive}"
   local url_checksums="${GITHUB_DL}/${tag}/checksums.txt"
 
-  local tmp
   _UPDASH_TMP="$(mktemp -d -t updash.XXXXXX)" || die "mktemp failed"
   local tmp="$_UPDASH_TMP"
   trap _cleanup_tmp EXIT
 
   log "→ Downloading $archive ($tag) for ${GOOS}/${GOARCH}…"
-  # shellcheck disable=SC2086 # CURL_SECURE_OPTS is a deliberate option list
-  curl $CURL_SECURE_OPTS --max-filesize "$CURL_MAX_ARCHIVE_BYTES" -o "$tmp/$archive" "$url_archive" \
+  download_limited "$url_archive" "$tmp/$archive" "$CURL_MAX_ARCHIVE_BYTES" \
     || die "download failed: $url_archive"
-  # shellcheck disable=SC2086 # CURL_SECURE_OPTS is a deliberate option list
-  curl $CURL_SECURE_OPTS --max-filesize "$CURL_MAX_TEXT_BYTES" -o "$tmp/checksums.txt" "$url_checksums" \
+  download_limited "$url_checksums" "$tmp/checksums.txt" "$CURL_MAX_CHECKSUM_BYTES" \
     || die "download failed: $url_checksums"
 
   local expected actual
@@ -210,12 +214,17 @@ install_from_release() {
   log "✓ sha256 verified"
 
   case "$EXT" in
-    tar.gz) require_cmd tar;   tar -xzf "$tmp/$archive" -C "$tmp" ;;
-    zip)    require_cmd unzip; unzip -o -q "$tmp/$archive" -d "$tmp" ;;
+    tar.gz) require_cmd tar; validate_tar_members "$tmp/$archive" ;;
+    zip)    require_cmd unzip; validate_zip_members "$tmp/$archive" ;;
   esac
   local bin="updash"
-  [ -f "$tmp/${bin}.exe" ] && bin="${bin}.exe"
-  [ -f "$tmp/$bin" ] || die "binary 'updash' not found in archive"
+  if ! archive_member_exists "$tmp/$archive" "$EXT" "$bin"; then
+    bin="${bin}.exe"
+  fi
+  archive_member_exists "$tmp/$archive" "$EXT" "$bin" || die "binary 'updash' not found in archive"
+  extract_archive_member "$tmp/$archive" "$EXT" "$bin" "$tmp/$bin" \
+    || die "could not extract binary 'updash' from archive"
+  require_executable_image "$tmp/$bin"
 
   install_binary "$tmp/$bin" "$tag"
 }
@@ -226,12 +235,37 @@ install_from_release() {
 # regex: the dots in "updash_1.2.3_linux_amd64.tar.gz" would otherwise be
 # wildcards and could match a different entry.
 checksum_for() {
-  local manifest="$1" want="$2" entries count
-  entries="$(awk -v want="$want" '
-    $2 == want && length($1) == 64 && $1 ~ /^[0-9a-fA-F]+$/ { print tolower($1) }
-  ' "$manifest" | sort -u)"
+  local manifest="$1" want="$2" entries count status
+  if entries="$(awk -v want="$want" '
+    $2 == want {
+      found=1
+      if (length($1) != 64 || $1 !~ /^[0-9a-fA-F]+$/) {
+        bad=1
+      } else {
+        print tolower($1)
+      }
+    }
+    END {
+      if (bad) exit 2
+      if (!found) exit 3
+    }
+  ' "$manifest")"; then
+    status=0
+  else
+    status=$?
+  fi
+  case "$status" in
+    2)
+      printf 'malformed sha256 entry for %s in checksums.txt' "$want"
+      return 1
+      ;;
+    3)
+      printf 'no sha256 entry found for %s in checksums.txt' "$want"
+      return 1
+      ;;
+  esac
   if [ -z "$entries" ]; then
-    printf 'no valid sha256 entry found for %s in checksums.txt' "$want"
+    printf 'no sha256 entry found for %s in checksums.txt' "$want"
     return 1
   fi
   count="$(printf '%s\n' "$entries" | wc -l | tr -d ' ')"
@@ -240,6 +274,126 @@ checksum_for() {
     return 1
   fi
   printf '%s' "$entries"
+}
+
+# download_limited <url> <destination> <max-bytes> — cap the streamed body,
+# including responses without a Content-Length header. The extra byte lets us
+# distinguish an exactly-at-limit response from one that exceeded the budget.
+download_limited() {
+  local url="$1" dest="$2" limit="$3" status size
+  require_cmd head
+  rm -f "$dest"
+  set +e
+  curl "${CURL_SECURE_OPTS[@]}" --max-filesize "$limit" "$url" \
+    | head -c "$((limit + 1))" >"$dest"
+  status=$?
+  set -e
+  size="$(wc -c <"$dest" | tr -d ' ')"
+  if [ "$size" -gt "$limit" ]; then
+    rm -f "$dest"
+    printf 'response exceeds %s-byte limit: %s' "$limit" "$url" >&2
+    return 1
+  fi
+  if [ "$status" -ne 0 ]; then
+    rm -f "$dest"
+    return "$status"
+  fi
+}
+
+validate_archive_member_name() {
+  local member="$1" normalized part
+  [ -n "$member" ] || die "archive contains an unnamed member"
+  case "$member" in
+    /*|\\*|[A-Za-z]:*) die "absolute path in archive: $member" ;;
+  esac
+  normalized="${member//\\//}"
+  IFS='/' read -r -a parts <<<"$normalized"
+  for part in "${parts[@]}"; do
+    [ "$part" != ".." ] || die "path traversal in archive: $member"
+  done
+}
+
+validate_tar_members() {
+  local archive="$1" names listing line type
+  names="$(tar -tzf "$archive")" || die "could not list tar archive"
+  while IFS= read -r line; do
+    [ -n "$line" ] || continue
+    validate_archive_member_name "$line"
+  done <<<"$names"
+
+  listing="$(tar -tvzf "$archive")" || die "could not inspect tar archive members"
+  while IFS= read -r line; do
+    [ -n "$line" ] || continue
+    type="${line:0:1}"
+    case "$type" in
+      -|d) ;;
+      *) die "non-regular archive member is not allowed: $line" ;;
+    esac
+  done <<<"$listing"
+}
+
+validate_zip_members() {
+  local archive="$1" names listing
+  names="$(unzip -Z1 "$archive")" || die "could not list zip archive"
+  while IFS= read -r line; do
+    [ -n "$line" ] || continue
+    validate_archive_member_name "$line"
+  done <<<"$names"
+
+  listing="$(unzip -Z -l "$archive")" || die "could not inspect zip archive members"
+  if ! awk '
+    $1 ~ /^[dl-][rwx-]{9}$/ {
+      seen=1
+      type=substr($1, 1, 1)
+      if (type != "-" && type != "d") exit 1
+    }
+    END { if (!seen) exit 2 }
+  ' <<<"$listing"; then
+    die "zip archive contains an unsupported or unrecognized member type"
+  fi
+}
+
+archive_member_exists() {
+  local archive="$1" ext="$2" member="$3"
+  case "$ext" in
+    tar.gz) tar -tzf "$archive" | grep -Fx -- "$member" >/dev/null ;;
+    zip)    unzip -Z1 "$archive" | grep -Fx -- "$member" >/dev/null ;;
+    *)      return 1 ;;
+  esac
+}
+
+extract_archive_member() {
+  local archive="$1" ext="$2" member="$3" dest="$4" status size
+  require_cmd head
+  rm -f "$dest"
+  set +e
+  case "$ext" in
+    tar.gz) tar -xOzf "$archive" "$member" | head -c "$((CURL_MAX_EXTRACTED_BYTES + 1))" >"$dest" ;;
+    zip)    unzip -p "$archive" "$member" | head -c "$((CURL_MAX_EXTRACTED_BYTES + 1))" >"$dest" ;;
+    *)      set -e; return 1 ;;
+  esac
+  status=$?
+  set -e
+  size="$(wc -c <"$dest" | tr -d ' ')"
+  if [ "$size" -gt "$CURL_MAX_EXTRACTED_BYTES" ]; then
+    rm -f "$dest"
+    printf 'archive member exceeds %s-byte limit: %s' "$CURL_MAX_EXTRACTED_BYTES" "$member" >&2
+    return 1
+  fi
+  if [ "$status" -ne 0 ]; then
+    rm -f "$dest"
+    return "$status"
+  fi
+}
+
+require_executable_image() {
+  local file="$1" magic
+  require_cmd od
+  magic="$(od -An -tx1 -N4 "$file" | tr -d '[:space:]' | tr 'A-F' 'a-f')"
+  case "$magic" in
+    7f454c46|4d5a*|feedface|feedfacf|cefaedfe|cffaedfe|cafebabe|bebafeca|cafebabf|bfbafeca) ;;
+    *) die "archive payload is not an ELF, Mach-O, or PE executable" ;;
+  esac
 }
 
 # ── Common install step ───────────────────────────────────────────────────

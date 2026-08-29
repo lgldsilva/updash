@@ -503,6 +503,34 @@ func replaceRunningBinaryWithOS(newBin []byte, goos string) error {
 	if err != nil {
 		return fmt.Errorf("resolve symlink: %w", err)
 	}
+	return replaceBinaryAt(newBin, self, goos)
+}
+
+// ReplaceBinaryAt atomically installs a locally produced binary at dest.
+// It shares the same staging, permission, and Windows replacement behavior as
+// the release self-update path. Existing symlinks are resolved before writes;
+// a missing destination is allowed for first-time development installs.
+func ReplaceBinaryAt(newBin []byte, dest, goos string) error {
+	if dest == "" {
+		return errors.New("refusing to install at an empty destination")
+	}
+	resolved := dest
+	if _, err := os.Lstat(dest); err == nil {
+		var resolveErr error
+		resolved, resolveErr = filepath.EvalSymlinks(dest)
+		if resolveErr != nil {
+			return fmt.Errorf("resolve destination symlink: %w", resolveErr)
+		}
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("inspect destination: %w", err)
+	}
+	return replaceBinaryAt(newBin, resolved, goos)
+}
+
+func replaceBinaryAt(newBin []byte, self, goos string) error {
+	if len(newBin) == 0 {
+		return errors.New("refusing to install an empty binary")
+	}
 	dir := filepath.Dir(self)
 	old := self + ".old"
 

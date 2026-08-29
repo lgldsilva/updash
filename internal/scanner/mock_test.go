@@ -581,6 +581,65 @@ func TestDockerScan_DaemonNotRunning(t *testing.T) {
 	if len(items) != 1 || !strings.Contains(items[0].CurrentVer, "not running") {
 		t.Errorf("expected daemon-not-running, got %+v", items)
 	}
+	if items[0].Status != model.StatusInfo {
+		t.Errorf("daemon availability is informational, got %s", items[0].Status)
+	}
+}
+
+func TestBunScan_EmptyIsInformational(t *testing.T) {
+	enableMocks()
+	defer disableMocks()
+	setMock("bun", []string{"pm", "ls", "-g"}, "", nil)
+
+	items, _ := (&BunSource{}).Scan(t.Context(), model.PlatformInfo{})
+	if len(items) != 1 || items[0].Status != model.StatusInfo {
+		t.Fatalf("expected informational empty inventory, got %+v", items)
+	}
+}
+
+func TestDockerCleanScan_DaemonNotRunningIsInformational(t *testing.T) {
+	enableMocks()
+	defer disableMocks()
+	setMock("docker", []string{"system", "df", "--format", "{{.Type}}\t{{.Size}}\t{{.Reclaimable}}"}, "Cannot connect to the Docker daemon", errors.New("docker unavailable"))
+
+	items, _ := (&DockerCleanSource{}).Scan(t.Context(), model.PlatformInfo{})
+	if len(items) != 1 || items[0].Status != model.StatusInfo {
+		t.Fatalf("expected informational Docker cleanup state, got %+v", items)
+	}
+}
+
+func TestGoCleanScan_ProbeFailureIsInformational(t *testing.T) {
+	enableMocks()
+	defer disableMocks()
+	setMock("go", []string{"env", "GOCACHE"}, "", errors.New("go unavailable"))
+
+	items, _ := (&GoCleanSource{}).Scan(t.Context(), model.PlatformInfo{})
+	if len(items) != 1 || items[0].Status != model.StatusInfo {
+		t.Fatalf("expected informational Go cache state, got %+v", items)
+	}
+}
+
+func TestNpmCleanScan_DetailsFailureIsInformational(t *testing.T) {
+	enableMocks()
+	defer disableMocks()
+	home := t.TempDir()
+	cacheDir := filepath.Join(home, ".npm")
+	if err := os.MkdirAll(cacheDir, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	oldHome := os.Getenv("HOME")
+	if err := os.Setenv("HOME", home); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Setenv("HOME", oldHome) })
+	setMock("du", []string{"-sh", cacheDir}, "12M\t"+cacheDir, nil)
+	setMock("du", []string{"-sk", filepath.Join(cacheDir, "_cacache")}, "", errors.New("permission denied"))
+	setMock("du", []string{"-sk", filepath.Join(cacheDir, "_npx")}, "", errors.New("permission denied"))
+
+	items, _ := (&NpmCleanSource{}).Scan(t.Context(), model.PlatformInfo{})
+	if len(items) != 1 || items[0].Status != model.StatusInfo {
+		t.Fatalf("expected informational npm cache state, got %+v", items)
+	}
 }
 
 // --- PACMAN Scanner ---
@@ -706,8 +765,8 @@ func TestBrewCleanSource_DuFailsOrEmpty_NoPanic(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Scan failed: %v", err)
 		}
-		if len(items) != 1 || items[0].CurrentVer != "0B" {
-			t.Fatalf("expected brew-cache with 0B size, got %+v", items)
+		if len(items) != 1 || items[0].CurrentVer != "unable to inspect cache" || items[0].Status != model.StatusInfo {
+			t.Fatalf("expected informational brew-cache, got %+v", items)
 		}
 	})
 
@@ -721,8 +780,8 @@ func TestBrewCleanSource_DuFailsOrEmpty_NoPanic(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Scan failed: %v", err)
 		}
-		if len(items) != 1 || items[0].CurrentVer != "0B" {
-			t.Fatalf("expected brew-cache with 0B size, got %+v", items)
+		if len(items) != 1 || items[0].CurrentVer != "unable to inspect cache" || items[0].Status != model.StatusInfo {
+			t.Fatalf("expected informational brew-cache, got %+v", items)
 		}
 	})
 }

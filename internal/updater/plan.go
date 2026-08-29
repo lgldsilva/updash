@@ -4,10 +4,13 @@ import (
 	"context"
 	"fmt"
 	"runtime"
+	"time"
 
 	"github.com/lgldsilva/updash/internal/model"
 	"github.com/lgldsilva/updash/internal/scanner"
 )
+
+const defaultPlanTimeout = 30 * time.Second
 
 // CommandScope describes how broadly a planned command can affect installed software.
 type CommandScope string
@@ -44,6 +47,40 @@ func (b *PreparedUpdateBatch) Category() model.Category { return b.category }
 func (b *PreparedUpdateBatch) Items() []*model.Item     { return append([]*model.Item(nil), b.items...) }
 func (b *PreparedUpdateBatch) Plans() []CommandPlan     { return clonePlans(b.plans) }
 
+// Subset returns a prepared batch for the requested items without invoking
+// the planner again. It is used when execution partitions one preflight batch
+// (for example, Brew items that do and do not need native elevation).
+func (b *PreparedUpdateBatch) Subset(items []*model.Item) (*PreparedUpdateBatch, error) {
+	if b == nil {
+		return nil, fmt.Errorf("cannot subset a nil prepared update batch")
+	}
+	selected := validItems(items)
+	if len(selected) == 0 {
+		return &PreparedUpdateBatch{category: b.category}, nil
+	}
+	if len(b.items) != len(b.plans) {
+		return nil, fmt.Errorf("prepared update batch has mismatched items and plans")
+	}
+
+	positions := make(map[*model.Item]int, len(b.items))
+	for i, item := range b.items {
+		positions[item] = i
+	}
+	selectedPlans := make([]CommandPlan, 0, len(selected))
+	for _, item := range selected {
+		position, ok := positions[item]
+		if !ok {
+			return nil, fmt.Errorf("item %q is not part of the prepared update batch", item.Name)
+		}
+		selectedPlans = append(selectedPlans, b.plans[position])
+	}
+	return &PreparedUpdateBatch{
+		category: b.category,
+		items:    append([]*model.Item(nil), selected...),
+		plans:    clonePlans(selectedPlans),
+	}, nil
+}
+
 // PrepareUpdateBatch resolves a batch exactly once. The returned batch may be
 // inspected for dry-run/preflight and then passed unchanged to ExecutePreparedBatch.
 func PrepareUpdateBatch(ctx context.Context, cat model.Category, items []*model.Item) (*PreparedUpdateBatch, error) {
@@ -71,7 +108,9 @@ func clonePlans(plans []CommandPlan) []CommandPlan {
 // Categories without a safe automatic command return a Manual plan; callers
 // can present that reason instead of silently broadening the selection.
 func PlanUpdateCommands(cat model.Category, items []*model.Item) ([]CommandPlan, error) {
-	return planUpdateCommands(context.Background(), cat, validItems(items))
+	ctx, cancel := context.WithTimeout(context.Background(), defaultPlanTimeout)
+	defer cancel()
+	return planUpdateCommands(ctx, cat, validItems(items))
 }
 
 func planUpdateCommands(ctx context.Context, cat model.Category, items []*model.Item) ([]CommandPlan, error) {

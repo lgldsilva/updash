@@ -15,10 +15,10 @@ func (s *ZypperSource) Label() string            { return binZypper }
 func (s *ZypperSource) Icon() string             { return "🦎" }
 
 func (s *ZypperSource) Scan(ctx context.Context, plat model.PlatformInfo) ([]*model.Item, error) {
-	// list-updates exits 100-103 when updates of various kinds are available,
-	// so parse the table regardless of exit code and only fail on empty output.
+	// list-updates reports updates with a successful exit status. Any failure is
+	// inconclusive, even if output contains a warning or table fragment.
 	out, err := execCombined(ctx, binZypper, "--quiet", "--non-interactive", "list-updates")
-	if err != nil && len(out) == 0 {
+	if err != nil {
 		return []*model.Item{errItem(binZypper, model.CatZypper)}, nil
 	}
 	return okOrOutdated(binZypper, model.CatZypper, ParseZypperListUpdates(string(out))), nil

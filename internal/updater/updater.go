@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"runtime"
 	"sort"
 	"strings"
 	"time"
@@ -61,18 +60,51 @@ func ExecutePreparedBatch(ctx context.Context, batch *PreparedUpdateBatch, opts 
 	}
 	items, plans := batch.items, batch.plans
 	switch batch.category {
+	case model.CatBrew:
+		return executePreparedBrew(ctx, items, plans, opts)
+	case model.CatMAS:
+		return executePreparedMAS(ctx, items, plans, opts)
 	case model.CatNpm:
 		return executePreparedNpm(ctx, items, plans, opts)
 	case model.CatApt:
 		return executePreparedApt(ctx, items, plans, opts)
-	case model.CatWinget, model.CatPnpm, model.CatBun, model.CatPipx:
-		return runExactPlans(ctx, items, plans, opts)
+	case model.CatAgent:
+		return executePreparedAgents(ctx, items, plans, opts)
 	default:
-		// Legacy specialized paths retain their post-update verification. New
-		// callers that need strict plan identity should use the prepared routes
-		// above; npm is the environment-sensitive path that must never replan.
-		return updateBatch(ctx, batch.category, items, opts)
+		return executePreparedPlans(ctx, items, plans, opts)
 	}
+}
+
+func executePreparedBrew(ctx context.Context, items []*model.Item, plans []CommandPlan, opts Options) []*Result {
+	if len(items) != len(plans) {
+		return failedBatch(items, fmt.Errorf("internal brew plan does not match selected items"))
+	}
+	results := make([]*Result, len(items))
+	for i, plan := range plans {
+		results[i] = upgradeOneBrewWithPlan(ctx, items[i], plan, opts)
+	}
+	return results
+}
+
+func executePreparedMAS(ctx context.Context, items []*model.Item, plans []CommandPlan, opts Options) []*Result {
+	if len(items) != len(plans) {
+		return failedBatch(items, fmt.Errorf("internal MAS plan does not match selected items"))
+	}
+	results := make([]*Result, len(items))
+	for i, plan := range plans {
+		results[i] = upgradeMASAppWithPlan(ctx, items[i], plan, opts)
+	}
+	return results
+}
+
+func executePreparedPlans(ctx context.Context, items []*model.Item, plans []CommandPlan, opts Options) []*Result {
+	if len(plans) == len(items) {
+		return runExactPlans(ctx, items, plans, opts)
+	}
+	if len(plans) == 1 {
+		return batchMarkAll(items, runCommandPlan(ctx, items[0], plans[0], opts))
+	}
+	return failedBatch(items, fmt.Errorf("internal command plan does not match selected items"))
 }
 
 func executePreparedNpm(ctx context.Context, items []*model.Item, plans []CommandPlan, opts Options) []*Result {
@@ -103,6 +135,31 @@ func executePreparedApt(ctx context.Context, items []*model.Item, plans []Comman
 	return batchMarkAll(items, &Result{Success: true, Output: output.String()})
 }
 
+func executePreparedAgents(ctx context.Context, items []*model.Item, plans []CommandPlan, opts Options) []*Result {
+	if len(items) != len(plans) {
+		return failedBatch(items, fmt.Errorf("internal agent plan does not match selected items"))
+	}
+	results := make([]*Result, len(items))
+	for i, plan := range plans {
+		item := items[i]
+		if plan.Scope == CommandScopeManual {
+			results[i] = manualAgentResult(item, plan.Manual)
+			continue
+		}
+		result := runCommandPlan(ctx, item, plan, opts)
+		updateCmd := append([]string{plan.Name}, plan.Args...)
+		switch item.Name {
+		case agentClaudeCode:
+			results[i] = ensureClaudeNativeBinary(ctx, item, result, updateCmd, opts)
+		case agentOpenCode:
+			results[i] = ensureOpenCodeHealthy(ctx, item, result)
+		default:
+			results[i] = result
+		}
+	}
+	return results
+}
+
 func sortedCategories(groups map[model.Category][]*model.Item) []model.Category {
 	cats := make([]model.Category, 0, len(groups))
 	for cat := range groups {
@@ -124,77 +181,16 @@ func groupByCategory(items []*model.Item) map[model.Category][]*model.Item {
 	return groups
 }
 
-// updateBatch processes a group of items of the same category.
-func updateBatch(ctx context.Context, cat model.Category, items []*model.Item, opts Options) []*Result {
-	if len(items) == 0 {
-		return nil
-	}
-	switch cat {
-	case model.CatBrew:
-		return batchBrewUpgrade(ctx, items, opts)
-	case model.CatMAS:
-		return batchMASUpgrade(ctx, items, opts)
-	case model.CatApt:
-		return batchAptUpgrade(ctx, items, opts)
-	case model.CatDnf:
-		return batchPlannedCategory(ctx, cat, items, opts)
-	case model.CatZypper:
-		return batchPlannedCategory(ctx, cat, items, opts)
-	case model.CatApk:
-		return batchPlannedCategory(ctx, cat, items, opts)
-	case model.CatPacman:
-		return batchPlannedCategory(ctx, cat, items, opts)
-	case model.CatWinget:
-		return batchWingetUpgrade(ctx, items, opts)
-	case model.CatChoco:
-		return batchPlannedCategory(ctx, cat, items, opts)
-	case model.CatScoop:
-		return batchPlannedCategory(ctx, cat, items, opts)
-	case model.CatNpm:
-		return batchNpmUpgrade(ctx, items, opts)
-	case model.CatPnpm:
-		return batchPnpmUpgrade(ctx, items, opts)
-	case model.CatBun:
-		return batchBunUpgrade(ctx, items, opts)
-	case model.CatOpenCodePlugins:
-		return batchPlannedCategory(ctx, cat, items, opts)
-	case model.CatPipx:
-		return batchPipxUpgrade(ctx, items, opts)
-	case model.CatFlatpak, model.CatSnap, model.CatGo, model.CatRustup, model.CatCargo,
-		model.CatSDKMAN, model.CatNvm, model.CatOmz, model.CatGHExt:
-		return batchPlannedCategory(ctx, cat, items, opts)
-	case model.CatAgent, model.CatAI:
-		return batchSequential(ctx, items, opts)
-	default:
-		return batchSequential(ctx, items, opts)
-	}
-}
-
-func batchSequential(ctx context.Context, items []*model.Item, opts Options) []*Result {
-	results := make([]*Result, len(items))
-	for i, it := range items {
-		results[i] = updateOne(ctx, it, opts)
-	}
-	return results
-}
-
-// batchBrewUpgrade upgrades each selected brew package individually and diagnoses failures.
-// Never runs a bare "brew upgrade --greedy" (that would touch unrelated outdated casks).
-func batchBrewUpgrade(ctx context.Context, items []*model.Item, opts Options) []*Result {
-	results := make([]*Result, len(items))
-	for i, it := range items {
-		results[i] = upgradeOneBrew(ctx, it, opts)
-	}
-	return results
-}
-
-func upgradeOneBrew(ctx context.Context, item *model.Item, opts Options) *Result {
+func upgradeOneBrewWithPlan(ctx context.Context, item *model.Item, plan CommandPlan, opts Options) *Result {
 	item.Status = model.StatusUpdating
+	if plan.Scope == CommandScopeManual {
+		return manualAgentResult(item, plan.Manual)
+	}
 
 	itemCtx, cancel := context.WithTimeout(ctx, BrewItemTimeout(item.Name))
 	defer cancel()
 
-	cmd := exec.CommandContext(itemCtx, "brew", commandUpgrade, "--greedy", item.Name)
+	cmd := exec.CommandContext(itemCtx, plan.Name, plan.Args...)
 	if scanner.BrewNeedsSudoPrime(item.Name) && !opts.Interactive {
 		cleanup, err := elevate.AttachSubprocessSudo(itemCtx, cmd)
 		if err != nil {
@@ -248,27 +244,18 @@ func upgradeOneBrew(ctx context.Context, item *model.Item, opts Options) *Result
 	return result
 }
 
-// batchMASUpgrade updates each MAS app individually and verifies via mas outdated.
-// mas manages its own sudo (see mas README) — do not wrap it in elevate.Sudo.
-func batchMASUpgrade(ctx context.Context, items []*model.Item, opts Options) []*Result {
-	results := make([]*Result, len(items))
-	for i, it := range items {
-		it.Status = model.StatusUpdating
-		results[i] = upgradeMASApp(ctx, it, opts)
+func upgradeMASApp(ctx context.Context, item *model.Item, opts Options) *Result {
+	plans, err := planUpdateCommands(ctx, model.CatMAS, []*model.Item{item})
+	if err != nil || len(plans) != 1 {
+		if err == nil {
+			err = fmt.Errorf("invalid MAS update plan")
+		}
+		return failedBatch([]*model.Item{item}, err)[0]
 	}
-
-	return results
+	return upgradeMASAppWithPlan(ctx, item, plans[0], opts)
 }
 
-func upgradeMASApp(ctx context.Context, item *model.Item, opts Options) *Result {
-	plans, planErr := PlanUpdateCommands(model.CatMAS, []*model.Item{item})
-	if planErr != nil || len(plans) != 1 {
-		if planErr == nil {
-			planErr = fmt.Errorf("invalid MAS update plan")
-		}
-		return failedBatch([]*model.Item{item}, planErr)[0]
-	}
-	plan := plans[0]
+func upgradeMASAppWithPlan(ctx context.Context, item *model.Item, plan CommandPlan, opts Options) *Result {
 	if plan.Scope == CommandScopeManual {
 		return manualAgentResult(item, plan.Manual)
 	}
@@ -420,7 +407,7 @@ func batchAptUpgrade(ctx context.Context, items []*model.Item, opts Options) []*
 		it.Status = model.StatusUpdating
 	}
 
-	plans, planErr := PlanUpdateCommands(model.CatApt, items)
+	plans, planErr := planUpdateCommands(ctx, model.CatApt, items)
 	if planErr != nil {
 		return failedBatch(items, planErr)
 	}
@@ -537,20 +524,6 @@ func batchPacmanUpgrade(ctx context.Context, items []*model.Item, opts Options) 
 	return results
 }
 
-func batchWingetUpgrade(ctx context.Context, items []*model.Item, opts Options) []*Result {
-	if len(items) == 0 {
-		return nil
-	}
-	for _, it := range items {
-		it.Status = model.StatusUpdating
-	}
-	plans, err := PlanUpdateCommands(model.CatWinget, items)
-	if err != nil {
-		return failedBatch(items, err)
-	}
-	return runExactPlans(ctx, items, plans, opts)
-}
-
 func wingetUpgradeArgs(items []*model.Item) []string {
 	args := make([]string, 0, len(items)*2)
 	for _, it := range items {
@@ -632,7 +605,7 @@ func batchNpmUpgrade(ctx context.Context, items []*model.Item, opts Options) []*
 	if len(updatable) == 0 {
 		return results
 	}
-	plans, err := PlanUpdateCommands(model.CatNpm, updatable)
+	plans, err := planUpdateCommands(ctx, model.CatNpm, updatable)
 	if err != nil || len(plans) != 1 {
 		if err == nil {
 			err = fmt.Errorf("invalid npm update plan")
@@ -731,15 +704,6 @@ func batchPnpmUpgrade(ctx context.Context, items []*model.Item, opts Options) []
 	return batchPlannedExact(ctx, model.CatPnpm, items, opts)
 }
 
-// batchBunUpgrade updates all bun global packages.
-func batchBunUpgrade(ctx context.Context, items []*model.Item, opts Options) []*Result {
-	return batchPlannedExact(ctx, model.CatBun, items, opts)
-}
-
-func batchPipxUpgrade(ctx context.Context, items []*model.Item, opts Options) []*Result {
-	return batchPlannedExact(ctx, model.CatPipx, items, opts)
-}
-
 func batchMarkAll(items []*model.Item, single *Result) []*Result {
 	if len(items) == 0 || single == nil {
 		return nil
@@ -768,28 +732,11 @@ func batchPlannedExact(ctx context.Context, cat model.Category, items []*model.I
 	for _, item := range items {
 		item.Status = model.StatusUpdating
 	}
-	plans, err := PlanUpdateCommands(cat, items)
+	plans, err := planUpdateCommands(ctx, cat, items)
 	if err != nil {
 		return failedBatch(items, err)
 	}
 	return runExactPlans(ctx, items, plans, opts)
-}
-
-func batchPlannedCategory(ctx context.Context, cat model.Category, items []*model.Item, opts Options) []*Result {
-	plans, err := PlanUpdateCommands(cat, items)
-	if err != nil {
-		return failedBatch(items, err)
-	}
-	if len(plans) == 0 {
-		return nil
-	}
-	if len(plans) == len(items) {
-		return runExactPlans(ctx, items, plans, opts)
-	}
-	if len(plans) == 1 {
-		return batchMarkAll(items, runCommandPlan(ctx, items[0], plans[0], opts))
-	}
-	return failedBatch(items, fmt.Errorf("internal command plan does not match selected items"))
 }
 
 func runExactPlans(ctx context.Context, items []*model.Item, plans []CommandPlan, opts Options) []*Result {
@@ -824,57 +771,6 @@ func failedBatchWithOutput(items []*model.Item, errText, output string) []*Resul
 		results[i] = &Result{Item: item, Error: errText, Output: output}
 	}
 	return results
-}
-
-// updateOne runs the appropriate update command for a single item.
-func updateOne(ctx context.Context, item *model.Item, opts Options) *Result {
-	item.Status = model.StatusUpdating
-
-	switch item.Category {
-	case model.CatFlatpak:
-		return updatePlannedOne(ctx, item, opts)
-	case model.CatSnap:
-		return updatePlannedOne(ctx, item, opts)
-	case model.CatGo:
-		return updatePlannedOne(ctx, item, opts)
-	case model.CatRustup:
-		return updatePlannedOne(ctx, item, opts)
-	case model.CatCargo:
-		return updatePlannedOne(ctx, item, opts)
-	case model.CatSDKMAN:
-		return runSDKMANUpgrade(ctx, item, opts)
-	case model.CatNvm:
-		if runtime.GOOS == "windows" {
-			// nvm-windows is a different product; it has no install-latest-npm.
-			return manualAgentResult(item, "update nvm-windows via its installer")
-		}
-		return runBashScript(ctx, item, opts,
-			"source $HOME/.nvm/nvm.sh && nvm install-latest-npm",
-			"install bash or update nvm manually")
-	case model.CatOmz:
-		return runBashScript(ctx, item, opts,
-			"source $HOME/.oh-my-zsh/tools/upgrade.sh",
-			"install bash or run the Oh My Zsh upgrade script manually")
-	case model.CatAgent:
-		return updateAgent(ctx, item, opts)
-	case model.CatGHExt:
-		return updatePlannedOne(ctx, item, opts)
-	case model.CatAI:
-		return updateAIInfra(ctx, item, opts)
-	default:
-		return updatePlannedOne(ctx, item, opts)
-	}
-}
-
-func updatePlannedOne(ctx context.Context, item *model.Item, opts Options) *Result {
-	plans, err := PlanUpdateCommands(item.Category, []*model.Item{item})
-	if err != nil || len(plans) != 1 {
-		if err == nil {
-			err = fmt.Errorf("invalid command plan for category %s", item.Category)
-		}
-		return &Result{Item: item, Error: err.Error()}
-	}
-	return runCommandPlan(ctx, item, plans[0], opts)
 }
 
 func runElevatedCmd(ctx context.Context, item *model.Item, opts Options, name string, args ...string) *Result {
@@ -941,23 +837,6 @@ func runCmdWithBuilder(ctx context.Context, item *model.Item, cmd *exec.Cmd, opt
 	return result
 }
 
-func runSDKMANUpgrade(ctx context.Context, item *model.Item, opts Options) *Result {
-	script := `
-		source $HOME/.sdkman/bin/sdkman-init.sh
-		echo "Y" | sdk upgrade
-	`
-	return runBashScript(ctx, item, opts, script, "install bash or run 'sdk upgrade' manually")
-}
-
-// runBashScript runs a shell-script update, degrading to a manual note when
-// bash is unavailable (e.g. bare Windows hosts).
-func runBashScript(ctx context.Context, item *model.Item, opts Options, script, manualNote string) *Result {
-	if _, err := exec.LookPath("bash"); err != nil {
-		return manualAgentResult(item, manualNote)
-	}
-	return runCmd(ctx, item, opts, "bash", "-c", script)
-}
-
 // manualAgentResult marks an item as skipped-manual without running anything.
 func manualAgentResult(item *model.Item, reason string) *Result {
 	item.Status = model.StatusOutdated
@@ -988,15 +867,4 @@ func updateAgent(ctx context.Context, item *model.Item, opts Options) *Result {
 		reason = "manual reinstall / app update"
 	}
 	return manualAgentResult(item, reason)
-}
-
-func updateAIInfra(ctx context.Context, item *model.Item, opts Options) *Result {
-	if cmd := scanner.InfraUpdateCommand(item.Name); len(cmd) > 0 {
-		return runCmd(ctx, item, opts, cmd[0], cmd[1:]...)
-	}
-	return &Result{
-		Item:    item,
-		Success: true,
-		Output:  fmt.Sprintf("%s: no auto-update", item.Name),
-	}
 }

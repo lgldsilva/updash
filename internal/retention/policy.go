@@ -38,7 +38,7 @@ type PathCandidate struct {
 // than maxDays. Skips missing roots. Depth 0 means root itself only; depth 1
 // means immediate children (typical for cache dirs).
 func CollectOldPaths(root string, maxDays, maxDepth int, now time.Time) ([]PathCandidate, int64, error) {
-	info, err := os.Stat(root)
+	_, err := os.Stat(root)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, 0, nil
@@ -46,8 +46,7 @@ func CollectOldPaths(root string, maxDays, maxDepth int, now time.Time) ([]PathC
 		return nil, 0, err
 	}
 	if maxDepth <= 0 {
-		candidates, total := collectLeaf(root, info, maxDays, now)
-		return candidates, total, nil
+		return collectLeaf(root, maxDays, now)
 	}
 
 	entries, err := os.ReadDir(root)
@@ -62,13 +61,20 @@ func CollectOldPaths(root string, maxDays, maxDepth int, now time.Time) ([]PathC
 		if err != nil {
 			continue
 		}
-		if !IsOlderThan(fi.ModTime(), maxDays, now) {
-			continue
-		}
 		sz := int64(0)
 		if e.IsDir() {
+			latest, err := latestPathMtime(p)
+			if err != nil {
+				return nil, 0, fmt.Errorf("inspect %s: %w", p, err)
+			}
+			if !IsOlderThan(latest, maxDays, now) {
+				continue
+			}
 			sz = dirSize(p)
 		} else {
+			if !IsOlderThan(fi.ModTime(), maxDays, now) {
+				continue
+			}
 			sz = fi.Size()
 		}
 		out = append(out, PathCandidate{Path: p, Size: sz})
@@ -77,12 +83,47 @@ func CollectOldPaths(root string, maxDays, maxDepth int, now time.Time) ([]PathC
 	return out, total, nil
 }
 
-func collectLeaf(root string, info fs.FileInfo, maxDays int, now time.Time) ([]PathCandidate, int64) {
-	if !IsOlderThan(info.ModTime(), maxDays, now) {
-		return nil, 0
+func collectLeaf(root string, maxDays int, now time.Time) ([]PathCandidate, int64, error) {
+	latest, err := latestPathMtime(root)
+	if err != nil {
+		return nil, 0, fmt.Errorf("inspect %s: %w", root, err)
+	}
+	if !IsOlderThan(latest, maxDays, now) {
+		return nil, 0, nil
 	}
 	sz := dirSize(root)
-	return []PathCandidate{{Path: root, Size: sz}}, sz
+	return []PathCandidate{{Path: root, Size: sz}}, sz, nil
+}
+
+// latestPathMtime returns the newest mtime in a path without following
+// symlinked directories. A failure is returned instead of allowing a
+// partially inspected tree to become a deletion candidate.
+func latestPathMtime(root string) (time.Time, error) {
+	info, err := os.Lstat(root)
+	if err != nil {
+		return time.Time{}, err
+	}
+	latest := info.ModTime()
+	err = filepath.WalkDir(root, func(path string, d fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if path == root {
+			return nil
+		}
+		entryInfo, err := d.Info()
+		if err != nil {
+			return err
+		}
+		if entryInfo.ModTime().After(latest) {
+			latest = entryInfo.ModTime()
+		}
+		return nil
+	})
+	if err != nil {
+		return time.Time{}, err
+	}
+	return latest, nil
 }
 
 func dirSize(root string) int64 {
@@ -249,7 +290,10 @@ func collectBuildDir(ctx context.Context, root, path string, out *[]PathCandidat
 		*partial = append(*partial, path+": escapes projects root")
 		return filepath.SkipDir
 	}
-	sz := dirSizeCtx(ctx, path)
+	sz, err := dirSizeCtx(ctx, path)
+	if err != nil {
+		return err
+	}
 	if sz > 0 {
 		*out = append(*out, PathCandidate{Path: path, Size: sz})
 		*total += sz
@@ -342,10 +386,10 @@ func canonicalRoot(root string) (string, error) {
 
 // dirSizeCtx is dirSize with context cancellation, for potentially huge
 // build trees such as node_modules.
-func dirSizeCtx(ctx context.Context, root string) int64 {
+func dirSizeCtx(ctx context.Context, root string) (int64, error) {
 	var total int64
 	// WalkDir is best effort: unreadable descendants are skipped while sizing.
-	_ = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return nil
 		}
@@ -362,7 +406,7 @@ func dirSizeCtx(ctx context.Context, root string) int64 {
 		total += fi.Size()
 		return nil
 	})
-	return total
+	return total, err
 }
 
 // TruncateFileIfOver writes empty content when size exceeds maxBytes.

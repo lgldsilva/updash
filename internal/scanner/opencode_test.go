@@ -26,7 +26,7 @@ func TestOpenCodeSource_Scan_noPackageJSON(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(items) != 1 || items[0].Status != model.StatusOK {
+	if len(items) != 1 || items[0].Status != model.StatusInfo {
 		t.Fatalf("items=%v", items)
 	}
 	if items[0].CurrentVer != "no package.json" {

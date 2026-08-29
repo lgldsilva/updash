@@ -19,7 +19,7 @@ func (s *DockerSource) Scan(ctx context.Context, plat model.PlatformInfo) ([]*mo
 	_, err := execCommand(ctx, binDocker, "info", "--format", "{{.ServerVersion}}")
 	if err != nil {
 		return []*model.Item{
-			{Name: binDocker, Category: model.CatDocker, Status: model.StatusOK, CurrentVer: "daemon not running"},
+			{Name: binDocker, Category: model.CatDocker, Status: model.StatusInfo, CurrentVer: "daemon not running"},
 		}, nil
 	}
 
@@ -27,7 +27,7 @@ func (s *DockerSource) Scan(ctx context.Context, plat model.PlatformInfo) ([]*mo
 	dfOut, err := execCommand(ctx, binDocker, "system", "df")
 	if err != nil {
 		return []*model.Item{
-			{Name: binDocker, Category: model.CatDocker, Status: model.StatusOK, CurrentVer: statusUpToDate},
+			{Name: binDocker, Category: model.CatDocker, Status: model.StatusInfo, CurrentVer: "unable to inspect images"},
 		}, nil
 	}
 
@@ -44,14 +44,14 @@ func (s *DockerSource) Scan(ctx context.Context, plat model.PlatformInfo) ([]*mo
 				Category:    model.CatDocker,
 				CurrentVer:  size,
 				Reclaimable: reclaim + " reclaimable",
-				Status:      model.StatusOK,
+				Status:      model.StatusInfo,
 			})
 		}
 	}
 
 	if len(items) == 0 {
 		items = append(items, &model.Item{
-			Name: binDocker, Category: model.CatDocker, Status: model.StatusOK, CurrentVer: "running",
+			Name: binDocker, Category: model.CatDocker, Status: model.StatusInfo, CurrentVer: "running",
 		})
 	}
 

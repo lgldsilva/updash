@@ -66,9 +66,7 @@ func (s *CargoSource) Icon() string             { return "🦀" }
 
 func (s *CargoSource) Scan(ctx context.Context, plat model.PlatformInfo) ([]*model.Item, error) {
 	if _, err := exec.LookPath("cargo-install-update"); err != nil {
-		return []*model.Item{
-			{Name: binCargo, Category: model.CatCargo, Status: model.StatusOK, CurrentVer: "not installed"},
-		}, nil
+		return []*model.Item{infoItem(binCargo, model.CatCargo, "not installed")}, nil
 	}
 
 	out, err := execCommand(ctx, "cargo-install-update", "-l")

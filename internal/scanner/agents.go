@@ -149,9 +149,7 @@ func (s *AgentSource) Scan(ctx context.Context, plat model.PlatformInfo) ([]*mod
 		}
 	}
 	if len(installed) == 0 {
-		return []*model.Item{
-			{Name: "agents", Category: model.CatAgent, Status: model.StatusOK, CurrentVer: verNoneInstalled},
-		}, nil
+		return []*model.Item{infoItem("agents", model.CatAgent, verNoneInstalled)}, nil
 	}
 	items := probeAgentsConcurrently(ctx, plat, installed)
 	if plat.HasNpm {
@@ -473,7 +471,7 @@ func (s *AIInfraSource) Scan(ctx context.Context, plat model.PlatformInfo) ([]*m
 	}
 	if len(items) == 0 {
 		items = append(items, &model.Item{
-			Name: "ai-infra", Category: model.CatAI, Status: model.StatusOK, CurrentVer: verNoneInstalled,
+			Name: "ai-infra", Category: model.CatAI, Status: model.StatusInfo, CurrentVer: verNoneInstalled,
 		})
 	}
 	return items, nil

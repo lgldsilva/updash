@@ -191,6 +191,10 @@ func RunUpdate(ctx context.Context, cfg Config) (int, int, error) {
 	if err != nil {
 		return 0, 0, err
 	}
+	return runUpdateFromScan(ctx, cfg, plat, updates)
+}
+
+func runUpdateFromScan(ctx context.Context, cfg Config, plat model.PlatformInfo, updates []*model.SourceSummary) (int, int, error) {
 	if err := requireConclusive(updates); err != nil {
 		return 0, 0, err
 	}
@@ -365,7 +369,9 @@ func RunAll(ctx context.Context, cfg Config) error {
 	if hasInconclusive(updates) || hasInconclusive(cleanup) {
 		return &ExitError{Code: 2, Err: fmt.Errorf("scan contains errors or unverified sources")}
 	}
-	uok, ufail, err := RunUpdate(ctx, cfg)
+	plat := detectPlatform()
+	fmt.Printf(msgScanning, platformLabel(plat))
+	uok, ufail, err := runUpdateFromScan(ctx, cfg, plat, updates)
 	if err != nil {
 		return err
 	}
@@ -556,7 +562,7 @@ func runNativeUpdateSection(
 	for _, it := range nativeItems {
 		fmt.Printf("  • %s\n", it.Name)
 	}
-	results = runNativeElevatedItems(ctx, env.plat, nativeItems, env.opts, env.cfg, env.elevSession)
+	results = runNativeElevatedItems(ctx, env.plat, nativeItems, env.opts, env.cfg, env.elevSession, env.prepared)
 	ok, fail, skipped = tallyUpdateResults(results)
 	return ok, fail, skipped, results
 }
@@ -573,25 +579,65 @@ func runCategoryUpdateSection(
 	batchCtx, cancel := context.WithTimeout(ctx, updater.BatchTimeout(cat))
 	defer cancel()
 
-	if cat == model.CatBrew {
-		results = runBrewUpdateBatch(batchCtx, groupItems, env.opts, env.cfg, env.elevSession)
+	prepared := env.prepared[cat]
+	if prepared == nil {
+		results = updatePlanErrorResults(groupItems, fmt.Errorf("missing prepared update batch"))
+	} else if cat == model.CatBrew {
+		results = runPreparedBrewUpdateBatch(batchCtx, prepared, groupItems, env.opts, env.cfg, env.elevSession)
+	} else if !updater.PlansRequireElevation(prepared.Plans()) {
+		results = executePreparedBatch(batchCtx, prepared, env.opts)
 	} else {
-		prepared := env.prepared[cat]
-		if prepared == nil {
-			results = updatePlanErrorResults(groupItems, fmt.Errorf("missing prepared update batch"))
-		} else if !updater.PlansRequireElevation(prepared.Plans()) {
-			results = executePreparedBatch(batchCtx, prepared, env.opts)
+		elevCtx, batchSkipped, skipReason := ensurePlannedElevation(batchCtx, updater.PlansRequireElevation(prepared.Plans()), env.cfg, env.elevSession)
+		if batchSkipped {
+			results = skipBatchResults(groupItems, skipReason)
 		} else {
-			elevCtx, batchSkipped, skipReason := ensurePlannedElevation(batchCtx, updater.PlansRequireElevation(prepared.Plans()), env.cfg, env.elevSession)
-			if batchSkipped {
-				results = skipBatchResults(groupItems, skipReason)
-			} else {
-				results = executePreparedBatch(elevCtx, prepared, env.opts)
-			}
+			results = executePreparedBatch(elevCtx, prepared, env.opts)
 		}
 	}
 	ok, fail, skipped = tallyUpdateResults(results)
 	return ok, fail, skipped, results
+}
+
+func runPreparedBrewUpdateBatch(
+	ctx context.Context,
+	prepared *updater.PreparedUpdateBatch,
+	items []*model.Item,
+	opts updater.Options,
+	cfg Config,
+	sess **elevate.Session,
+) []*updater.Result {
+	var plain, password []*model.Item
+	for _, item := range items {
+		if brewItemNeedsPassword(item) {
+			password = append(password, item)
+		} else {
+			plain = append(plain, item)
+		}
+	}
+
+	results := make([]*updater.Result, 0, len(items))
+	if len(plain) > 0 {
+		plainBatch, err := prepared.Subset(plain)
+		if err != nil {
+			results = append(results, updatePlanErrorResults(plain, err)...)
+		} else {
+			results = append(results, executePreparedBatch(ctx, plainBatch, opts)...)
+		}
+	}
+	if len(password) > 0 {
+		passCtx, skipped, reason := ensureBrewPassword(ctx, password, cfg, sess)
+		if skipped {
+			results = append(results, skipBatchResults(password, reason)...)
+			return results
+		}
+		passwordBatch, err := prepared.Subset(password)
+		if err != nil {
+			results = append(results, updatePlanErrorResults(password, err)...)
+		} else {
+			results = append(results, executePreparedBatch(passCtx, passwordBatch, opts)...)
+		}
+	}
+	return results
 }
 
 func updatePlanErrorResults(items []*model.Item, err error) []*updater.Result {

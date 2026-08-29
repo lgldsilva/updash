@@ -550,14 +550,41 @@ func updateSelf() {
 	if runtime.GOOS == "windows" {
 		binName += ".exe"
 	}
-	// Build straight into the install dir — the toolchain writes the binary,
-	// so no intermediate copy step is needed.
-	build := exec.Command(goBin, "build", "-o", filepath.Join(installDir, binName), filepath.Join("cmd", "updash"))
+	buildStage, err := os.CreateTemp(installDir, ".updash.build-*")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "✘ failed to stage build: %v\n", err)
+		os.Exit(1)
+	}
+	buildPath := buildStage.Name()
+	if err := buildStage.Close(); err != nil {
+		_ = os.Remove(buildPath)
+		fmt.Fprintf(os.Stderr, "✘ failed to prepare build stage: %v\n", err)
+		os.Exit(1)
+	}
+	defer func() { _ = os.Remove(buildPath) }()
+
+	// Build into an unpredictable temporary file, then use the same atomic
+	// replacement path as release self-update. A failed build cannot truncate
+	// the installed binary.
+	build := exec.Command(goBin, "build", "-o", buildPath, filepath.Join("cmd", "updash"))
 	build.Dir = repoDir
 	build.Stdout = os.Stdout
 	build.Stderr = os.Stderr
 	if err := build.Run(); err != nil {
+		_ = os.Remove(buildPath)
 		fmt.Printf("✘ Build failed: %v\n", err)
+		os.Exit(1)
+	}
+	// buildPath is the O_EXCL temporary file created above inside installDir.
+	payload, err := os.ReadFile(buildPath) // #nosec G304 -- path is locally created and controlled
+	if err != nil {
+		_ = os.Remove(buildPath)
+		fmt.Fprintf(os.Stderr, "✘ failed to read built binary: %v\n", err)
+		os.Exit(1)
+	}
+	if err := upgrade.ReplaceBinaryAt(payload, filepath.Join(installDir, binName), runtime.GOOS); err != nil {
+		_ = os.Remove(buildPath)
+		fmt.Fprintf(os.Stderr, "✘ failed to install built binary: %v\n", err)
 		os.Exit(1)
 	}
 

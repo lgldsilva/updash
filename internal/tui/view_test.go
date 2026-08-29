@@ -34,6 +34,11 @@ func TestHasUpdateItems(t *testing.T) {
 			sum:  &model.SourceSummary{Items: []*model.Item{{Status: model.StatusUnverified}}},
 			want: true,
 		},
+		{
+			name: "info stays visible",
+			sum:  &model.SourceSummary{Items: []*model.Item{{Status: model.StatusInfo}}},
+			want: true,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -94,6 +99,20 @@ func TestRenderUpdatesTab_agentsUpToDate(t *testing.T) {
 	}
 	if strings.Contains(out, "Claude") {
 		t.Fatalf("should not list individual agents when all OK: %s", out)
+	}
+}
+
+func TestRenderUpdatesTab_agentPendingIsNotUpToDate(t *testing.T) {
+	s := New()
+	s.Summaries = []*model.SourceSummary{{
+		Category: model.CatAgent,
+		Label:    "AI Agents",
+		Total:    1,
+		Items:    []*model.Item{{Name: "Claude", Status: model.StatusPending}},
+	}}
+	out := strings.ToLower(s.renderUpdatesTab())
+	if strings.Contains(out, "installed, up to date") {
+		t.Fatalf("pending agent must not be reported as up to date: %s", out)
 	}
 }
 
