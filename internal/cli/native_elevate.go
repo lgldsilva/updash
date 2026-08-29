@@ -73,7 +73,14 @@ func runNativeElevatedItems(
 		*sess = s
 	}
 	ctx = elevate.WithSession(ctx, *sess)
-	return executeNativeElevatedGroups(ctx, plat, items, opts, cfg, sess, firstPreparedBatch(preparedBatches))
+	env := updateBatchEnv{
+		plat:        plat,
+		prepared:    firstPreparedBatch(preparedBatches),
+		opts:        opts,
+		cfg:         cfg,
+		elevSession: sess,
+	}
+	return executeNativeElevatedGroups(ctx, items, env)
 }
 
 func firstPreparedBatch(batches []map[model.Category]*updater.PreparedUpdateBatch) map[model.Category]*updater.PreparedUpdateBatch {
@@ -83,48 +90,31 @@ func firstPreparedBatch(batches []map[model.Category]*updater.PreparedUpdateBatc
 	return batches[0]
 }
 
-func executeNativeElevatedGroups(
-	ctx context.Context,
-	plat model.PlatformInfo,
-	items []*model.Item,
-	opts updater.Options,
-	cfg Config,
-	sess **elevate.Session,
-	prepared map[model.Category]*updater.PreparedUpdateBatch,
-) []*updater.Result {
+func executeNativeElevatedGroups(ctx context.Context, items []*model.Item, env updateBatchEnv) []*updater.Result {
 	var results []*updater.Result
 	groups := groupByCategory(items)
 	for _, cat := range sortedCategories(groups) {
-		results = append(results, executeNativeElevatedCategory(ctx, plat, cat, groups[cat], prepared, opts, cfg, sess)...)
+		results = append(results, executeNativeElevatedCategory(ctx, env, cat, groups[cat])...)
 	}
 	return results
 }
 
-func executeNativeElevatedCategory(
-	ctx context.Context,
-	plat model.PlatformInfo,
-	cat model.Category,
-	items []*model.Item,
-	prepared map[model.Category]*updater.PreparedUpdateBatch,
-	opts updater.Options,
-	cfg Config,
-	sess **elevate.Session,
-) []*updater.Result {
-	if batch := prepared[cat]; batch != nil {
+func executeNativeElevatedCategory(ctx context.Context, env updateBatchEnv, cat model.Category, items []*model.Item) []*updater.Result {
+	if batch := env.prepared[cat]; batch != nil {
 		subset, err := batch.Subset(items)
 		if err != nil {
 			return updatePlanErrorResults(items, err)
 		}
-		return executePreparedBatch(ctx, subset, opts)
+		return executePreparedBatch(ctx, subset, env.opts)
 	}
 	if cat == model.CatBrew {
-		return updateCategory(ctx, cat, items, opts)
+		return updateCategory(ctx, cat, items, env.opts)
 	}
-	elevCtx, skipped, reason := ensureCategoryElevation(ctx, plat, cat, cfg, sess)
+	elevCtx, skipped, reason := ensureCategoryElevation(ctx, env.plat, cat, env.cfg, env.elevSession)
 	if skipped {
 		return skipBatchResults(items, reason)
 	}
-	return updateCategory(elevCtx, cat, items, opts)
+	return updateCategory(elevCtx, cat, items, env.opts)
 }
 
 func stdinIsTTY() bool {
