@@ -402,6 +402,52 @@ func TestRunNativeElevatedItems(t *testing.T) {
 	}
 }
 
+func TestRunNativeElevatedItems_usesPreparedBatch(t *testing.T) {
+	restoreHooks(t)
+	stdinIsTTYFn = func() bool { return true }
+	primeMacSudo = func(context.Context) error { return nil }
+	item := &model.Item{Name: "app", Category: model.CatMAS, PackageID: "123"}
+	prepared, err := updater.PrepareUpdateBatch(context.Background(), model.CatMAS, []*model.Item{item})
+	if err != nil {
+		t.Fatal(err)
+	}
+	executed := false
+	executePreparedBatch = func(_ context.Context, batch *updater.PreparedUpdateBatch, _ updater.Options) []*updater.Result {
+		executed = true
+		return []*updater.Result{{Item: batch.Items()[0], Success: true}}
+	}
+	var sess *elevate.Session
+	results := runNativeElevatedItems(
+		context.Background(), model.PlatformInfo{OS: "darwin"}, []*model.Item{item},
+		updater.Options{}, Config{}, &sess,
+		map[model.Category]*updater.PreparedUpdateBatch{model.CatMAS: prepared},
+	)
+	if len(results) != 1 || !results[0].Success || !executed {
+		t.Fatalf("results=%+v executed=%v", results, executed)
+	}
+}
+
+func TestRunNativeElevatedItems_rejectsForeignPreparedBatch(t *testing.T) {
+	restoreHooks(t)
+	stdinIsTTYFn = func() bool { return true }
+	primeMacSudo = func(context.Context) error { return nil }
+	preparedItem := &model.Item{Name: "prepared", Category: model.CatMAS, PackageID: "123"}
+	prepared, err := updater.PrepareUpdateBatch(context.Background(), model.CatMAS, []*model.Item{preparedItem})
+	if err != nil {
+		t.Fatal(err)
+	}
+	actual := &model.Item{Name: "actual", Category: model.CatMAS, PackageID: "456"}
+	var sess *elevate.Session
+	results := runNativeElevatedItems(
+		context.Background(), model.PlatformInfo{OS: "darwin"}, []*model.Item{actual},
+		updater.Options{}, Config{}, &sess,
+		map[model.Category]*updater.PreparedUpdateBatch{model.CatMAS: prepared},
+	)
+	if len(results) != 1 || results[0].Error == "" || results[0].Success {
+		t.Fatalf("foreign batch should fail safely: %+v", results)
+	}
+}
+
 func TestRunNativeUpdateSection_withItems(t *testing.T) {
 	restoreHooks(t)
 	primeMacSudo = func(ctx context.Context) error { return elevate.ErrDialogCancelled }

@@ -805,6 +805,34 @@ func TestReplaceBinaryAt_preservesExistingPermissions(t *testing.T) {
 	}
 }
 
+func TestReplaceBinaryAt_rejectsInvalidDestinations(t *testing.T) {
+	if err := ReplaceBinaryAt([]byte("new"), "", "linux"); err == nil {
+		t.Fatal("empty destination must be rejected")
+	}
+	if err := ReplaceBinaryAt(nil, filepath.Join(t.TempDir(), "updash"), "linux"); err == nil {
+		t.Fatal("empty payload must be rejected")
+	}
+
+	if runtime.GOOS != "windows" {
+		dir := t.TempDir()
+		broken := filepath.Join(dir, "broken")
+		if err := os.Symlink(filepath.Join(dir, "missing"), broken); err != nil {
+			t.Fatal(err)
+		}
+		if err := ReplaceBinaryAt([]byte("new"), broken, "linux"); err == nil {
+			t.Fatal("broken destination symlink must be rejected")
+		}
+	}
+
+	parent := filepath.Join(t.TempDir(), "not-a-directory")
+	if err := os.WriteFile(parent, []byte("file"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := ReplaceBinaryAt([]byte("new"), filepath.Join(parent, "updash"), "linux"); err == nil {
+		t.Fatal("uninspectable destination must be rejected")
+	}
+}
+
 func TestReplaceRunningBinaryWithOS_WindowsFallback(t *testing.T) {
 	dir := t.TempDir()
 	fakeBin := filepath.Join(dir, "fake-updash")

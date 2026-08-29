@@ -487,6 +487,58 @@ func TestRunCategoryUpdateSection_brewUsesPreparedPlan(t *testing.T) {
 	}
 }
 
+func TestRunPreparedBrewUpdateBatch_usesPreparedPlanForBothPartitions(t *testing.T) {
+	restoreHooks(t)
+	items := []*model.Item{
+		{Name: "wget", Category: model.CatBrew},
+		{Name: "microsoft-office", Category: model.CatBrew},
+	}
+	batch, err := updater.PrepareUpdateBatch(context.Background(), model.CatBrew, items)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var executed [][]*model.Item
+	executePreparedBatch = func(_ context.Context, batch *updater.PreparedUpdateBatch, _ updater.Options) []*updater.Result {
+		selected := batch.Items()
+		executed = append(executed, selected)
+		return []*updater.Result{{Item: selected[0], Success: true}}
+	}
+	sess := elevate.NewSession()
+	sess.SetPasswordless()
+	results := runPreparedBrewUpdateBatch(context.Background(), batch, items, updater.Options{}, Config{}, &sess)
+	if len(results) != 2 || !results[0].Success || !results[1].Success {
+		t.Fatalf("results=%+v", results)
+	}
+	if len(executed) != 2 || len(executed[0]) != 1 || len(executed[1]) != 1 {
+		t.Fatalf("executed partitions=%v", executed)
+	}
+	if executed[0][0] != items[0] || executed[1][0] != items[1] {
+		t.Fatalf("wrong prepared items=%v", executed)
+	}
+}
+
+func TestRunPreparedBrewUpdateBatch_rejectsForeignItems(t *testing.T) {
+	restoreHooks(t)
+	preparedItem := &model.Item{Name: "prepared", Category: model.CatBrew}
+	prepared, err := updater.PrepareUpdateBatch(context.Background(), model.CatBrew, []*model.Item{preparedItem})
+	if err != nil {
+		t.Fatal(err)
+	}
+	plain := &model.Item{Name: "wget", Category: model.CatBrew}
+	password := &model.Item{Name: "microsoft-office", Category: model.CatBrew}
+	sess := elevate.NewSession()
+	sess.SetPasswordless()
+	results := runPreparedBrewUpdateBatch(context.Background(), prepared, []*model.Item{plain, password}, updater.Options{}, Config{}, &sess)
+	if len(results) != 2 {
+		t.Fatalf("results=%+v", results)
+	}
+	for _, result := range results {
+		if result.Error == "" || result.Success {
+			t.Fatalf("foreign item should fail safely: %+v", result)
+		}
+	}
+}
+
 func TestRunOneClean_unknownCategory(t *testing.T) {
 	it := &model.Item{Name: "weird", Category: model.CatBrew}
 	out := captureStdout(t, func() {

@@ -58,12 +58,7 @@ func runNativeElevatedItems(
 	fmt.Println("ℹ After that, brew/mas run as your user with cached sudo")
 
 	if err := primeMacSudo(ctx); err != nil {
-		if errors.Is(err, elevate.ErrDialogCancelled) {
-			fmt.Fprintln(os.Stderr, "⊘ Authorization cancelled — privileged packages skipped")
-			return skipBatchResults(items, "authorization cancelled in the macOS dialog")
-		}
-		fmt.Fprintf(os.Stderr, "⊘ Native authorization failed: %v\n", err)
-		return nativeElevatedFailAll(items, "", err)
+		return nativeAuthorizationResults(items, err)
 	}
 
 	// sudo -v succeeded — reuse normal updater paths with a passwordless session.
@@ -74,34 +69,64 @@ func runNativeElevatedItems(
 	}
 	ctx = elevate.WithSession(ctx, *sess)
 
-	var results []*updater.Result
-	groups := groupByCategory(items)
 	var prepared map[model.Category]*updater.PreparedUpdateBatch
 	if len(preparedBatches) > 0 {
 		prepared = preparedBatches[0]
 	}
+	return runNativeCategoryGroups(ctx, plat, items, opts, cfg, sess, prepared)
+}
+
+func nativeAuthorizationResults(items []*model.Item, err error) []*updater.Result {
+	if errors.Is(err, elevate.ErrDialogCancelled) {
+		fmt.Fprintln(os.Stderr, "⊘ Authorization cancelled — privileged packages skipped")
+		return skipBatchResults(items, "authorization cancelled in the macOS dialog")
+	}
+	fmt.Fprintf(os.Stderr, "⊘ Native authorization failed: %v\n", err)
+	return nativeElevatedFailAll(items, "", err)
+}
+
+func runNativeCategoryGroups(
+	ctx context.Context,
+	plat model.PlatformInfo,
+	items []*model.Item,
+	opts updater.Options,
+	cfg Config,
+	sess **elevate.Session,
+	prepared map[model.Category]*updater.PreparedUpdateBatch,
+) []*updater.Result {
+	groups := groupByCategory(items)
+	var results []*updater.Result
 	for _, cat := range sortedCategories(groups) {
-		if batch := prepared[cat]; batch != nil {
-			subset, err := batch.Subset(groups[cat])
-			if err != nil {
-				results = append(results, updatePlanErrorResults(groups[cat], err)...)
-			} else {
-				results = append(results, executePreparedBatch(ctx, subset, opts)...)
-			}
-			continue
-		}
-		if cat == model.CatBrew {
-			results = append(results, updateCategory(ctx, cat, groups[cat], opts)...)
-			continue
-		}
-		elevCtx, skipped, reason := ensureCategoryElevation(ctx, plat, cat, cfg, sess)
-		if skipped {
-			results = append(results, skipBatchResults(groups[cat], reason)...)
-		} else {
-			results = append(results, updateCategory(elevCtx, cat, groups[cat], opts)...)
-		}
+		results = append(results, runNativeCategory(ctx, plat, cat, groups[cat], opts, cfg, sess, prepared)...)
 	}
 	return results
+}
+
+func runNativeCategory(
+	ctx context.Context,
+	plat model.PlatformInfo,
+	cat model.Category,
+	items []*model.Item,
+	opts updater.Options,
+	cfg Config,
+	sess **elevate.Session,
+	prepared map[model.Category]*updater.PreparedUpdateBatch,
+) []*updater.Result {
+	if batch := prepared[cat]; batch != nil {
+		subset, err := batch.Subset(items)
+		if err != nil {
+			return updatePlanErrorResults(items, err)
+		}
+		return executePreparedBatch(ctx, subset, opts)
+	}
+	if cat == model.CatBrew {
+		return updateCategory(ctx, cat, items, opts)
+	}
+	elevCtx, skipped, reason := ensureCategoryElevation(ctx, plat, cat, cfg, sess)
+	if skipped {
+		return skipBatchResults(items, reason)
+	}
+	return updateCategory(elevCtx, cat, items, opts)
 }
 
 func stdinIsTTY() bool {
