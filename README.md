@@ -106,6 +106,7 @@ keeps ownership of updates, signatures, and rollback.
 | `--dry-run` | Print plan without executing |
 | `--strict` | Non-zero exit if anything remains outdated/cleanable |
 | `--skip-password` | Skip sudo-needing batches |
+| `--skip-auto-upgrade` | Skip release self-update on startup |
 | `--env-defaults` | Print effective `UPDASH_*` retention vars |
 | `--upgrade` | Self-update from latest release |
 
@@ -159,6 +160,14 @@ package manager that can list what is installed but not what is current) report
 `info`, never `ok`, and the CLI/TUI never print success copy for an
 `info`-only summary. `unverified` and `error` are counted separately in the
 JSON report (`unverified`, `errors`, `info`) and both drive exit code `2`.
+
+`--update` remains the CLI update workflow. When Oh My Zsh is installed, its
+updater child process is non-interactive: it is executed directly as `zsh -f`
+with an absolute script path, so
+`.zshrc` and tmux auto-attach hooks are not loaded. Headless modes, including
+`--update`, skip the startup release self-upgrade/re-exec; `--skip-auto-upgrade`
+remains available as an explicit guard for modes that do perform the startup
+check.
 
 ### JSON check (automation)
 

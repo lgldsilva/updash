@@ -3,6 +3,8 @@ package updater
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"runtime"
 	"time"
 
@@ -228,7 +230,7 @@ func planUpdateCommands(ctx context.Context, cat model.Category, items []*model.
 		}
 		return bashGlobalPlan("source $HOME/.nvm/nvm.sh && nvm install-latest-npm", "install bash or update nvm manually")
 	case model.CatOmz:
-		return bashGlobalPlan("source $HOME/.oh-my-zsh/tools/upgrade.sh", "install bash or run the Oh My Zsh upgrade script manually")
+		return omzGlobalPlan()
 	case model.CatGHExt:
 		return globalPlan("gh", []string{"extension", commandUpgrade, "--all"}, false)
 	case model.CatAgent:
@@ -249,6 +251,24 @@ func bashGlobalPlan(script, manual string) ([]CommandPlan, error) {
 	}
 	return globalPlan("bash", []string{"-c", script}, false)
 }
+
+func omzGlobalPlan() ([]CommandPlan, error) {
+	if _, err := lookPath("zsh"); err != nil {
+		return []CommandPlan{manualPlan("install zsh or run the Oh My Zsh upgrade script manually")}, nil
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil, fmt.Errorf("resolve home directory for Oh My Zsh: %w", err)
+	}
+	scriptPath, err := filepath.Abs(filepath.Join(home, ".oh-my-zsh", "tools", "upgrade.sh"))
+	if err != nil {
+		return nil, fmt.Errorf("resolve Oh My Zsh updater path: %w", err)
+	}
+	// -f disables zsh startup files. Passing the script as argv also avoids a
+	// shell fragment that could source the caller's .zshrc or attach tmux.
+	return globalPlan("zsh", []string{"-f", scriptPath}, false)
+}
+
 func manualPlan(reason string) CommandPlan {
 	return CommandPlan{Scope: CommandScopeManual, Manual: reason}
 }
