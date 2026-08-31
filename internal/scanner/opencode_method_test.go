@@ -107,17 +107,17 @@ func TestOpenCodeInstall_FollowsSymlink(t *testing.T) {
 }
 
 func TestDirWritable(t *testing.T) {
-	if got := dirWritable(t.TempDir()); !got {
+	if !dirWritable(t.TempDir()) {
 		t.Fatal("a temp dir must be writable")
 	}
-	if got := dirWritable(""); got {
+	if dirWritable("") {
 		t.Fatal("empty dir must not be writable")
 	}
-	if got := dirWritable(filepath.Join(t.TempDir(), "missing")); got {
+	if dirWritable(filepath.Join(t.TempDir(), "missing")) {
 		t.Fatal("missing dir must not be writable")
 	}
 	if runtime.GOOS != "windows" && os.Geteuid() != 0 {
-		if got := dirWritable("/proc/self"); got {
+		if dirWritable("/proc/self") {
 			t.Fatal("a read-only system dir must not be writable")
 		}
 	}
