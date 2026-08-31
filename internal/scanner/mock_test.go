@@ -61,25 +61,31 @@ var realExecCommand = func(ctx context.Context, name string, args ...string) ([]
 
 // defaultExecCommand is the real os/exec implementation, saved at init.
 var (
-	defaultExecCommand  func(ctx context.Context, name string, args ...string) ([]byte, error)
-	defaultExecCombined func(ctx context.Context, name string, args ...string) ([]byte, error)
+	defaultExecCommand    func(ctx context.Context, name string, args ...string) ([]byte, error)
+	defaultExecCombined   func(ctx context.Context, name string, args ...string) ([]byte, error)
+	defaultExecCommandEnv func(ctx context.Context, env []string, name string, args ...string) ([]byte, error)
 )
 
 func init() {
 	defaultExecCommand = execCommand
 	defaultExecCombined = execCombined
+	defaultExecCommandEnv = execCommandEnv
 }
 
 // enableMocks replaces execCommand with the mock.
 func enableMocks() {
 	execCommand = mockExecCommand
 	execCombined = mockExecCommand
+	execCommandEnv = func(ctx context.Context, _ []string, name string, args ...string) ([]byte, error) {
+		return mockExecCommand(ctx, name, args...)
+	}
 }
 
 // disableMocks restores the real implementation.
 func disableMocks() {
 	execCommand = defaultExecCommand
 	execCombined = defaultExecCombined
+	execCommandEnv = defaultExecCommandEnv
 }
 
 // TestMain is not used — we call enable/disable in each test.

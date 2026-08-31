@@ -12,6 +12,14 @@ var execCommand = func(ctx context.Context, name string, args ...string) ([]byte
 	return cmd.Output()
 }
 
+// execCommandEnv is execCommand with an explicit environment, for tools that
+// need a corrected PATH (see EnsurePnpmPath). Variable so tests can mock it.
+var execCommandEnv = func(ctx context.Context, env []string, name string, args ...string) ([]byte, error) {
+	cmd := exec.CommandContext(ctx, name, args...)
+	cmd.Env = env
+	return cmd.Output()
+}
+
 // execCombined captures stdout+stderr (for actionable error messages).
 // Do NOT use this for commands whose stdout must be parsed as JSON (e.g.
 // `npm ... --json`): npm routinely writes "npm warn"/"npm notice" lines to

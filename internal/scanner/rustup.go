@@ -16,18 +16,25 @@ func (s *RustupSource) Label() string            { return binRustup }
 func (s *RustupSource) Icon() string             { return "🦀" }
 
 func (s *RustupSource) Scan(ctx context.Context, plat model.PlatformInfo) ([]*model.Item, error) {
+	// `rustup check` exits 100 when a toolchain update is available while still
+	// printing a perfectly parseable report on stdout. Treating the exit code as
+	// a failure marked the source as errored, and one errored source blocks
+	// every update — so trust the output whenever it parses.
 	out, err := execCommand(ctx, binRustup, "check")
-	if err != nil {
-		return []*model.Item{errItem(binRustup, model.CatRustup)}, nil
-	}
 	if items := parseRustupCheck(string(out)); len(items) > 0 {
 		return items, nil
+	}
+	if err != nil {
+		return []*model.Item{errItem(binRustup, model.CatRustup)}, nil
 	}
 	return []*model.Item{okItem(binRustup, model.CatRustup)}, nil
 }
 
+// rustup phrasing changed across versions ("Update available" in older
+// releases, "update available" in 1.29), so every match here is
+// case-insensitive.
 func parseRustupCheck(output string) []*model.Item {
-	if !strings.Contains(output, "out of date") && !strings.Contains(output, "Update available") {
+	if !containsFold(output, "out of date") && !containsFold(output, "update available") {
 		return nil
 	}
 	var items []*model.Item
@@ -45,9 +52,9 @@ func parseRustupCheckLine(line string) *model.Item {
 		return nil
 	}
 	switch {
-	case strings.Contains(line, "out of date"), strings.Contains(line, "Update available"):
+	case containsFold(line, "out of date"), containsFold(line, "update available"):
 		return &model.Item{Name: parts[0], Category: model.CatRustup, Status: model.StatusOutdated}
-	case strings.Contains(line, "is up to date"):
+	case containsFold(line, "is up to date"), containsFold(line, "up to date :"):
 		return &model.Item{
 			Name: parts[0], Category: model.CatRustup,
 			CurrentVer: statusUpToDate, Status: model.StatusOK,
@@ -55,6 +62,11 @@ func parseRustupCheckLine(line string) *model.Item {
 	default:
 		return nil
 	}
+}
+
+// containsFold is a case-insensitive strings.Contains.
+func containsFold(haystack, needle string) bool {
+	return strings.Contains(strings.ToLower(haystack), strings.ToLower(needle))
 }
 
 // CargoSource scans cargo-installed tools via cargo-install-update.
