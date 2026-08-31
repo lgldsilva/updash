@@ -5,11 +5,22 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/lgldsilva/updash/internal/model"
+	"github.com/lgldsilva/updash/internal/scanner"
 )
+
+// stubOpenCodeInstall pins the detected OpenCode installation for one test so
+// the plan does not depend on how the machine running the suite installed it.
+func stubOpenCodeInstall(t *testing.T, info scanner.OpenCodeInstallInfo) {
+	t.Helper()
+	prev := openCodeInstall
+	openCodeInstall = func() scanner.OpenCodeInstallInfo { return info }
+	t.Cleanup(func() { openCodeInstall = prev })
+}
 
 // tempExecutable creates a real executable file so os.Stat inside
 // openCodeBinaryOK sees a runnable launcher (lookPath is stubbed to return it).
@@ -89,19 +100,22 @@ func TestUpdateAgent_OpenCode(t *testing.T) {
 	}
 	lookPath = func(file string) (string, error) { return exe, nil }
 	t.Cleanup(func() { runUpdateCmd, outputRunner, lookPath = prevRun, prevRunner, prevLook })
+	stubOpenCodeInstall(t, scanner.OpenCodeInstallInfo{Method: scanner.OpenCodeMethodCurl, BinPath: exe})
 
 	item := &model.Item{Name: agentOpenCode, Category: model.CatAgent, Status: model.StatusOutdated}
 	res := updateAgent(context.Background(), item, SilentOptions())
 	if !res.Success || item.Status != model.StatusDone {
 		t.Fatalf("expected success/done, got success=%v status=%v err=%q", res.Success, item.Status, res.Error)
 	}
-	if len(dispatched) != 2 || dispatched[0] != "opencode" || dispatched[1] != "upgrade" {
-		t.Fatalf("dispatched = %v, want [opencode upgrade]", dispatched)
+	want := []string{"opencode", "upgrade", "-m", scanner.OpenCodeMethodCurl}
+	if !slices.Equal(dispatched, want) {
+		t.Fatalf("dispatched = %v, want %v", dispatched, want)
 	}
 }
 
 func TestExecutePreparedBatch_OpenCodeKeepsHealthCheck(t *testing.T) {
 	exe := tempExecutable(t)
+	stubOpenCodeInstall(t, scanner.OpenCodeInstallInfo{Method: scanner.OpenCodeMethodCurl, BinPath: exe})
 	item := &model.Item{Name: agentOpenCode, Category: model.CatAgent}
 	batch, err := PrepareUpdateBatch(context.Background(), model.CatAgent, []*model.Item{item})
 	if err != nil {

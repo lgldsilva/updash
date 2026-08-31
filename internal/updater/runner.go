@@ -41,7 +41,7 @@ var runUpdateCmd = func(ctx context.Context, opts Options, name string, args ...
 		cmd.Stdout = &out
 		cmd.Stderr = &er
 	}
-	err = cmd.Run()
+	err = runGuarded(cmd, inactivityWindow)
 	return out.String(), er.String(), err
 }
 
@@ -57,6 +57,6 @@ var runElevatedUpdateCmd = func(ctx context.Context, opts Options, name string, 
 		cmd.Stdout = &out
 		cmd.Stderr = &er
 	}
-	err = cmd.Run()
+	err = runGuarded(cmd, inactivityWindow)
 	return out.String(), er.String(), err
 }

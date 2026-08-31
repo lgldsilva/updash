@@ -289,7 +289,14 @@ func packageIDsOrNames(items []*model.Item) ([]string, error) {
 func agentPlans(items []*model.Item) ([]CommandPlan, error) {
 	plans := make([]CommandPlan, 0, len(items))
 	for _, item := range items {
-		if cmd := scanner.AgentUpdateCommand(item.Name); len(cmd) > 0 {
+		cmd := scanner.AgentUpdateCommand(item.Name)
+		// OpenCode resolves its own install method and prompts when it fails;
+		// updash decides the method (or the npm fallback) up front instead.
+		if item.Name == agentOpenCode {
+			plans = append(plans, openCodeUpgradePlan(cmd))
+			continue
+		}
+		if len(cmd) > 0 {
 			plans = append(plans, CommandPlan{Name: cmd[0], Args: cmd[1:], Scope: CommandScopeExact})
 			continue
 		}

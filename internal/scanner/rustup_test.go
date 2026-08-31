@@ -1,6 +1,7 @@
 package scanner
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/lgldsilva/updash/internal/model"
@@ -118,5 +119,59 @@ func TestParseCargoInstallUpdateLine(t *testing.T) {
 				t.Fatalf("got %+v, want %+v", got, tt.want)
 			}
 		})
+	}
+}
+
+// `rustup check` exits 100 when an update is available while printing a valid
+// report; the source must be reported as outdated, not errored — an errored
+// source blocks every update.
+func TestRustupScan_NonZeroExitWithValidOutput(t *testing.T) {
+	enableMocks()
+	defer disableMocks()
+	setMock(binRustup, []string{"check"},
+		"stable-x86_64-unknown-linux-gnu - Update available: 1.97.0 -> 1.98.0\nrustup - up to date : 1.29.0",
+		errors.New("exit status 100"))
+
+	items, err := (&RustupSource{}).Scan(t.Context(), model.PlatformInfo{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) == 0 || items[0].Status != model.StatusOutdated {
+		t.Fatalf("items = %+v, want an outdated toolchain", items)
+	}
+}
+
+// A real failure (no parseable output) is still an error.
+func TestRustupScan_FailureWithoutOutputIsError(t *testing.T) {
+	enableMocks()
+	defer disableMocks()
+	setMock(binRustup, []string{"check"}, "", errors.New("rustup: command failed"))
+
+	items, err := (&RustupSource{}).Scan(t.Context(), model.PlatformInfo{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 1 || items[0].Status != model.StatusError {
+		t.Fatalf("items = %+v, want an error item", items)
+	}
+}
+
+// rustup 1.29 lowercased the phrase ("update available"); older releases wrote
+// "Update available". Both must be recognised, and the trailing "up to date :"
+// line for rustup itself must not be mistaken for a toolchain update.
+func TestParseRustupCheck_CaseInsensitivePhrasing(t *testing.T) {
+	out := "stable-x86_64-unknown-linux-gnu - update available: 1.97.0 (2d8144b78) -> 1.98.0 (88d9e12ae)\nrustup - up to date : 1.29.0"
+	items := parseRustupCheck(out)
+	if len(items) != 2 {
+		t.Fatalf("items = %+v, want the toolchain and rustup itself", items)
+	}
+	if items[0].Status != model.StatusOutdated || items[0].Name != "stable-x86_64-unknown-linux-gnu" {
+		t.Fatalf("toolchain not flagged outdated: %+v", items[0])
+	}
+	if items[1].Status != model.StatusOK {
+		t.Fatalf("rustup itself must be OK: %+v", items[1])
+	}
+	if got := parseRustupCheck("stable - Update available: 1.0 -> 1.1"); len(got) != 1 || got[0].Status != model.StatusOutdated {
+		t.Fatalf("legacy capitalised phrasing broke: %+v", got)
 	}
 }

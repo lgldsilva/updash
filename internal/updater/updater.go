@@ -70,6 +70,8 @@ func ExecutePreparedBatch(ctx context.Context, batch *PreparedUpdateBatch, opts 
 		return executePreparedApt(ctx, items, plans, opts)
 	case model.CatAgent:
 		return executePreparedAgents(ctx, items, plans, opts)
+	case model.CatFlatpak:
+		return executePreparedFlatpak(ctx, items, plans, opts)
 	default:
 		return executePreparedPlans(ctx, items, plans, opts)
 	}
@@ -140,13 +142,13 @@ func executePreparedAgents(ctx context.Context, items []*model.Item, plans []Com
 		return failedBatch(items, fmt.Errorf("internal agent plan does not match selected items"))
 	}
 	results := make([]*Result, len(items))
-	for i, plan := range plans {
-		item := items[i]
+	for i, item := range items {
+		plan := plans[i]
 		if plan.Scope == CommandScopeManual {
 			results[i] = manualAgentResult(item, plan.Manual)
 			continue
 		}
-		result := runCommandPlan(ctx, item, plan, opts)
+		result := runAgentPlan(ctx, item, plan, opts)
 		updateCmd := append([]string{plan.Name}, plan.Args...)
 		switch item.Name {
 		case agentClaudeCode:
@@ -214,7 +216,10 @@ func upgradeOneBrewWithPlan(ctx context.Context, item *model.Item, plan CommandP
 		cmd.Stderr = &stderr
 	}
 
-	runErr := cmd.Run()
+	// No inactivity watchdog here: brew already has a per-item timeout, and a
+	// long silent step (a .pkg installer) is expected. The zero window still
+	// applies the shared non-interactive environment.
+	runErr := runGuarded(cmd, 0)
 	output := stdout.String() + stderr.String()
 	timedOut := errors.Is(itemCtx.Err(), context.DeadlineExceeded)
 
@@ -750,6 +755,14 @@ func runExactPlans(ctx context.Context, items []*model.Item, plans []CommandPlan
 	return results
 }
 
+// runAgentPlan runs one agent plan under its own timeout so a single stuck
+// agent cannot exhaust the shared CatAgent batch budget.
+func runAgentPlan(ctx context.Context, item *model.Item, plan CommandPlan, opts Options) *Result {
+	itemCtx, cancel := context.WithTimeout(ctx, AgentItemTimeout())
+	defer cancel()
+	return runCommandPlan(itemCtx, item, plan, opts)
+}
+
 func runCommandPlan(ctx context.Context, item *model.Item, plan CommandPlan, opts Options) *Result {
 	if plan.Scope == CommandScopeManual {
 		return manualAgentResult(item, plan.Manual)
@@ -818,7 +831,7 @@ func runCmdWithBuilder(ctx context.Context, item *model.Item, cmd *exec.Cmd, opt
 		cmd.Stderr = &stderr
 	}
 
-	err := cmd.Run()
+	err := runGuarded(cmd, inactivityWindow)
 	result := &Result{Item: item}
 
 	if err != nil {
@@ -848,23 +861,16 @@ func manualAgentResult(item *model.Item, reason string) *Result {
 	}
 }
 
+// updateAgent updates a single agent through the same planner the prepared
+// batch uses, so a dry-run and an execution can never disagree on the command.
 func updateAgent(ctx context.Context, item *model.Item, opts Options) *Result {
-	if cmd := scanner.AgentUpdateCommand(item.Name); len(cmd) > 0 {
-		res := runCmd(ctx, item, opts, cmd[0], cmd[1:]...)
-		switch item.Name {
-		case agentClaudeCode:
-			return ensureClaudeNativeBinary(ctx, item, res, cmd, opts)
-		case agentOpenCode:
-			return ensureOpenCodeHealthy(ctx, item, res)
+	plans, err := agentPlans([]*model.Item{item})
+	if err != nil || len(plans) != 1 {
+		if err == nil {
+			err = fmt.Errorf("invalid agent update plan for %q", item.Name)
 		}
-		return res
+		item.Status = model.StatusError
+		return &Result{Item: item, Error: err.Error()}
 	}
-	reason := item.KeepPolicy
-	if reason == "" {
-		reason = scanner.AgentKeepPolicy(item.Name)
-	}
-	if reason == "" {
-		reason = "manual reinstall / app update"
-	}
-	return manualAgentResult(item, reason)
+	return executePreparedAgents(ctx, []*model.Item{item}, plans, opts)[0]
 }
