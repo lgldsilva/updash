@@ -35,3 +35,10 @@ func BrewItemTimeout(name string) time.Duration {
 	}
 	return 12 * time.Minute
 }
+
+// AgentItemTimeout caps a single agent upgrade. The CatAgent batch budget is
+// shared by every agent, so without a per-item cap one stuck CLI can consume
+// the whole window before the next agent is even attempted.
+func AgentItemTimeout() time.Duration {
+	return 8 * time.Minute
+}
