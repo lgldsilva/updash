@@ -15,8 +15,17 @@ trap 'rm -rf "$work"' EXIT
 
 FAIL=0
 pass() { printf '  ✓ %s\n' "$1"; }
-# mode_of echoes the octal permissions of a path (BSD stat, then GNU stat).
-mode_of() { stat -f '%Lp' "$1" 2>/dev/null || stat -c '%a' "$1" 2>/dev/null; }
+# mode_of echoes the octal permissions of a path (GNU stat, then BSD stat).
+# GNU stat must be tried first: it accepts -f as "filesystem info" and exits 0,
+# so probing BSD's -f '%Lp' first would swallow the real answer on Linux.
+mode_of() {
+  local mode
+  if mode=$(stat -c '%a' "$1" 2>/dev/null); then
+    printf '%s\n' "$mode"
+    return 0
+  fi
+  stat -f '%Lp' "$1" 2>/dev/null
+}
 fail() { printf '  ✘ %s\n' "$1" >&2; FAIL=1; }
 
 # run_install <install_dir> <src> — calls install_binary in a subshell.
