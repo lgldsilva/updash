@@ -72,6 +72,22 @@ func cleanOne(ctx context.Context, item *model.Item, opts Options) *Result {
 	}
 }
 
+// pacmanCleanCmdForItem maps a pacman/yay cleanup item name to its command
+// (argv without sudo). Pure routing — no I/O.
+func pacmanCleanCmdForItem(name string) []string {
+	switch {
+	case strings.HasPrefix(name, "pacman-orphans"):
+		return []string{"bash", "-c",
+			`orphans=$(pacman -Qtdq); if [ -n "$orphans" ]; then echo "$orphans" | pacman -Rns - --noconfirm; else echo "no orphans"; fi`}
+	case strings.HasPrefix(name, "pacman"):
+		return []string{"paccache", "-rk2"}
+	case strings.HasPrefix(name, "yay"):
+		return []string{"yay", "-Sc", "--aur", "--noconfirm"}
+	default:
+		return nil
+	}
+}
+
 // cleanCache handles general cache cleanup.
 func cleanCache(ctx context.Context, item *model.Item, opts Options) *Result {
 	switch {
@@ -88,6 +104,8 @@ func cleanCache(ctx context.Context, item *model.Item, opts Options) *Result {
 		return cleanNpm(ctx, item, opts)
 	case strings.HasPrefix(item.Name, "snap"):
 		return runElevatedCmd(ctx, item, opts, "snap", "set", "system", "refresh.retain=2")
+	case strings.HasPrefix(item.Name, "pacman-orphans"), strings.HasPrefix(item.Name, "pacman"), strings.HasPrefix(item.Name, "yay"):
+		return cleanPacman(ctx, item, opts)
 	case strings.HasPrefix(item.Name, "win"):
 		return cleanWindowsCache(ctx, item, opts)
 	default:
@@ -97,6 +115,17 @@ func cleanCache(ctx context.Context, item *model.Item, opts Options) *Result {
 			Output:  fmt.Sprintf("%s: cleaned", item.Name),
 		}
 	}
+}
+
+// cleanPacman runs the pacman/yay cache and orphan cleanup commands.
+// Orphan removal and the pacman package cache need root (elevated); the yay
+// build cache in ~/.cache/yay is user-owned.
+func cleanPacman(ctx context.Context, item *model.Item, opts Options) *Result {
+	argv := pacmanCleanCmdForItem(item.Name)
+	if len(argv) == 0 {
+		return &Result{Item: item, Success: false, Error: "cannot parse pacman item: " + item.Name}
+	}
+	return runCmdWithBuilder(ctx, item, elevate.Sudo(ctx, argv[0], argv[1:]...), opts)
 }
 
 const fmtErrLine = "error: %s\n"

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"strings"
+	"time"
 
 	"github.com/lgldsilva/updash/internal/model"
 )
@@ -51,9 +52,48 @@ func (s *PipxSource) Scan(ctx context.Context, plat model.PlatformInfo) ([]*mode
 		})
 	}
 
+	// `pipx list` only reports installed versions, so probe PyPI per package
+	// through the venv's own pip (`pipx runpip <pkg> list --outdated`). A probe
+	// that fails leaves the item informational — an affirmative claim it never
+	// verified would be worse than none.
+	for _, it := range items {
+		out, err := execCommandBudget(ctx, pipxProbeTimeout, binPipx, "runpip", it.Name, "list", "--outdated", "--format=json")
+		if err != nil {
+			continue
+		}
+		latest := parsePipxOutdated(string(out), it.Name)
+		if latest == "" {
+			it.Status = model.StatusOK
+			continue
+		}
+		it.AvailableVer = latest
+		it.Status = model.StatusOutdated
+	}
+
 	if len(items) == 0 {
 		items = append(items, &model.Item{Name: binPipx, Category: model.CatPipx, Status: model.StatusInfo, CurrentVer: statusUpToDate})
 	}
 
 	return items, nil
+}
+
+const pipxProbeTimeout = 20 * time.Second
+
+// parsePipxOutdated extracts latest_version for the named package from
+// `pip list --outdated --format=json` output. A package absent from the list
+// is up to date (or pip could not reach the index); both mean "no item".
+func parsePipxOutdated(output, name string) string {
+	var rows []struct {
+		Name      string `json:"name"`
+		LatestVer string `json:"latest_version"`
+	}
+	if err := json.Unmarshal([]byte(output), &rows); err != nil {
+		return ""
+	}
+	for _, r := range rows {
+		if strings.EqualFold(r.Name, name) {
+			return r.LatestVer
+		}
+	}
+	return ""
 }

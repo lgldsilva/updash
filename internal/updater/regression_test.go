@@ -105,8 +105,7 @@ func TestPlanUpdateCommands_TargetsOnlySelectedPackages(t *testing.T) {
 			category: model.CatPipx,
 			items:    []*model.Item{{Name: "one"}, {Name: "two"}},
 			want: []CommandPlan{
-				{Name: "pipx", Args: []string{"upgrade", "one"}, Scope: CommandScopeExact},
-				{Name: "pipx", Args: []string{"upgrade", "two"}, Scope: CommandScopeExact},
+				{Name: "pipx", Args: []string{"upgrade-all"}, Scope: CommandScopeCategoryGlobal},
 			},
 		},
 	}

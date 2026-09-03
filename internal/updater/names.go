@@ -3,6 +3,8 @@ package updater
 const (
 	commandUpdate  = "update"
 	commandUpgrade = "upgrade"
+	commandInstall = "install"
+	flagPrefix     = "--prefix"
 	flagYes        = "-y"
 	flagGlobal     = "-g"
 	npmCommand     = "npm"

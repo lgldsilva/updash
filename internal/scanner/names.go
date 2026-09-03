@@ -27,6 +27,8 @@ const (
 	binCargo   = "cargo"
 	binDu      = "du"
 
+	binCheckupdates = "checkupdates"
+
 	cleanupIcon = "🧹"
 	flagDuShort = "-sh"
 

@@ -22,6 +22,9 @@ const (
 	nameNpmCache            = "npm-cache"
 	nameBrewCache           = "brew-cache"
 	nameAptCache            = "apt-cache"
+	namePacmanCache         = "pacman-cache"
+	namePacmanOrphans       = "pacman-orphans"
+	nameYayCache            = "yay-cache"
 	nameWinTemp             = "win-temp"
 	msgUnableToInspectCache = "unable to inspect cache"
 	msgUnableToScan         = "unable to scan"
@@ -133,6 +136,112 @@ func (s *AptCleanSource) Scan(ctx context.Context, plat model.PlatformInfo) ([]*
 			Reclaimable: size,
 		},
 	}, nil
+}
+
+// --- Pacman Cleanup ---
+
+type PacmanCleanSource struct{}
+
+func (s *PacmanCleanSource) Category() model.Category { return model.CatCache }
+func (s *PacmanCleanSource) Label() string            { return "Pacman Cache" }
+func (s *PacmanCleanSource) Icon() string             { return cleanupIcon }
+
+func (s *PacmanCleanSource) Scan(ctx context.Context, plat model.PlatformInfo) ([]*model.Item, error) {
+	var items []*model.Item
+	if it := s.scanPacmanCache(ctx); it != nil {
+		items = append(items, it)
+	}
+	if it := s.scanYayCache(ctx, plat); it != nil {
+		items = append(items, it)
+	}
+	if it := s.scanOrphans(ctx); it != nil {
+		items = append(items, it)
+	}
+	return items, nil
+}
+
+// scanPacmanCache sizes /var/cache/pacman/pkg. Cleaning runs `paccache -rk2`
+// (pacman-contrib), so without paccache the item is informational only.
+func (s *PacmanCleanSource) scanPacmanCache(ctx context.Context) *model.Item {
+	if _, err := os.Stat("/var/cache/pacman/pkg"); err != nil {
+		if os.IsNotExist(err) {
+			return &model.Item{Name: namePacmanCache, Category: model.CatCache, Status: model.StatusOK, CurrentVer: verNoCache}
+		}
+		return infoItem(namePacmanCache, model.CatCache, msgUnableToInspectCache)
+	}
+	if _, err := exec.LookPath("paccache"); err != nil {
+		return &model.Item{Name: namePacmanCache, Category: model.CatCache, Status: model.StatusInfo, CurrentVer: "install pacman-contrib (paccache) to clean"}
+	}
+	// du exits 1 on unreadable subdirs (e.g. pacman's root-owned
+	// download-* temp dirs during an active update) but still prints the
+	// total on stdout — trust the output whenever it is non-empty.
+	out, _ := execCommand(ctx, binDu, flagDuShort, "/var/cache/pacman/pkg")
+	if strings.TrimSpace(string(out)) == "" {
+		return infoItem(namePacmanCache, model.CatCache, msgUnableToInspectCache)
+	}
+	size := firstField(out, "0B")
+	return &model.Item{
+		Name:        namePacmanCache,
+		Category:    model.CatCache,
+		CurrentVer:  size,
+		Status:      model.StatusCleanCandidate,
+		Reclaimable: size,
+		KeepPolicy:  "keep 2 latest versions (paccache -rk2)",
+	}
+}
+
+// scanYayCache sizes the AUR build cache (~/.cache/yay). Only present as an
+// item when yay is installed and the cache directory exists.
+func (s *PacmanCleanSource) scanYayCache(ctx context.Context, plat model.PlatformInfo) *model.Item {
+	if !plat.HasYay {
+		return nil
+	}
+	cacheDir := filepath.Join(os.Getenv("HOME"), ".cache", "yay")
+	if _, err := os.Stat(cacheDir); err != nil {
+		if os.IsNotExist(err) {
+			return &model.Item{Name: nameYayCache, Category: model.CatCache, Status: model.StatusOK, CurrentVer: verNoCache}
+		}
+		return infoItem(nameYayCache, model.CatCache, msgUnableToInspectCache)
+	}
+	out, _ := execCommand(ctx, binDu, flagDuShort, cacheDir)
+	if strings.TrimSpace(string(out)) == "" {
+		return infoItem(nameYayCache, model.CatCache, msgUnableToInspectCache)
+	}
+	size := firstField(out, "0B")
+	return &model.Item{
+		Name:        nameYayCache,
+		Category:    model.CatCache,
+		CurrentVer:  size,
+		Status:      model.StatusCleanCandidate,
+		Reclaimable: size,
+		KeepPolicy:  "AUR build cache (yay -Sc --aur)",
+	}
+}
+
+// scanOrphans detects orphan packages (installed as deps, no longer required)
+// via `pacman -Qtdq`. Only surfaces an item when orphans exist.
+func (s *PacmanCleanSource) scanOrphans(ctx context.Context) *model.Item {
+	out, err := execCommand(ctx, binPacman, "-Qtdq")
+	if err != nil {
+		return nil // query failure is benign — nothing claimable
+	}
+	var count int
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		if strings.TrimSpace(line) != "" {
+			count++
+		}
+	}
+	if count == 0 {
+		return nil
+	}
+	return &model.Item{
+		Name:        namePacmanOrphans,
+		Category:    model.CatCache,
+		CurrentVer:  fmt.Sprintf("%d package(s)", count),
+		Status:      model.StatusCleanCandidate,
+		RemoveCount: count,
+		KeepPolicy:  "pacman -Rns (orphaned deps)",
+	}
 }
 
 // --- Docker Cleanup ---
