@@ -252,15 +252,15 @@ func globalPlan(name string, args []string, elevated bool) ([]CommandPlan, error
 // flagged versions explicitly instead; fall back to `npm update` when an item
 // has no known target version.
 func opencodePluginPlans(items []*model.Item) ([]CommandPlan, error) {
-	args := []string{commandInstall, "--prefix", scanner.OpenCodeConfigDir()}
+	args := []string{commandInstall, flagPrefix, scanner.OpenCodeConfigDir()}
 	for _, it := range items {
 		if it.AvailableVer == "" {
-			return globalPlan(npmCommand, []string{commandUpdate, "--prefix", scanner.OpenCodeConfigDir()}, false)
+			return globalPlan(npmCommand, []string{commandUpdate, flagPrefix, scanner.OpenCodeConfigDir()}, false)
 		}
 		args = append(args, it.Name+"@"+it.AvailableVer)
 	}
 	if len(args) == 2 {
-		return globalPlan(npmCommand, []string{commandUpdate, "--prefix", scanner.OpenCodeConfigDir()}, false)
+		return globalPlan(npmCommand, []string{commandUpdate, flagPrefix, scanner.OpenCodeConfigDir()}, false)
 	}
 	return []CommandPlan{{Name: npmCommand, Args: args, Scope: CommandScopeExact}}, nil
 }
