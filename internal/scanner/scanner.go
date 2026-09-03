@@ -233,6 +233,7 @@ func appendCleanupSources(src []Source, plat model.PlatformInfo) []Source {
 		{plat.HasGo, &GoCleanSource{}},
 		{plat.HasNpm, &NpmCleanSource{}},
 		{plat.HasSnap, &SnapCleanSource{}},
+		{plat.HasPacman || plat.HasYay, &PacmanCleanSource{}},
 		{plat.OS == "windows", &WindowsTempSource{}},
 	} {
 		if c.ok {

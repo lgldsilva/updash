@@ -69,6 +69,10 @@ func cacheMeasurePaths(item *model.Item) []string {
 		return npmCachePaths(home)
 	case strings.HasPrefix(item.Name, "apt"):
 		return []string{"/var/cache/apt"}
+	case strings.HasPrefix(item.Name, "pacman"):
+		return []string{"/var/cache/pacman/pkg"}
+	case strings.HasPrefix(item.Name, "yay"):
+		return firstExistingPath(filepath.Join(home, ".cache", "yay"))
 	}
 	return nil
 }
