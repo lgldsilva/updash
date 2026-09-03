@@ -457,7 +457,10 @@ func aiInfraCatalog() []infraTool {
 		{name: "Gh Extensions", binary: binGh, category: model.CatGHExt, verCmd: []string{binGh, "extension", cmdList},
 			latestCmd: []string{binGh, "extension", cmdList}, latest: infraLatestGhExt},
 		{name: binGcloud, binary: binGcloud, category: model.CatAI, verCmd: []string{binGcloud, "version", "--format=json"},
-			latestCmd: []string{binGcloud, "components", cmdList, "--only-filter-updates-available", "--format=value(id)"}, latest: infraLatestNonEmpty},
+			// --only-filter-updates-available was removed from modern gcloud;
+			// the generic --filter is the supported equivalent (empty output
+			// = nothing to update).
+			latestCmd: []string{binGcloud, "components", cmdList, `--filter=status="Update Available"`, "--format=value(id)"}, latest: infraLatestNonEmpty},
 	}
 }
 

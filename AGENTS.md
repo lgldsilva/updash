@@ -31,7 +31,7 @@ scanner/             → Source interface + RunAll() (parallel, max 6 workers)
   ├── agents.go      → AI CLIs + npm global outdated merge
   ├── npm_protected.go → packages owned by another path (excluded from npm batch)
   ├── homelab_clean  → retention cleanups (env-driven)
-  └── cleanup.go     → brew/docker/npm/go caches, SDKMAN majors
+  └── cleanup.go     → brew/docker/npm/go caches, SDKMAN majors, pacman/yay caches + orphans
 updater/             → batch updates (brew/mas/npm/opencode plugins/agents)
   ├── runner.go      → exec seam (outputRunner/runUpdateCmd/lookPath) for tests
   └── opencode_health.go → post-update `opencode --version` validation
@@ -86,7 +86,7 @@ function without running an install (test seam used by `scripts/install_test.sh`
 - semidx (`semidx upgrade --check`), gh extensions and gcloud components are flagged outdated when updates exist — `--update` reaches them headless
 - nvm/omz/SDKMAN updates need `bash`; hosts without it get a manual note instead of a failing command
 - Manual-only agents use `KeepPolicy` containing `manual` → skipped in CLI update
-- OpenCode binary: `opencode upgrade` (single owner); plugins: `npm update --prefix ~/.config/opencode`
+- OpenCode binary: `opencode upgrade` (single owner); plugins: `npm install --prefix ~/.config/opencode <pkg>@<version>…` (explicit versions — `npm update` cannot move exactly-pinned plugins, e.g. `@opencode-ai/plugin`)
 - **OpenCode single-owner / protected npm packages:** the OpenCode binary is updated ONLY by `opencode upgrade` (the agent path). Its npm dist packages (`opencode-ai`, `@opencode-ai/cli`) are in `scanner.ProtectedNpmPackages()` (data-driven, not grep) and are (a) dropped from `NpmSource.Scan` and (b) excluded from the generic `npm update -g` batch in `batchNpmUpgrade`, which targets the remaining outdated globals by explicit name. The OpenCode agent item carries `npmPackage: "opencode-ai"` purely so the existing outdated-detection machinery flags it (its `updateCmd` still wins for the upgrade). After `opencode upgrade`, `ensureOpenCodeHealthy` runs `opencode --version` + checks the launcher exists/executable; a broken stub fails explicitly with the reinstall hint.
 
 ## Retention policy (env)

@@ -213,9 +213,9 @@ func planUpdateCommands(ctx context.Context, cat model.Category, items []*model.
 	case model.CatBun:
 		return exactPlans("bun", []string{commandUpdate, flagGlobal}, items)
 	case model.CatPipx:
-		return exactPlans("pipx", []string{commandUpgrade}, items)
+		return globalPlan("pipx", []string{"upgrade-all"}, false)
 	case model.CatOpenCodePlugins:
-		return globalPlan(npmCommand, []string{commandUpdate, "--prefix", scanner.OpenCodeConfigDir()}, false)
+		return opencodePluginPlans(items)
 	case model.CatGo:
 		return globalPlan("gup", []string{commandUpdate}, false)
 	case model.CatRustup:
@@ -244,6 +244,25 @@ func planUpdateCommands(ctx context.Context, cat model.Category, items []*model.
 
 func globalPlan(name string, args []string, elevated bool) ([]CommandPlan, error) {
 	return []CommandPlan{{Name: name, Args: args, Scope: CommandScopeCategoryGlobal, Elevated: elevated}}, nil
+}
+
+// opencodePluginPlans builds the OpenCode plugin update. `npm update` only
+// moves packages within their package.json range, so a plugin pinned exactly
+// (wanted == current) never upgrades and stays flagged forever. Install the
+// flagged versions explicitly instead; fall back to `npm update` when an item
+// has no known target version.
+func opencodePluginPlans(items []*model.Item) ([]CommandPlan, error) {
+	args := []string{commandInstall, "--prefix", scanner.OpenCodeConfigDir()}
+	for _, it := range items {
+		if it.AvailableVer == "" {
+			return globalPlan(npmCommand, []string{commandUpdate, "--prefix", scanner.OpenCodeConfigDir()}, false)
+		}
+		args = append(args, it.Name+"@"+it.AvailableVer)
+	}
+	if len(args) == 2 {
+		return globalPlan(npmCommand, []string{commandUpdate, "--prefix", scanner.OpenCodeConfigDir()}, false)
+	}
+	return []CommandPlan{{Name: npmCommand, Args: args, Scope: CommandScopeExact}}, nil
 }
 func bashGlobalPlan(script, manual string) ([]CommandPlan, error) {
 	if _, err := lookPath("bash"); err != nil {
