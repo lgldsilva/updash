@@ -185,6 +185,27 @@ func TestRemovePaths_errors(t *testing.T) {
 	}
 }
 
+// TestRemovePaths_danglingSymlink covers a symlink whose target no longer
+// exists (e.g. a rotated-away session file). os.Stat would follow the link
+// and fail with "no such file", so RemovePaths must use os.Lstat instead.
+func TestRemovePaths_danglingSymlink(t *testing.T) {
+	dir := t.TempDir()
+	link := filepath.Join(dir, "latest")
+	if err := os.Symlink(filepath.Join(dir, "gone.txt"), link); err != nil {
+		t.Fatal(err)
+	}
+	freed, errs := RemovePaths([]string{link})
+	if len(errs) != 0 {
+		t.Fatalf("errs=%v", errs)
+	}
+	if freed != 0 {
+		t.Fatalf("freed=%d, want 0 for a symlink", freed)
+	}
+	if _, err := os.Lstat(link); !os.IsNotExist(err) {
+		t.Fatalf("symlink still present, lstat err=%v", err)
+	}
+}
+
 func TestCollectOldPaths_fileChildren(t *testing.T) {
 	root := t.TempDir()
 	f := filepath.Join(root, "old.log")
