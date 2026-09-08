@@ -144,17 +144,22 @@ func dirSize(root string) int64 {
 }
 
 // RemovePaths deletes each path (file or directory). Returns freed bytes best-effort.
+// Uses Lstat so dangling symlinks (whose target no longer exists) are still removed
+// instead of failing outright — os.Stat would follow the link and error out first.
 func RemovePaths(paths []string) (freed int64, errs []string) {
 	for _, p := range paths {
-		fi, err := os.Stat(p)
+		fi, err := os.Lstat(p)
 		if err != nil {
 			errs = append(errs, p+": "+err.Error())
 			continue
 		}
 		var sz int64
-		if fi.IsDir() {
+		switch {
+		case fi.Mode()&os.ModeSymlink != 0:
+			sz = 0
+		case fi.IsDir():
 			sz = dirSize(p)
-		} else {
+		default:
 			sz = fi.Size()
 		}
 		if err := os.RemoveAll(p); err != nil {

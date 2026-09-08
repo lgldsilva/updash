@@ -407,8 +407,19 @@ func probeAgentVersionOK(ctx context.Context, verCmd []string) (string, bool) {
 	return statusInstalled, false
 }
 
-// agentSkipVersionProbe avoids Electron/GUI CLIs that hang without a display (common over SSH).
+// agentSkipVersionProbe avoids Electron/GUI CLIs whose "--version" launches
+// the full app instead of printing a version and exiting.
+//
+// Antigravity has no working version flag at all: `antigravity --version`
+// starts the Electron shell, language server, and host bridge regardless of
+// whether a display is attached, and never returns on its own — every probe
+// burns the full per-agent timeout. Cursor and Windsurf, by contrast, only
+// exhibit that behavior headless (common over SSH, e.g. no DISPLAY); with a
+// display attached they answer --version normally, so they stay gated on that.
 func agentSkipVersionProbe(plat model.PlatformInfo, binary string) bool {
+	if binary == binAntigravity {
+		return true
+	}
 	if plat.OS != "linux" {
 		return false
 	}
@@ -416,7 +427,7 @@ func agentSkipVersionProbe(plat model.PlatformInfo, binary string) bool {
 		return false
 	}
 	switch binary {
-	case binAntigravity, binCursor, binWindsurf:
+	case binCursor, binWindsurf:
 		return true
 	default:
 		return false

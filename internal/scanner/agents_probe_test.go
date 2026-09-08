@@ -24,6 +24,13 @@ func TestAgentSkipVersionProbe(t *testing.T) {
 	if agentSkipVersionProbe(plat, "cursor") {
 		t.Fatal("cursor should probe when DISPLAY is set")
 	}
+
+	// Antigravity has no working --version flag at all: it launches the full
+	// Electron app even with a display attached, so it must always skip,
+	// unlike Cursor/Windsurf which only misbehave headless.
+	if !agentSkipVersionProbe(plat, binAntigravity) {
+		t.Fatal("antigravity should always skip, even with DISPLAY set")
+	}
 }
 
 // Gh Extensions must use CatGHExt so updater hits `gh extension upgrade --all`,
