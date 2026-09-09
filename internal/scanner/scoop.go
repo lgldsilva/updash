@@ -17,7 +17,7 @@ func (s *ScoopSource) Icon() string             { return "🪣" }
 func (s *ScoopSource) Scan(ctx context.Context, plat model.PlatformInfo) ([]*model.Item, error) {
 	out, err := execCommand(ctx, binScoop, "status")
 	if err != nil {
-		return []*model.Item{errItem(binScoop, model.CatScoop)}, nil
+		return []*model.Item{errItem(binScoop, model.CatScoop, err)}, nil
 	}
 	output := string(out)
 	if strings.Contains(output, "Everything is ok") {

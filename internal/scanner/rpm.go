@@ -34,7 +34,7 @@ func (s *RpmSource) Scan(ctx context.Context, plat model.PlatformInfo) ([]*model
 	// check-update exits 100 when updates exist; treat that as success.
 	out, err := execCombined(ctx, RpmToolName(), "check-update", "-q")
 	if err != nil && !isExitCode(err, rpmCheckExitCode) {
-		return []*model.Item{errItem(RpmToolName(), model.CatDnf)}, nil
+		return []*model.Item{errItem(RpmToolName(), model.CatDnf, err)}, nil
 	}
 	return okOrOutdated(RpmToolName(), model.CatDnf, ParseDnfCheckUpdate(string(out))), nil
 }

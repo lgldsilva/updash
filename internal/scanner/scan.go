@@ -92,6 +92,7 @@ func ScanSource(ctx context.Context, src Source, plat model.PlatformInfo) *model
 			Category:   src.Category(),
 			Status:     model.StatusError,
 			CurrentVer: "scan timed out",
+			Error:      errCause(scanCtx.Err()),
 		}}, scanCtx.Err())
 	}
 }

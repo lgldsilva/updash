@@ -26,6 +26,7 @@ const (
 	binDnf     = "dnf"
 	binCargo   = "cargo"
 	binDu      = "du"
+	binSh      = "sh" // POSIX shell; ENOEXEC fallback in runner.go
 
 	binCheckupdates = "checkupdates"
 

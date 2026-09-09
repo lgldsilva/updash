@@ -25,7 +25,7 @@ func (s *RustupSource) Scan(ctx context.Context, plat model.PlatformInfo) ([]*mo
 		return items, nil
 	}
 	if err != nil {
-		return []*model.Item{errItem(binRustup, model.CatRustup)}, nil
+		return []*model.Item{errItem(binRustup, model.CatRustup, err)}, nil
 	}
 	return []*model.Item{okItem(binRustup, model.CatRustup)}, nil
 }
@@ -83,7 +83,7 @@ func (s *CargoSource) Scan(ctx context.Context, plat model.PlatformInfo) ([]*mod
 
 	out, err := execCommand(ctx, "cargo-install-update", "-l")
 	if err != nil {
-		return []*model.Item{errItem(binCargo, model.CatCargo)}, nil
+		return []*model.Item{errItem(binCargo, model.CatCargo, err)}, nil
 	}
 
 	items := parseCargoInstallUpdate(string(out))

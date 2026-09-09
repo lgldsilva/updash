@@ -98,6 +98,7 @@ type Item struct {
 	CurrentVer   string   // installed version ("" if N/A)
 	AvailableVer string   // version available ("" if up to date)
 	Status       Status
+	Error        string // why the check failed (short, single line; "" if none)
 	Selected     bool   // marked by user for action
 	Log          string // output from update/clean operation
 

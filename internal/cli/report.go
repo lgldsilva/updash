@@ -77,13 +77,22 @@ func printSourceTruth(s *model.SourceSummary) {
 		}
 		switch it.Status {
 		case model.StatusError:
-			fmt.Printf("  ✘ %s %s: %s\n", s.Icon, s.Label, it.CurrentVer)
+			fmt.Printf("  ✘ %s %s: %s\n", s.Icon, s.Label, probeLine(it))
 		case model.StatusUnverified:
-			fmt.Printf("  ? %s %s: %s\n", s.Icon, s.Label, it.CurrentVer)
+			fmt.Printf("  ? %s %s: %s\n", s.Icon, s.Label, probeLine(it))
 		case model.StatusInfo:
 			fmt.Printf("  ℹ %s %s: freshness not verified\n", s.Icon, it.Name)
 		}
 	}
+}
+
+// probeLine renders a failed/unverified probe: the status word plus, when the
+// scanner captured it, the cause — "error — fork/exec …: exec format error".
+func probeLine(it *model.Item) string {
+	if it.Error == "" {
+		return it.CurrentVer
+	}
+	return it.CurrentVer + " — " + it.Error
 }
 
 func printAgentSummary(s *model.SourceSummary) (outdated, needsSudo, manualOnly int) {
@@ -108,7 +117,7 @@ func printAgentSummary(s *model.SourceSummary) (outdated, needsSudo, manualOnly 
 			case model.StatusUnverified:
 				fmt.Printf("    ? %s  %s (verification failed)\n", it.Name, it.CurrentVer)
 			case model.StatusError:
-				fmt.Printf("    ✘ %s  %s\n", it.Name, it.CurrentVer)
+				fmt.Printf("    ✘ %s  %s\n", it.Name, probeLine(it))
 			}
 		}
 	}

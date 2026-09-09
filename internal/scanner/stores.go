@@ -22,11 +22,11 @@ func (s *PnpmSource) Scan(ctx context.Context, plat model.PlatformInfo) ([]*mode
 	// child gets a PATH that includes it regardless of the user's shell setup.
 	out, err := execCommandEnv(ctx, EnsurePnpmPath(nil), binPnpm, "outdated", flagGlobal, "--json")
 	if err != nil && len(out) == 0 {
-		return []*model.Item{errItem(binPnpm, model.CatPnpm)}, nil
+		return []*model.Item{errItem(binPnpm, model.CatPnpm, err)}, nil
 	}
 	items, parseErr := parsePnpmOutdatedGlobal(out)
 	if parseErr != nil {
-		return []*model.Item{errItem(binPnpm, model.CatPnpm)}, nil
+		return []*model.Item{errItem(binPnpm, model.CatPnpm, parseErr)}, nil
 	}
 	return okOrOutdated(binPnpm, model.CatPnpm, items), nil
 }
@@ -84,7 +84,7 @@ func (s *BunSource) Icon() string             { return "🍞" }
 func (s *BunSource) Scan(ctx context.Context, plat model.PlatformInfo) ([]*model.Item, error) {
 	out, err := execCombined(ctx, binBun, "pm", "ls", flagGlobal)
 	if err != nil && len(out) == 0 {
-		return []*model.Item{errItem(binBun, model.CatBun)}, nil
+		return []*model.Item{errItem(binBun, model.CatBun, err)}, nil
 	}
 	return infoOrOutdated(binBun, model.CatBun, ParseBunPmLsGlobal(string(out))), nil
 }
