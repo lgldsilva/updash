@@ -4,6 +4,7 @@ package cleaner
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -345,6 +346,7 @@ func cleanContainerLogs(ctx context.Context, item *model.Item, opts Options) *Re
 	ids := strings.Fields(string(out))
 	var freed int64
 	failures := 0
+	permSkips := 0
 	var b strings.Builder
 	for _, id := range ids {
 		logPath, err := containerLogPath(ctx, id)
@@ -358,6 +360,15 @@ func cleanContainerLogs(ctx context.Context, item *model.Item, opts Options) *Re
 		}
 		ok, before, err := retention.TruncateFileIfOver(logPath, maxBytes)
 		if err != nil {
+			// Docker's /var/lib/docker is 0700 root: a non-root run can list
+			// containers through the daemon but never touch the json-file logs
+			// behind those paths. That is a permission wall, not a broken
+			// cleanup — report it and move on instead of failing the item.
+			if errors.Is(err, os.ErrPermission) {
+				permSkips++
+				fmt.Fprintf(&b, "skip %s: root required to truncate (%v)\n", id, err)
+				continue
+			}
 			failures++
 			fmt.Fprintf(&b, "skip %s: %v\n", id, err)
 			continue
@@ -374,6 +385,15 @@ func cleanContainerLogs(ctx context.Context, item *model.Item, opts Options) *Re
 		item.Status = model.StatusError
 		item.Freed = FormatBytes(freed)
 		return &Result{Item: item, Success: false, Error: "some container logs could not be inspected or truncated", Output: b.String(), BytesFreed: freed}
+	}
+	if permSkips > 0 {
+		// Nothing failed; the permission wall just kept us out. Surface how
+		// to actually reclaim the space as information, and let --clean
+		// still count as a success.
+		fmt.Fprintf(&b, "%d log(s) need root to truncate — run sudo updash --clean, or cap growth with the daemon's json-file max-size\n", permSkips)
+		item.Status = model.StatusInfo
+		item.Freed = FormatBytes(freed)
+		return &Result{Item: item, Success: true, Output: b.String(), BytesFreed: freed}
 	}
 	item.Status = model.StatusCleaned
 	item.Freed = FormatBytes(freed)
