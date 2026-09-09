@@ -149,13 +149,13 @@ jobs:
   security-gosec:
     name: gosec
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
     permissions:
       contents: read
       security-events: write
     env:
       GO_VERSION: '1.26'
-      GOSEC_VERSION: 'v2.27.1'
+      GOSEC_VERSION: '2.27.1'
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -163,7 +163,21 @@ jobs:
           go-version: ${{ env.GO_VERSION }}
           cache: false
       - name: Install gosec
-        run: go install github.com/securego/gosec/v2/cmd/gosec@${{ env.GOSEC_VERSION }}
+        # Release tarball, same pattern as gitleaks. `go install` compiles gosec
+        # from source (cache is off) and has cancelled this job at the 5m timeout.
+        run: |
+          set -eu
+          case "$(uname -m)" in
+            aarch64|arm64)  GOSEC_ARCH="linux_arm64" ;;
+            x86_64|amd64)   GOSEC_ARCH="linux_amd64" ;;
+            *) echo "Unsupported: $(uname -m)"; exit 1 ;;
+          esac
+          curl --proto '=https' --tlsv1.2 -sSfL -o /tmp/gosec.tgz \
+            "https://github.com/securego/gosec/releases/download/v${GOSEC_VERSION}/gosec_${GOSEC_VERSION}_${GOSEC_ARCH}.tar.gz"
+          tar xzf /tmp/gosec.tgz -C /tmp gosec
+          sudo mv /tmp/gosec /usr/local/bin/gosec
+          sudo chmod +x /usr/local/bin/gosec
+          gosec -version
       - name: Run gosec
         run: |
           set -eu
