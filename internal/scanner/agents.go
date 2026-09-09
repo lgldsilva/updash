@@ -313,13 +313,13 @@ func resolveRegistryLatestFrom(ctx context.Context, items []*model.Item, catalog
 // (which honours the user's .npmrc registry/proxy).
 func registryLatest(ctx context.Context, a agentDef) string {
 	if len(a.latestCmd) > 0 {
-		out, err := execCommandBudget(ctx, agentProbeTimeout, a.latestCmd[0], a.latestCmd[1:]...)
+		out, err := execCommandBudget(ctx, registryLatestTimeout, a.latestCmd[0], a.latestCmd[1:]...)
 		if err == nil {
 			return parseAgentVersion(string(out))
 		}
 		return ""
 	}
-	out, err := execCommandBudget(ctx, agentProbeTimeout, binNpm, "view", a.npmPackage, "version")
+	out, err := execCommandBudget(ctx, registryLatestTimeout, binNpm, "view", a.npmPackage, "version")
 	if err != nil {
 		return ""
 	}
