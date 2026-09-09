@@ -41,7 +41,7 @@ func (s *PacmanSource) scanYay(ctx context.Context) ([]*model.Item, error) {
 		if len(strings.TrimSpace(string(out))) == 0 {
 			return okOrOutdated(binYay, model.CatPacman, nil), nil
 		}
-		return []*model.Item{errItem(binYay, model.CatPacman)}, nil
+		return []*model.Item{errItem(binYay, model.CatPacman, err)}, nil
 	}
 	return okOrOutdated(binYay, model.CatPacman, items), nil
 }
@@ -74,7 +74,7 @@ func dedupePacmanItems(items []*model.Item) []*model.Item {
 func (s *PacmanSource) scanPacman(ctx context.Context) ([]*model.Item, error) {
 	out, err := execCommand(ctx, binPacman, "-Qu")
 	if err != nil {
-		return []*model.Item{errItem(binPacman, model.CatPacman)}, nil
+		return []*model.Item{errItem(binPacman, model.CatPacman, err)}, nil
 	}
 	return okOrOutdated(binPacman, model.CatPacman, parsePacmanArrowLines(string(out), false)), nil
 }

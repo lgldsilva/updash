@@ -31,6 +31,7 @@ type ReportItem struct {
 	Current     string `json:"current,omitempty"`
 	Available   string `json:"available,omitempty"`
 	Status      string `json:"status"`
+	Error       string `json:"error,omitempty"` // why the check failed (scan errors)
 	Reclaimable string `json:"reclaimable,omitempty"`
 	KeepPolicy  string `json:"keep_policy,omitempty"`
 	PackageID   string `json:"package_id,omitempty"`
@@ -173,6 +174,7 @@ func itemToReport(it *model.Item) ReportItem {
 		Current:     it.CurrentVer,
 		Available:   it.AvailableVer,
 		Status:      it.Status.String(),
+		Error:       it.Error,
 		Reclaimable: it.Reclaimable,
 		KeepPolicy:  it.KeepPolicy,
 		PackageID:   it.PackageID,

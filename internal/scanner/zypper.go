@@ -19,7 +19,7 @@ func (s *ZypperSource) Scan(ctx context.Context, plat model.PlatformInfo) ([]*mo
 	// inconclusive, even if output contains a warning or table fragment.
 	out, err := execCombined(ctx, binZypper, "--quiet", "--non-interactive", "list-updates")
 	if err != nil {
-		return []*model.Item{errItem(binZypper, model.CatZypper)}, nil
+		return []*model.Item{errItem(binZypper, model.CatZypper, err)}, nil
 	}
 	return okOrOutdated(binZypper, model.CatZypper, ParseZypperListUpdates(string(out))), nil
 }
