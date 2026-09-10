@@ -314,7 +314,10 @@ func TestPrintCheckAndVerifyReport(t *testing.T) {
 		if stats.remaining < 1 {
 			t.Fatalf("remaining=%d", stats.remaining)
 		}
-		if stats.failed != 1 || stats.updated != 1 {
+		// Both leftovers classify as failed: git has a failed result, and the
+		// codex agent item is still outdated with no result at all. The count
+		// reflects the classified outcome, not the raw execution counter.
+		if stats.failed != 2 || stats.updated != 1 {
 			t.Fatalf("stats=%+v", stats)
 		}
 	})
