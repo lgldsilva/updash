@@ -2,22 +2,24 @@ package scanner
 
 import (
 	"context"
+	"errors"
 	"os/exec"
+	"runtime"
 	"strings"
+	"syscall"
 )
 
 // execCommand is a variable so tests can replace it with a mock.
 var execCommand = func(ctx context.Context, name string, args ...string) ([]byte, error) {
-	cmd := exec.CommandContext(ctx, name, args...)
-	return cmd.Output()
+	return spawn(ctx, nil, name, args, false)
 }
 
 // execCommandEnv is execCommand with an explicit environment, for tools that
-// need a corrected PATH (see EnsurePnpmPath). Variable so tests can mock it.
+// need a corrected PATH (see EnsurePnpmPath). stdout-only like execCommand
+// (pnpm outdated --json must not merge stderr warnings). Variable so tests
+// can mock it.
 var execCommandEnv = func(ctx context.Context, env []string, name string, args ...string) ([]byte, error) {
-	cmd := exec.CommandContext(ctx, name, args...)
-	cmd.Env = env
-	return cmd.Output()
+	return spawn(ctx, env, name, args, false)
 }
 
 // execCombined captures stdout+stderr (for actionable error messages).
@@ -29,8 +31,47 @@ var execCommandEnv = func(ctx context.Context, env []string, name string, args .
 // execCommand (stdout only) for those, and errStderr(err) to still surface
 // the stderr text on a hard failure.
 var execCombined = func(ctx context.Context, name string, args ...string) ([]byte, error) {
+	return spawn(ctx, nil, name, args, true)
+}
+
+// spawn runs the command, retrying through the POSIX shell when the kernel
+// refuses the target with ENOEXEC. A shebang-less script is not a machine
+// binary, so execve rejects it outright — pnpm ships exactly that between
+// `npm install -g pnpm` and its install script swapping in the native binary
+// (an install blocked by script allow-lists leaves the placeholder in place).
+// POSIX shells and glibc's execvp retry such a file under sh; Go does not, and
+// without the retry the source reports an error instead of probing the tool.
+// Windows has no sh (and pnpm never ships the placeholder there), so the
+// retry is unix-only.
+func spawn(ctx context.Context, env []string, name string, args []string, combine bool) ([]byte, error) {
+	out, err := runCmd(ctx, env, name, args, combine)
+	if err == nil || runtime.GOOS == "windows" || !errors.Is(err, syscall.ENOEXEC) {
+		return out, err
+	}
+	// Hand the script a real path: placeholder-style scripts derive their own
+	// directory from $0 (pnpm's walks symlinks from it). The retry reuses the
+	// probe's own fixed name and argument list — no new input, no quoting.
+	target := name
+	if abs, lookErr := exec.LookPath(name); lookErr == nil {
+		target = abs
+	}
+	shArgs := make([]string, len(args)+1)
+	shArgs[0] = target
+	copy(shArgs[1:], args)
+	return runCmd(ctx, env, binSh, shArgs, combine)
+}
+
+// runCmd is a package var like the other exec seams so CommandContext stays in
+// a closure. gosec G702 treats named-function parameters as taint sources;
+// probe names/args are product inputs (binPnpm, --json, ...), passed as argv
+// — never as `sh -c`.
+var runCmd = func(ctx context.Context, env []string, name string, args []string, combine bool) ([]byte, error) {
 	cmd := exec.CommandContext(ctx, name, args...)
-	return cmd.CombinedOutput()
+	cmd.Env = env
+	if combine {
+		return cmd.CombinedOutput()
+	}
+	return cmd.Output()
 }
 
 // errStderr returns the failed command's stderr text when available
