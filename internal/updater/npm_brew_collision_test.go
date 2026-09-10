@@ -96,12 +96,12 @@ func TestNpmBrewCollisionDowngradePassThrough(t *testing.T) {
 	item := &model.Item{Name: "Qwen Code", Category: model.CatAgent, PackageID: "@qwen-code/qwen-code"}
 
 	okResult := &Result{Item: item, Success: true}
-	if got := npmBrewCollisionDowngrade(item, okResult); got != okResult {
+	if npmBrewCollisionDowngrade(item, okResult) != okResult {
 		t.Fatal("successful result must pass through untouched")
 	}
 
 	noCollision := &Result{Item: item, Success: false, Error: "exit status 1", Output: "npm error network unreachable"}
-	if got := npmBrewCollisionDowngrade(item, noCollision); got != noCollision {
+	if npmBrewCollisionDowngrade(item, noCollision) != noCollision {
 		t.Fatal("non-collision failure must pass through untouched")
 	}
 }
