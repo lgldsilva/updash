@@ -46,6 +46,14 @@ func ClassifyItem(item *model.Item, result *Result) (ItemKind, string) {
 		return KindNeedsPassword, reason
 	}
 
+	// Homebrew refuses to upgrade casks it disabled upstream (Gatekeeper /
+	// notarization failures) but keeps listing them in `brew outdated
+	// --greedy`, so the item can never turn green on its own. That is not a
+	// failed update — bucket it with the manual-only items.
+	if strings.Contains(combined, "not upgrading") && strings.Contains(combined, "it is disabled") {
+		return KindManualOnly, "cask desabilitado no brew — nada a atualizar até reativação (brew outdated segue listando)"
+	}
+
 	if errMsg != "" {
 		return KindFailed, errMsg
 	}
