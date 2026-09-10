@@ -255,7 +255,10 @@ func runUpdateFromScan(ctx context.Context, cfg Config, plat model.PlatformInfo,
 		}
 		return ok, fail, fmt.Errorf("%d item(s) still outdated", stats.remaining)
 	}
-	return ok, fail, nil
+	// The caller's exit decision reads this count — hand back the classified
+	// one, or manual-only leftovers (disabled casks, origin conflicts) keep
+	// every run exiting non-zero.
+	return ok, stats.failed, nil
 }
 
 func prepareBatches(ctx context.Context, items []*model.Item) (map[model.Category]*updater.PreparedUpdateBatch, error) {
