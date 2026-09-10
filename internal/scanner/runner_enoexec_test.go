@@ -87,11 +87,9 @@ const (
 func writeProbeScript(t *testing.T, dir, name string, shebang bool, body string) string {
 	t.Helper()
 	path := filepath.Join(dir, name)
-	content := body
+	content := "# shebang-less on purpose (the kernel answers ENOEXEC)\n" + body
 	if shebang {
 		content = "#!/bin/sh\n" + body
-	} else {
-		content = "# shebang-less on purpose (the kernel answers ENOEXEC)\n" + body
 	}
 	if err := os.WriteFile(path, []byte(content), 0o755); err != nil {
 		t.Fatal(err)
