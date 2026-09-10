@@ -1,6 +1,9 @@
 package updater
 
 import (
+	"bytes"
+	"io"
+	"os/exec"
 	"testing"
 
 	"github.com/lgldsilva/updash/internal/model"
@@ -61,6 +64,39 @@ func TestClassifyItem_brewDisabledCask(t *testing.T) {
 	}
 	if reason == "" {
 		t.Fatal("want a non-empty manual-only reason")
+	}
+}
+
+// A verbose/interactive run streams to the terminal AND must still buffer the
+// child output — the failure diagnosis and the disabled-cask bucket both read
+// it, and empty output turned failures into bare "exit status 1" messages.
+func TestWireCaptureKeepsTerminalAndBuffers(t *testing.T) {
+	cmd := exec.Command("true")
+	var live, buffered bytes.Buffer
+	cmd.Stdout = &live
+	cmd.Stderr = &live
+	wireCapture(cmd, &buffered, &buffered)
+
+	if _, err := io.WriteString(cmd.Stdout, "hello"); err != nil {
+		t.Fatal(err)
+	}
+	if buffered.String() != "hello" || live.String() != "hello" {
+		t.Fatalf("buffered=%q live=%q", buffered.String(), live.String())
+	}
+}
+
+func TestWireCaptureBuffersWhenNothingAttached(t *testing.T) {
+	cmd := exec.Command("true")
+	var buffered bytes.Buffer
+	wireCapture(cmd, &buffered, &buffered)
+	if cmd.Stdout == nil {
+		t.Fatal("stdout not wired")
+	}
+	if _, err := io.WriteString(cmd.Stdout, "x"); err != nil {
+		t.Fatal(err)
+	}
+	if buffered.String() != "x" {
+		t.Fatalf("buffered=%q", buffered.String())
 	}
 }
 
