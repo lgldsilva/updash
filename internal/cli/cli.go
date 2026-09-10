@@ -250,8 +250,8 @@ func runUpdateFromScan(ctx context.Context, cfg Config, plat model.PlatformInfo,
 	stats := PrintVerifyReport(updates2, results, ok, fail, skipped)
 
 	if shouldFailExit(cfg, stats) {
-		if fail > 0 {
-			return ok, fail, fmt.Errorf("%d update(s) failed", fail)
+		if stats.failed > 0 {
+			return ok, fail, fmt.Errorf("%d update(s) failed", stats.failed)
 		}
 		return ok, fail, fmt.Errorf("%d item(s) still outdated", stats.remaining)
 	}

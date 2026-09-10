@@ -203,9 +203,15 @@ func PrintVerifyReport(
 	resultByItem := indexResults(results)
 	stats := verifyStats{updated: ok, skipped: skipped, failed: fail}
 
-	printVerifyHeader(ok, fail, skipped)
-
 	needPass, manual, failed, other := classifyRemaining(updates, resultByItem, &stats)
+	// The execution counter (fail) counts every unsuccessful command, but the
+	// exit decision and this report answer a different question: what is still
+	// outdated and NOT resolvable without the user. An item that failed once
+	// but scans clean now, or whose leftover is manual-only (Toolbox, disabled
+	// cask, origin conflict), is not a failed update.
+	stats.failed = len(failed)
+	printVerifyHeader(ok, stats.failed, skipped)
+
 	if stats.remaining == 0 {
 		fmt.Println("\n✓ Verified — nothing outdated remains")
 		return stats
