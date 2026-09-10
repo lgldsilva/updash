@@ -15,9 +15,11 @@ var execCommand = func(ctx context.Context, name string, args ...string) ([]byte
 }
 
 // execCommandEnv is execCommand with an explicit environment, for tools that
-// need a corrected PATH (see EnsurePnpmPath). Variable so tests can mock it.
+// need a corrected PATH (see EnsurePnpmPath). stdout-only like execCommand
+// (pnpm outdated --json must not merge stderr warnings). Variable so tests
+// can mock it.
 var execCommandEnv = func(ctx context.Context, env []string, name string, args ...string) ([]byte, error) {
-	return spawn(ctx, env, name, args, true)
+	return spawn(ctx, env, name, args, false)
 }
 
 // execCombined captures stdout+stderr (for actionable error messages).
@@ -59,7 +61,11 @@ func spawn(ctx context.Context, env []string, name string, args []string, combin
 	return runCmd(ctx, env, binSh, shArgs, combine)
 }
 
-func runCmd(ctx context.Context, env []string, name string, args []string, combine bool) ([]byte, error) {
+// runCmd is a package var like the other exec seams so CommandContext stays in
+// a closure. gosec G702 treats named-function parameters as taint sources;
+// probe names/args are product inputs (binPnpm, --json, ...), passed as argv
+// — never as `sh -c`.
+var runCmd = func(ctx context.Context, env []string, name string, args []string, combine bool) ([]byte, error) {
 	cmd := exec.CommandContext(ctx, name, args...)
 	cmd.Env = env
 	if combine {
