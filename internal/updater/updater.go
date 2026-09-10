@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"sort"
@@ -207,14 +208,8 @@ func upgradeOneBrewWithPlan(ctx context.Context, item *model.Item, plan CommandP
 	}
 
 	var stdout, stderr bytes.Buffer
-	if opts.Output != nil {
-		opts.ConfigureCmd(cmd)
-	} else if opts.Verbose || opts.Interactive {
-		opts.ConfigureCmd(cmd)
-	} else {
-		cmd.Stdout = &stdout
-		cmd.Stderr = &stderr
-	}
+	opts.ConfigureCmd(cmd)
+	wireCapture(cmd, &stdout, &stderr)
 
 	// No inactivity watchdog here: brew already has a per-item timeout, and a
 	// long silent step (a .pkg installer) is expected. The zero window still
@@ -278,14 +273,8 @@ func upgradeMASAppWithPlan(ctx context.Context, item *model.Item, plan CommandPl
 		defer cleanup()
 	}
 	var stdout, stderr bytes.Buffer
-	if opts.Output != nil {
-		opts.ConfigureCmd(cmd)
-	} else if opts.Verbose || opts.Interactive {
-		opts.ConfigureCmd(cmd)
-	} else {
-		cmd.Stdout = &stdout
-		cmd.Stderr = &stderr
-	}
+	opts.ConfigureCmd(cmd)
+	wireCapture(cmd, &stdout, &stderr)
 
 	err := cmd.Run()
 	output := stdout.String() + stderr.String()
@@ -851,6 +840,24 @@ func runCmdWithBuilder(ctx context.Context, item *model.Item, cmd *exec.Cmd, opt
 }
 
 // manualAgentResult marks an item as skipped-manual without running anything.
+// wireCapture always buffers child output while preserving whatever live
+// writer ConfigureCmd attached (terminal in verbose/interactive runs, TUI log
+// streaming otherwise). Diagnosis and classification read this text — without
+// the buffer, a verbose run reduced every brew failure to a bare
+// "exit status 1" and hid refusals like disabled casks.
+func wireCapture(cmd *exec.Cmd, stdout, stderr *bytes.Buffer) {
+	if cmd.Stdout != nil {
+		cmd.Stdout = io.MultiWriter(cmd.Stdout, stdout)
+	} else {
+		cmd.Stdout = stdout
+	}
+	if cmd.Stderr != nil {
+		cmd.Stderr = io.MultiWriter(cmd.Stderr, stderr)
+	} else {
+		cmd.Stderr = stderr
+	}
+}
+
 func manualAgentResult(item *model.Item, reason string) *Result {
 	item.Status = model.StatusOutdated
 	return &Result{
