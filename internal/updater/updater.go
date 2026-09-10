@@ -157,7 +157,7 @@ func executePreparedAgents(ctx context.Context, items []*model.Item, plans []Com
 		case agentOpenCode:
 			results[i] = ensureOpenCodeHealthy(ctx, item, result)
 		default:
-			results[i] = result
+			results[i] = npmBrewCollisionDowngrade(item, result)
 		}
 	}
 	return results
