@@ -654,6 +654,7 @@ func TestPacmanScan_Outdated(t *testing.T) {
 	enableMocks()
 	defer disableMocks()
 
+	setMock("checkupdates", nil, "", errors.New("exit status 2 (no updates)"))
 	setMock("yay", []string{"-Qua"}, "core/btop 1.3.0 -> 1.5.0\ncore/git 2.42.0 -> 2.45.0", nil)
 
 	src := &PacmanSource{}
@@ -671,6 +672,7 @@ func TestPacmanScan_Empty(t *testing.T) {
 	enableMocks()
 	defer disableMocks()
 
+	setMock("checkupdates", nil, "", errors.New("exit status 2 (no updates)"))
 	setMock("yay", []string{"-Qua"}, "", nil)
 
 	src := &PacmanSource{}
@@ -1171,6 +1173,7 @@ var _ = runtime.GOOS
 func TestPacmanScan_YayNonZeroExit(t *testing.T) {
 	enableMocks()
 	defer disableMocks()
+	setMock("checkupdates", nil, "", errors.New("exit status 2 (no updates)"))
 	src := &PacmanSource{}
 
 	t.Run("non-zero with updates still parses", func(t *testing.T) {

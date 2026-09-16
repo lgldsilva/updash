@@ -89,6 +89,13 @@ func pacmanCleanCmdForItem(name string) []string {
 	}
 }
 
+// pacmanCleanNeedsRoot is true for the pacman package cache and orphans.
+// The yay build cache lives in ~/.cache/yay and must not run as root
+// (yay refuses, or would clean /root/.cache/yay instead).
+func pacmanCleanNeedsRoot(name string) bool {
+	return strings.HasPrefix(name, "pacman")
+}
+
 // cleanCache handles general cache cleanup.
 func cleanCache(ctx context.Context, item *model.Item, opts Options) *Result {
 	switch {
@@ -126,7 +133,10 @@ func cleanPacman(ctx context.Context, item *model.Item, opts Options) *Result {
 	if len(argv) == 0 {
 		return &Result{Item: item, Success: false, Error: "cannot parse pacman item: " + item.Name}
 	}
-	return runCmdWithBuilder(ctx, item, elevate.Sudo(ctx, argv[0], argv[1:]...), opts)
+	if pacmanCleanNeedsRoot(item.Name) {
+		return runElevatedCmd(ctx, item, opts, argv[0], argv[1:]...)
+	}
+	return runCmd(ctx, item, opts, argv[0], argv[1:]...)
 }
 
 const fmtErrLine = "error: %s\n"

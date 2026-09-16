@@ -46,8 +46,10 @@ func TestPacmanScan_CheckupdatesFailureTolerated(t *testing.T) {
 	defer disableMocks()
 
 	// checkupdates missing (pacman-contrib not installed) must not fail the
-	// source: the AUR probe alone still reports its updates.
+	// source: the AUR probe still reports its updates. Fallback pacman -Qu
+	// is empty here so official repos add nothing.
 	setMock("checkupdates", nil, "", errors.New("executable file not found"))
+	setMock("pacman", []string{"-Qu"}, "", nil)
 	setMock("yay", []string{"-Qua"}, "aur/yay 12.3.0 -> 12.4.0", nil)
 
 	src := &PacmanSource{}
@@ -57,6 +59,57 @@ func TestPacmanScan_CheckupdatesFailureTolerated(t *testing.T) {
 	}
 	if len(items) != 1 || items[0].Name != "yay" || items[0].Status != model.StatusOutdated {
 		t.Fatalf("expected the AUR update only, got %+v", items)
+	}
+}
+
+func TestPacmanScan_CheckupdatesMissingFallsBackToPacmanQu(t *testing.T) {
+	enableMocks()
+	defer disableMocks()
+
+	setMock("checkupdates", nil, "", errors.New("executable file not found"))
+	setMock("pacman", []string{"-Qu"}, "btop 1.3.0 -> 1.5.0", nil)
+	setMock("yay", []string{"-Qua"}, "", nil)
+
+	items, err := (&PacmanSource{}).Scan(context.Background(), model.PlatformInfo{HasYay: true})
+	if err != nil {
+		t.Fatalf("Scan failed: %v", err)
+	}
+	if len(items) != 1 || items[0].Name != "btop" || items[0].Status != model.StatusOutdated {
+		t.Fatalf("missing checkupdates must fall back to pacman -Qu, got %+v", items)
+	}
+}
+
+func TestPacmanScan_CheckupdatesProbeFailureIsNotOK(t *testing.T) {
+	enableMocks()
+	defer disableMocks()
+
+	setMock("checkupdates", nil, "", errors.New("exit status 1"))
+	setMock("pacman", []string{"-Qu"}, "", nil)
+	setMock("yay", []string{"-Qua"}, "", nil)
+
+	items, _ := (&PacmanSource{}).Scan(context.Background(), model.PlatformInfo{HasYay: true})
+	if len(items) != 1 || items[0].Status == model.StatusOK {
+		t.Fatalf("failed checkupdates must not claim up to date, got %+v", items)
+	}
+	if items[0].Status != model.StatusError {
+		t.Fatalf("want StatusError, got %+v", items)
+	}
+}
+
+func TestPacmanScan_CheckupdatesMissingAndPacmanQuFailedIsNotOK(t *testing.T) {
+	enableMocks()
+	defer disableMocks()
+
+	setMock("checkupdates", nil, "", errors.New("executable file not found"))
+	setMock("pacman", []string{"-Qu"}, "", errors.New("exit status 1"))
+	setMock("yay", []string{"-Qua"}, "", nil)
+
+	items, _ := (&PacmanSource{}).Scan(context.Background(), model.PlatformInfo{HasYay: true})
+	if len(items) != 1 || items[0].Status == model.StatusOK {
+		t.Fatalf("failed official probe must not claim up to date, got %+v", items)
+	}
+	if items[0].Status != model.StatusUnverified {
+		t.Fatalf("want StatusUnverified, got %+v", items)
 	}
 }
 
