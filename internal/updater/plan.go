@@ -252,17 +252,32 @@ func globalPlan(name string, args []string, elevated bool) ([]CommandPlan, error
 // flagged versions explicitly instead; fall back to `npm update` when an item
 // has no known target version.
 func opencodePluginPlans(items []*model.Item) ([]CommandPlan, error) {
-	args := []string{commandInstall, flagPrefix, scanner.OpenCodeConfigDir()}
+	dir := scanner.OpenCodeConfigDir()
+	var pinned []string
+	unversioned := 0
 	for _, it := range items {
-		if it.AvailableVer == "" {
-			return globalPlan(npmCommand, []string{commandUpdate, flagPrefix, scanner.OpenCodeConfigDir()}, false)
+		if it == nil {
+			continue
 		}
-		args = append(args, it.Name+"@"+it.AvailableVer)
+		if it.AvailableVer == "" {
+			unversioned++
+			continue
+		}
+		pinned = append(pinned, it.Name+"@"+it.AvailableVer)
 	}
-	if len(args) == 2 {
-		return globalPlan(npmCommand, []string{commandUpdate, flagPrefix, scanner.OpenCodeConfigDir()}, false)
+	if len(pinned) == 0 {
+		return globalPlan(npmCommand, []string{commandUpdate, flagPrefix, dir}, false)
 	}
-	return []CommandPlan{{Name: npmCommand, Args: args, Scope: CommandScopeExact}}, nil
+	args := append([]string{commandInstall, flagPrefix, dir}, pinned...)
+	plans := []CommandPlan{{Name: npmCommand, Args: args, Scope: CommandScopeExact}}
+	if unversioned == 0 {
+		return plans, nil
+	}
+	fallback, err := globalPlan(npmCommand, []string{commandUpdate, flagPrefix, dir}, false)
+	if err != nil {
+		return nil, err
+	}
+	return append(plans, fallback...), nil
 }
 func bashGlobalPlan(script, manual string) ([]CommandPlan, error) {
 	if _, err := lookPath("bash"); err != nil {

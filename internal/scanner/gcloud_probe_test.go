@@ -7,7 +7,9 @@ import (
 
 // The gcloud freshness probe must not use --only-filter-updates-available:
 // modern gcloud removed that flag, and its permanent failure marked the item
-// unverified, which blocked the whole --update gate (fail-closed).
+// unverified, which used to block the whole --update gate (fail-closed).
+// Mutable runs now skip inconclusive items visibly instead, but a
+// permanently-failing probe still exits 2, so the flag stays forbidden.
 func TestGcloudLatestCmdUsesSupportedFilter(t *testing.T) {
 	for _, tool := range aiInfraCatalog() {
 		if tool.name != "gcloud" {

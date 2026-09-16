@@ -32,3 +32,15 @@ func TestPacmanCleanCmdForItem_OrphansOnlyTargetsOrphans(t *testing.T) {
 		t.Fatalf("orphans must route to the removal script, got %v", got)
 	}
 }
+
+func TestPacmanCleanNeedsRoot(t *testing.T) {
+	if pacmanCleanNeedsRoot("yay-cache") {
+		t.Fatal("yay-cache is user-owned and must not be elevated")
+	}
+	if !pacmanCleanNeedsRoot("pacman-cache") {
+		t.Fatal("pacman-cache needs root")
+	}
+	if !pacmanCleanNeedsRoot("pacman-orphans") {
+		t.Fatal("pacman-orphans needs root")
+	}
+}

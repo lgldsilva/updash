@@ -471,6 +471,11 @@ Usage:
   updash --update-self, -u    Update updash via git pull + rebuild (dev)
   updash --help, -h           Show this help
 
+Exit codes: 0 ok · 1 update/clean failures or --strict findings ·
+2 inconclusive scan (errors or unverified sources). --update/--clean/--all
+still apply conclusive items and list skipped problems (⊘) instead of
+aborting blindly; use --check --json problems[] to inspect culprits.
+
 Options (CLI modes):
   --only <category>           Limit to one source (brew, mas, npm, docker, …)
   --dry-run                   Show what would run without executing

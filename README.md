@@ -140,10 +140,13 @@ inconclusive scan cannot honestly answer "is anything pending?". When `--json`
 is used, the report is written to stdout **before** the non-zero exit, so
 automation always gets a parseable document.
 
-Mutable modes (`--update`, `--clean`, `--all`) preflight every included source
-first: if any of them is inconclusive, nothing is executed and the run exits
-`2`. `--all` also refuses to start cleanup when the post-update verification
-is inconclusive.
+Mutable modes (`--update`, `--clean`, `--all`) act on conclusive items and
+skip inconclusive ones visibly: each skipped problem is listed as `⊘` with its
+error, and the run exits `2` (precedence preserved). A single broken item
+inside a source (e.g. gcloud in AI Infra) does not hostage siblings.
+Nothing inconclusive is ever executed or reported as up to date. `--all`
+still runs cleanup after a partial update. Use `--check --json` `problems[]`
+to inspect the culprits, or `--only <category>` to scope a run.
 
 ### Status semantics
 
@@ -152,7 +155,7 @@ is inconclusive.
 | `ok` | Affirmatively verified as up to date |
 | `outdated` | An update is available |
 | `error` | The check failed |
-| `unverified` | The source could not establish a trustworthy state — **blocks mutation** |
+| `unverified` | The source could not establish a trustworthy state — **skipped by mutation, listed visibly** |
 | `info` | Informational only; no affirmative freshness check was possible |
 
 `ok` is reserved for affirmative verification. Inventory-only sources (a

@@ -99,13 +99,107 @@ func scanForConfig(ctx context.Context, cfg Config, includeCleanup bool, cleanup
 	return updates, cleanup, time.Since(start).Round(time.Millisecond), nil
 }
 
-func requireConclusive(summaries ...[]*model.SourceSummary) error {
-	for _, group := range summaries {
-		if hasInconclusive(group) {
-			return &ExitError{Code: 2, Err: fmt.Errorf("scan contains errors or unverified sources")}
+// partitionConclusive splits each summary by item so one broken probe
+// (gcloud in AI Infra) cannot hostage siblings (semidx, ai-memory).
+func partitionConclusive(summaries []*model.SourceSummary) (ok, skipped []*model.SourceSummary) {
+	for _, s := range summaries {
+		keep, skip := splitSummary(s)
+		if keep != nil {
+			ok = append(ok, keep)
+		}
+		if skip != nil {
+			skipped = append(skipped, skip)
 		}
 	}
+	return ok, skipped
+}
+
+func splitSummary(s *model.SourceSummary) (keep, skip *model.SourceSummary) {
+	if s == nil {
+		return nil, nil
+	}
+	if len(s.Items) == 0 {
+		if s.ErrorCount > 0 || s.Unverified > 0 {
+			return nil, s
+		}
+		return s, nil
+	}
+	keepItems, skipItems, errs, unverified := partitionItems(s.Items)
+	if len(skipItems) == 0 {
+		return s, nil
+	}
+	skip = copySummary(s, skipItems, errs, unverified)
+	if len(keepItems) == 0 {
+		return nil, skip
+	}
+	return copySummary(s, keepItems, 0, 0), skip
+}
+
+func partitionItems(items []*model.Item) (keep, skip []*model.Item, errs, unverified int) {
+	for _, it := range items {
+		if it == nil {
+			continue
+		}
+		switch it.Status {
+		case model.StatusError:
+			skip = append(skip, it)
+			errs++
+		case model.StatusUnverified:
+			skip = append(skip, it)
+			unverified++
+		default:
+			keep = append(keep, it)
+		}
+	}
+	return keep, skip, errs, unverified
+}
+
+func copySummary(s *model.SourceSummary, items []*model.Item, errs, unverified int) *model.SourceSummary {
+	out := *s
+	out.Items = items
+	out.ErrorCount = errs
+	out.Unverified = unverified
+	return &out
+}
+
+// printSkippedSources warns about inconclusive items skipped by an
+// update/clean pass and returns how many problem entries were listed.
+func printSkippedSources(action string, groups ...[]*model.SourceSummary) int {
+	var problems []ReportItem
+	appendProblems(&problems, groups...)
+	if len(problems) == 0 {
+		return 0
+	}
+	fmt.Printf("\n⚠ %s: %d problem(s) skipped — errors or unverified:\n", action, len(problems))
+	for _, p := range problems {
+		detail := p.Current
+		if detail == "" {
+			detail = p.Status
+		}
+		fmt.Printf("  ⊘ %s (%s): %s\n", p.Name, p.Category, detail)
+	}
+	return len(problems)
+}
+
+// partialErr reports a pass that completed on conclusive items only.
+// Code 2 preserves the documented 2 > 1 > 0 precedence so scripts still
+// detect that some probes were not covered.
+func partialErr(skipped int) error {
+	return &ExitError{Code: 2, Err: fmt.Errorf("%d problem(s) skipped: scan contains errors or unverified sources", skipped)}
+}
+
+// maybePartial returns a Code 2 error when probes were skipped, else nil.
+func maybePartial(skipped int) error {
+	if skipped > 0 {
+		return partialErr(skipped)
+	}
 	return nil
+}
+
+// isPartialErr reports whether err is a partial-completion Code 2.
+func isPartialErr(err error) bool {
+	var exitErr *ExitError
+	return errors.As(err, &exitErr) && exitErr.Code == 2
 }
 
 // PrintCheck renders scan results to stdout.
@@ -195,18 +289,13 @@ func RunUpdate(ctx context.Context, cfg Config) (int, int, error) {
 }
 
 func runUpdateFromScan(ctx context.Context, cfg Config, plat model.PlatformInfo, updates []*model.SourceSummary) (int, int, error) {
-	if err := requireConclusive(updates); err != nil {
-		return 0, 0, err
-	}
+	conclusive, skippedSums := partitionConclusive(updates)
+	skippedCount := printSkippedSources("update", skippedSums)
+	updates = conclusive
 
 	items := collectOutdated(updates, cfg.Only)
 	if len(items) == 0 {
-		if hasInformational(updates) {
-			fmt.Println("ℹ No update selected; installed inventory was not affirmatively verified")
-		} else {
-			fmt.Println("✓ Nothing to update")
-		}
-		return 0, 0, nil
+		return emptyUpdateOutcome(updates, skippedCount)
 	}
 
 	updatable, manualOnly := partitionUpdatable(items)
@@ -224,7 +313,7 @@ func runUpdateFromScan(ctx context.Context, cfg Config, plat model.PlatformInfo,
 
 	if cfg.DryRun {
 		printPreparedDryRun(prepared)
-		return 0, 0, nil
+		return 0, 0, maybePartial(skippedCount)
 	}
 
 	opts := updater.DefaultOptions()
@@ -239,26 +328,45 @@ func runUpdateFromScan(ctx context.Context, cfg Config, plat model.PlatformInfo,
 	fmt.Printf("\n⏱ update %s — %d ok, %d skipped, %d failed\n",
 		time.Since(start).Round(time.Second), ok, skipped, fail)
 
+	return verifyUpdateResults(ctx, cfg, results, ok, fail, skipped, skippedCount)
+}
+
+// emptyUpdateOutcome is the no-outdated path: skip listing already printed,
+// then either Code 2 (probes skipped) or the truthful noop message.
+func emptyUpdateOutcome(updates []*model.SourceSummary, skipped int) (int, int, error) {
+	if err := maybePartial(skipped); err != nil {
+		return 0, 0, err
+	}
+	if hasInformational(updates) {
+		fmt.Println("ℹ No update selected; installed inventory was not affirmatively verified")
+	} else {
+		fmt.Println("✓ Nothing to update")
+	}
+	return 0, 0, nil
+}
+
+func verifyUpdateResults(ctx context.Context, cfg Config, results []*updater.Result, ok, fail, skipped, skippedCount int) (int, int, error) {
 	fmt.Println("\n🔍 Verifying...")
 	updates2, _, _, verifyErr := scanForConfig(ctx, cfg, false, false)
 	if verifyErr != nil {
 		return ok, fail, verifyErr
 	}
-	if hasInconclusive(updates2) {
-		return ok, fail, &ExitError{Code: 2, Err: fmt.Errorf("post-update scan contains errors or unverified sources")}
-	}
-	stats := PrintVerifyReport(updates2, results, ok, fail, skipped)
+	conclusive2, skipped2 := partitionConclusive(updates2)
+	skippedCount += printSkippedSources("verify", skipped2)
+	stats := PrintVerifyReport(conclusive2, results, ok, fail, skipped)
+	return ok, stats.failed, updateOutcomeErr(cfg, stats, skippedCount)
+}
 
+// updateOutcomeErr prefers classified failures / strict leftovers over a
+// partial skip so --update still returns stats.failed on real update errors.
+func updateOutcomeErr(cfg Config, stats verifyStats, skipped int) error {
 	if shouldFailExit(cfg, stats) {
 		if stats.failed > 0 {
-			return ok, fail, fmt.Errorf("%d update(s) failed", stats.failed)
+			return fmt.Errorf("%d update(s) failed", stats.failed)
 		}
-		return ok, fail, fmt.Errorf("%d item(s) still outdated", stats.remaining)
+		return fmt.Errorf("%d item(s) still outdated", stats.remaining)
 	}
-	// The caller's exit decision reads this count — hand back the classified
-	// one, or manual-only leftovers (disabled casks, origin conflicts) keep
-	// every run exiting non-zero.
-	return ok, stats.failed, nil
+	return maybePartial(skipped)
 }
 
 func prepareBatches(ctx context.Context, items []*model.Item) (map[model.Category]*updater.PreparedUpdateBatch, error) {
@@ -309,12 +417,16 @@ func RunClean(ctx context.Context, cfg Config) (int, int, error) {
 	if err != nil {
 		return 0, 0, err
 	}
-	if err := requireConclusive(updates, cleanup); err != nil {
-		return 0, 0, err
-	}
+	conclusiveU, skippedU := partitionConclusive(updates)
+	conclusiveC, skippedC := partitionConclusive(cleanup)
+	skippedCount := printSkippedSources("clean", skippedU, skippedC)
+	updates, cleanup = conclusiveU, conclusiveC
 
 	items := collectCleanable(cleanup, cfg.Only)
 	if len(items) == 0 {
+		if skippedCount > 0 {
+			return 0, 0, partialErr(skippedCount)
+		}
 		if hasInformational(updates, cleanup) {
 			fmt.Println("ℹ No cleanup selected; installed inventory was not affirmatively verified")
 		} else {
@@ -325,6 +437,9 @@ func RunClean(ctx context.Context, cfg Config) (int, int, error) {
 
 	if cfg.DryRun {
 		printDryRun("clean", items)
+		if skippedCount > 0 {
+			return 0, 0, partialErr(skippedCount)
+		}
 		return 0, 0, nil
 	}
 
@@ -344,6 +459,9 @@ func RunClean(ctx context.Context, cfg Config) (int, int, error) {
 	fmt.Println()
 	if fail > 0 {
 		return ok, fail, fmt.Errorf("%d clean(s) failed", fail)
+	}
+	if skippedCount > 0 {
+		return ok, fail, partialErr(skippedCount)
 	}
 	return ok, fail, nil
 }
@@ -369,21 +487,24 @@ func RunAll(ctx context.Context, cfg Config) error {
 	if err != nil {
 		return err
 	}
-	if hasInconclusive(updates) || hasInconclusive(cleanup) {
-		return &ExitError{Code: 2, Err: fmt.Errorf("scan contains errors or unverified sources")}
-	}
 	plat := detectPlatform()
 	fmt.Printf(msgScanning, platformLabel(plat))
-	uok, ufail, err := runUpdateFromScan(ctx, cfg, plat, updates)
-	if err != nil {
-		return err
+	uok, ufail, uerr := runUpdateFromScan(ctx, cfg, plat, updates)
+	if uerr != nil && !isPartialErr(uerr) {
+		return uerr
 	}
 	cok, cfail, cerr := RunClean(ctx, cfg)
-	if cerr != nil && cfail == 0 {
+	if cerr != nil && !isPartialErr(cerr) && cfail == 0 {
 		return cerr
 	}
 	if ufail > 0 || cfail > 0 {
+		if isPartialErr(uerr) || isPartialErr(cerr) {
+			return &ExitError{Code: 2, Err: fmt.Errorf("finished with %d update fail(s), %d clean fail(s), plus skipped problems (errors or unverified)", ufail, cfail)}
+		}
 		return fmt.Errorf("finished with %d update fail(s), %d clean fail(s)", ufail, cfail)
+	}
+	if isPartialErr(uerr) || isPartialErr(cerr) {
+		return &ExitError{Code: 2, Err: fmt.Errorf("completed with skipped problems: scan contains errors or unverified sources")}
 	}
 	if uok == 0 && cok == 0 && !hasInformational(updates, cleanup) {
 		fmt.Println("✓ Everything is up to date and clean!")
@@ -391,23 +512,6 @@ func RunAll(ctx context.Context, cfg Config) error {
 		fmt.Println("ℹ No action selected; installed inventory was not affirmatively verified")
 	}
 	return nil
-}
-
-func hasInconclusive(summaries []*model.SourceSummary) bool {
-	for _, summary := range summaries {
-		if summary == nil {
-			continue
-		}
-		if summary.ErrorCount > 0 || summary.Unverified > 0 {
-			return true
-		}
-		for _, item := range summary.Items {
-			if item != nil && (item.Status == model.StatusError || item.Status == model.StatusUnverified) {
-				return true
-			}
-		}
-	}
-	return false
 }
 
 type cleanGroup struct {

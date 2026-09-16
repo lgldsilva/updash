@@ -172,7 +172,112 @@ func TestRunUpdateDryRunPrintsExactAndGlobalPlans(t *testing.T) {
 	}
 }
 
-func TestRunUpdateStopsOnUnverifiedVerification(t *testing.T) {
+func TestPartitionConclusiveKeepsSiblingsInSameSource(t *testing.T) {
+	src := &model.SourceSummary{
+		Category: model.CatAI,
+		Label:    "AI Infra",
+		Items: []*model.Item{
+			{Name: "gcloud", Category: model.CatAI, Status: model.StatusError, CurrentVer: "error"},
+			{Name: "semidx", Category: model.CatAI, Status: model.StatusOutdated},
+			{Name: "ai-memory", Category: model.CatAI, Status: model.StatusOK},
+		},
+	}
+	ok, skipped := partitionConclusive([]*model.SourceSummary{src})
+	if len(ok) != 1 || len(skipped) != 1 {
+		t.Fatalf("ok=%d skipped=%d", len(ok), len(skipped))
+	}
+	if len(ok[0].Items) != 2 || ok[0].ErrorCount != 0 {
+		t.Fatalf("keep = %+v", ok[0])
+	}
+	if len(skipped[0].Items) != 1 || skipped[0].Items[0].Name != "gcloud" {
+		t.Fatalf("skip = %+v", skipped[0])
+	}
+}
+
+func TestRunUpdateSkipsBrokenItemKeepsSiblingsInSameSource(t *testing.T) {
+	restoreHooks(t)
+	gcloud := &model.Item{Name: "gcloud", Category: model.CatAI, Status: model.StatusError, CurrentVer: "error"}
+	semidx := &model.Item{Name: "semidx", Category: model.CatAI, Status: model.StatusOutdated}
+	src := &model.SourceSummary{Category: model.CatAI, Label: "AI Infra", Items: []*model.Item{gcloud, semidx}}
+	verified := &model.SourceSummary{Category: model.CatAI, Label: "AI Infra", Items: []*model.Item{
+		{Name: "gcloud", Category: model.CatAI, Status: model.StatusError, CurrentVer: "error"},
+		{Name: "semidx", Category: model.CatAI, Status: model.StatusOK},
+	}}
+	calls := 0
+	runScannerAll = func(context.Context, model.PlatformInfo, bool) []*model.SourceSummary {
+		calls++
+		if calls == 1 {
+			return []*model.SourceSummary{src}
+		}
+		return []*model.SourceSummary{verified}
+	}
+	detectPlatform = func() model.PlatformInfo { return model.PlatformInfo{OS: "linux"} }
+	executePreparedBatch = func(_ context.Context, batch *updater.PreparedUpdateBatch, _ updater.Options) []*updater.Result {
+		if batch.Category() != model.CatAI || len(batch.Items()) != 1 || batch.Items()[0].Name != "semidx" {
+			t.Fatalf("must only update semidx, got cat=%s items=%+v", batch.Category(), batch.Items())
+		}
+		return []*updater.Result{{Item: semidx, Success: true}}
+	}
+
+	out := captureStdout(t, func() {
+		ok, fail, err := RunUpdate(context.Background(), Config{})
+		var exitErr *ExitError
+		if !errors.As(err, &exitErr) || ExitCode(err) != 2 {
+			t.Fatalf("ok=%d fail=%d err=%v, want partial ExitError code 2", ok, fail, err)
+		}
+		if ok != 1 || fail != 0 {
+			t.Fatalf("ok=%d fail=%d, want the conclusive sibling updated", ok, fail)
+		}
+	})
+	if !strings.Contains(out, "skipped") || !strings.Contains(out, "gcloud") || !strings.Contains(out, "semidx") {
+		t.Fatalf("output missing skip/update evidence:\n%s", out)
+	}
+}
+
+func TestRunUpdateSkipsErrorSourceAndUpdatesConclusiveItems(t *testing.T) {
+	restoreHooks(t)
+	tool := &model.Item{Name: "semidx", Category: model.CatAI, Status: model.StatusOutdated}
+	broken := &model.SourceSummary{
+		Category: model.CatBun,
+		Label:    "bun (global)",
+		Items:    []*model.Item{{Name: "bun", Category: model.CatBun, Status: model.StatusError, CurrentVer: "error"}},
+	}
+	conclusive := &model.SourceSummary{Category: model.CatAI, Label: "AI Infra", Items: []*model.Item{tool}}
+	verified := &model.SourceSummary{Category: model.CatAI, Label: "AI Infra", Items: []*model.Item{{Name: "semidx", Category: model.CatAI, Status: model.StatusOK}}}
+	calls := 0
+	runScannerAll = func(context.Context, model.PlatformInfo, bool) []*model.SourceSummary {
+		calls++
+		if calls == 1 {
+			return []*model.SourceSummary{broken, conclusive}
+		}
+		return []*model.SourceSummary{broken, verified}
+	}
+	detectPlatform = func() model.PlatformInfo { return model.PlatformInfo{OS: "linux"} }
+	executePreparedBatch = func(_ context.Context, batch *updater.PreparedUpdateBatch, _ updater.Options) []*updater.Result {
+		if batch.Category() != model.CatAI {
+			t.Fatalf("must only update the conclusive category, got %s", batch.Category())
+		}
+		return []*updater.Result{{Item: tool, Success: true}}
+	}
+
+	out := captureStdout(t, func() {
+		ok, fail, err := RunUpdate(context.Background(), Config{})
+		var exitErr *ExitError
+		if !errors.As(err, &exitErr) || ExitCode(err) != 2 {
+			t.Fatalf("ok=%d fail=%d err=%v, want partial ExitError code 2", ok, fail, err)
+		}
+		if ok != 1 || fail != 0 {
+			t.Fatalf("ok=%d fail=%d, want the conclusive update applied", ok, fail)
+		}
+	})
+	for _, want := range []string{"skipped", "bun (bun)", "semidx"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("output missing %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestRunUpdateProceedsDespiteUnverifiedVerification(t *testing.T) {
 	restoreHooks(t)
 	item := &model.Item{Name: "eslint", Category: model.CatPnpm, Status: model.StatusOutdated}
 	first := &model.SourceSummary{Category: model.CatPnpm, Label: "pnpm", Items: []*model.Item{item}}
@@ -192,10 +297,18 @@ func TestRunUpdateStopsOnUnverifiedVerification(t *testing.T) {
 		return []*updater.Result{{Item: item, Success: true}}
 	}
 
-	_, _, err := RunUpdate(context.Background(), Config{})
-	var exitErr *ExitError
-	if !errors.As(err, &exitErr) || ExitCode(err) != 2 || calls != 2 {
-		t.Fatalf("err=%v calls=%d, want verification ExitError after two scans", err, calls)
+	out := captureStdout(t, func() {
+		ok, fail, err := RunUpdate(context.Background(), Config{})
+		var exitErr *ExitError
+		if !errors.As(err, &exitErr) || ExitCode(err) != 2 || calls != 2 {
+			t.Fatalf("ok=%d fail=%d err=%v calls=%d, want updated item plus partial ExitError after two scans", ok, fail, err, calls)
+		}
+		if ok != 1 || fail != 0 {
+			t.Fatalf("ok=%d fail=%d, want the conclusive update applied", ok, fail)
+		}
+	})
+	if !strings.Contains(out, "skipped") || !strings.Contains(out, "pnpm") {
+		t.Fatalf("partial update must name the skipped source:\n%s", out)
 	}
 }
 
@@ -258,22 +371,86 @@ func TestRunAllInfoOnlyUsesTruthfulNoopWording(t *testing.T) {
 	}
 }
 
-func TestRunAllPreflightBlocksAnyMutationOnInconclusiveScan(t *testing.T) {
+func TestRunAllSkipsInconclusiveScanWithoutMutation(t *testing.T) {
 	restoreHooks(t)
 	calls := 0
 	runScannerAll = func(context.Context, model.PlatformInfo, bool) []*model.SourceSummary {
 		calls++
-		return []*model.SourceSummary{{Category: model.CatNpm, ErrorCount: 1}}
+		return []*model.SourceSummary{{Category: model.CatNpm, Label: "npm", ErrorCount: 1}}
 	}
 	detectPlatform = func() model.PlatformInfo { return model.PlatformInfo{OS: "linux"} }
 	updateCategory = func(context.Context, model.Category, []*model.Item, updater.Options) []*updater.Result {
-		t.Fatal("preflight failure must not begin updates")
+		t.Fatal("inconclusive sources must be skipped, never updated")
 		return nil
 	}
 
-	err := RunAll(context.Background(), Config{})
-	var exitErr *ExitError
-	if !errors.As(err, &exitErr) || ExitCode(err) != 2 || calls != 1 {
-		t.Fatalf("err=%v calls=%d, want preflight ExitError without additional scans", err, calls)
+	out := captureStdout(t, func() {
+		err := RunAll(context.Background(), Config{})
+		var exitErr *ExitError
+		if !errors.As(err, &exitErr) || ExitCode(err) != 2 {
+			t.Fatalf("err=%v, want partial ExitError code 2", err)
+		}
+	})
+	if calls != 2 {
+		t.Fatalf("calls=%d, want update scan plus clean scan", calls)
+	}
+	if !strings.Contains(out, "skipped") || !strings.Contains(out, "npm") {
+		t.Fatalf("partial run must name the skipped source:\n%s", out)
+	}
+}
+
+func TestMaybePartialAndEmptyUpdateOutcome(t *testing.T) {
+	if err := maybePartial(0); err != nil {
+		t.Fatalf("maybePartial(0)=%v, want nil", err)
+	}
+	if ExitCode(maybePartial(2)) != 2 {
+		t.Fatal("maybePartial must be ExitError code 2")
+	}
+
+	out := captureStdout(t, func() {
+		ok, fail, err := emptyUpdateOutcome(nil, 3)
+		if ok != 0 || fail != 0 || ExitCode(err) != 2 {
+			t.Fatalf("ok=%d fail=%d err=%v", ok, fail, err)
+		}
+	})
+	if strings.Contains(out, "Nothing to update") || strings.Contains(out, "not affirmatively verified") {
+		t.Fatalf("partial empty update must not print a noop summary:\n%s", out)
+	}
+
+	info := []*model.SourceSummary{{Items: []*model.Item{{Name: "x", Status: model.StatusInfo}}}}
+	out = captureStdout(t, func() {
+		ok, fail, err := emptyUpdateOutcome(info, 0)
+		if err != nil || ok != 0 || fail != 0 {
+			t.Fatalf("ok=%d fail=%d err=%v", ok, fail, err)
+		}
+	})
+	if strings.Contains(out, "✓ Nothing to update") || !strings.Contains(out, "not affirmatively verified") {
+		t.Fatalf("output=%q", out)
+	}
+
+	out = captureStdout(t, func() {
+		if _, _, err := emptyUpdateOutcome(nil, 0); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if !strings.Contains(out, "✓ Nothing to update") {
+		t.Fatalf("output=%q", out)
+	}
+}
+
+func TestUpdateOutcomeErrPrecedence(t *testing.T) {
+	failed := updateOutcomeErr(Config{}, verifyStats{failed: 2, remaining: 3}, 4)
+	if failed == nil || isPartialErr(failed) || !strings.Contains(failed.Error(), "update(s) failed") {
+		t.Fatalf("classified failures must win over partial skip: %v", failed)
+	}
+	strict := updateOutcomeErr(Config{Strict: true}, verifyStats{remaining: 1}, 4)
+	if strict == nil || isPartialErr(strict) || !strings.Contains(strict.Error(), "still outdated") {
+		t.Fatalf("strict remaining must win over partial skip: %v", strict)
+	}
+	if !isPartialErr(updateOutcomeErr(Config{}, verifyStats{}, 1)) {
+		t.Fatal("clean stats with skips must stay Code 2")
+	}
+	if err := updateOutcomeErr(Config{}, verifyStats{}, 0); err != nil {
+		t.Fatalf("clean success: %v", err)
 	}
 }

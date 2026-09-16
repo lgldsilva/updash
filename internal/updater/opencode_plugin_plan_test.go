@@ -51,3 +51,30 @@ func TestOpencodePluginPlans_FallsBackToNpmUpdate(t *testing.T) {
 		t.Fatalf("args = %v", plans[0].Args)
 	}
 }
+
+func TestOpencodePluginPlans_MixedPinnedAndUnversioned(t *testing.T) {
+	items := []*model.Item{
+		{Name: "@opencode-ai/plugin", Category: model.CatOpenCodePlugins, AvailableVer: "1.18.27"},
+		{Name: "other", Category: model.CatOpenCodePlugins},
+	}
+	plans, err := opencodePluginPlans(items)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plans) != 2 {
+		t.Fatalf("plans = %v", plans)
+	}
+	if plans[0].Scope != CommandScopeExact {
+		t.Fatalf("pinned plan = %+v", plans[0])
+	}
+	wantInstall := []string{"install", "--prefix", scanner.OpenCodeConfigDir(), "@opencode-ai/plugin@1.18.27"}
+	if !slices.Equal(plans[0].Args, wantInstall) {
+		t.Fatalf("install args = %v, want %v", plans[0].Args, wantInstall)
+	}
+	if plans[1].Scope != CommandScopeCategoryGlobal {
+		t.Fatalf("unversioned plan = %+v", plans[1])
+	}
+	if strings.Join(plans[1].Args, " ") != "update --prefix "+scanner.OpenCodeConfigDir() {
+		t.Fatalf("update args = %v", plans[1].Args)
+	}
+}

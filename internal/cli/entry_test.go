@@ -151,17 +151,28 @@ func TestRunUpdate_InfoOnlyUsesTruthfulNoopWording(t *testing.T) {
 	}
 }
 
-func TestRunUpdate_InconclusivePreflightBlocksDryRunAndMutation(t *testing.T) {
+func TestRunUpdate_DryRunSkipsInconclusiveAndPlansTheRest(t *testing.T) {
 	restoreHooks(t)
-	item := &model.Item{Name: "git", Category: model.CatBrew, Status: model.StatusOutdated}
-	fakeScan([]*model.SourceSummary{{Category: model.CatBrew, Items: []*model.Item{item}}, {Category: model.CatNpm, Items: []*model.Item{{Name: "npm", Category: model.CatNpm, Status: model.StatusError}}}}, nil)
+	item := &model.Item{Name: "eslint", Category: model.CatPnpm, Status: model.StatusOutdated}
+	fakeScan([]*model.SourceSummary{
+		{Category: model.CatPnpm, Label: "pnpm", Items: []*model.Item{item}},
+		{Category: model.CatNpm, Label: "npm", Items: []*model.Item{{Name: "npm", Category: model.CatNpm, Status: model.StatusError}}},
+	}, nil)
 	updateCategory = func(context.Context, model.Category, []*model.Item, updater.Options) []*updater.Result {
-		t.Fatal("mutation must not run after inconclusive preflight")
+		t.Fatal("dry-run must not execute updates")
 		return nil
 	}
-	_, _, err := RunUpdate(t.Context(), Config{DryRun: true})
-	if ExitCode(err) != 2 {
-		t.Fatalf("ExitCode(%v) = %d, want 2", err, ExitCode(err))
+	out := captureStdout(t, func() {
+		_, _, err := RunUpdate(t.Context(), Config{DryRun: true})
+		if ExitCode(err) != 2 {
+			t.Fatalf("ExitCode(%v) = %d, want 2", err, ExitCode(err))
+		}
+	})
+	if !strings.Contains(out, "skipped") || !strings.Contains(out, "npm") {
+		t.Fatalf("dry-run must name the skipped problem:\n%s", out)
+	}
+	if !strings.Contains(out, "eslint") {
+		t.Fatalf("conclusive plan missing:\n%s", out)
 	}
 }
 
@@ -287,17 +298,22 @@ func TestRunClean_InfoOnlyUsesTruthfulNoopWording(t *testing.T) {
 	}
 }
 
-func TestRunClean_InconclusivePreflightBlocksDryRunAndMutation(t *testing.T) {
+func TestRunClean_DryRunWarnsOnInconclusiveScan(t *testing.T) {
 	restoreHooks(t)
 	clean := &model.Item{Name: "cache", Category: model.CatCache, Status: model.StatusCleanCandidate}
-	fakeScan([]*model.SourceSummary{{Category: model.CatNpm, Items: []*model.Item{{Name: "npm", Category: model.CatNpm, Status: model.StatusUnverified}}}}, []*model.SourceSummary{{Category: model.CatCache, Items: []*model.Item{clean}}})
+	fakeScan([]*model.SourceSummary{{Category: model.CatNpm, Label: "npm", Items: []*model.Item{{Name: "npm", Category: model.CatNpm, Status: model.StatusUnverified}}}}, []*model.SourceSummary{{Category: model.CatCache, Items: []*model.Item{clean}}})
 	cleanOneFn = func(context.Context, *model.Item, cleaner.Options) *cleaner.Result {
-		t.Fatal("cleanup must not run after inconclusive preflight")
+		t.Fatal("dry-run must not execute cleanup")
 		return nil
 	}
-	_, _, err := RunClean(t.Context(), Config{DryRun: true})
-	if ExitCode(err) != 2 {
-		t.Fatalf("ExitCode(%v) = %d, want 2", err, ExitCode(err))
+	out := captureStdout(t, func() {
+		_, _, err := RunClean(t.Context(), Config{DryRun: true})
+		if ExitCode(err) != 2 {
+			t.Fatalf("ExitCode(%v) = %d, want 2", err, ExitCode(err))
+		}
+	})
+	if !strings.Contains(out, "skipped") || !strings.Contains(out, "would clean") {
+		t.Fatalf("dry-run must warn about the skipped source and still print the plan:\n%s", out)
 	}
 }
 
