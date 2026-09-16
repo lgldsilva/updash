@@ -188,6 +188,14 @@ func partialErr(skipped int) error {
 	return &ExitError{Code: 2, Err: fmt.Errorf("%d problem(s) skipped: scan contains errors or unverified sources", skipped)}
 }
 
+// maybePartial returns a Code 2 error when probes were skipped, else nil.
+func maybePartial(skipped int) error {
+	if skipped > 0 {
+		return partialErr(skipped)
+	}
+	return nil
+}
+
 // isPartialErr reports whether err is a partial-completion Code 2.
 func isPartialErr(err error) bool {
 	var exitErr *ExitError
@@ -287,15 +295,7 @@ func runUpdateFromScan(ctx context.Context, cfg Config, plat model.PlatformInfo,
 
 	items := collectOutdated(updates, cfg.Only)
 	if len(items) == 0 {
-		if skippedCount > 0 {
-			return 0, 0, partialErr(skippedCount)
-		}
-		if hasInformational(updates) {
-			fmt.Println("ℹ No update selected; installed inventory was not affirmatively verified")
-		} else {
-			fmt.Println("✓ Nothing to update")
-		}
-		return 0, 0, nil
+		return emptyUpdateOutcome(updates, skippedCount)
 	}
 
 	updatable, manualOnly := partitionUpdatable(items)
@@ -313,10 +313,7 @@ func runUpdateFromScan(ctx context.Context, cfg Config, plat model.PlatformInfo,
 
 	if cfg.DryRun {
 		printPreparedDryRun(prepared)
-		if skippedCount > 0 {
-			return 0, 0, partialErr(skippedCount)
-		}
-		return 0, 0, nil
+		return 0, 0, maybePartial(skippedCount)
 	}
 
 	opts := updater.DefaultOptions()
@@ -331,6 +328,24 @@ func runUpdateFromScan(ctx context.Context, cfg Config, plat model.PlatformInfo,
 	fmt.Printf("\n⏱ update %s — %d ok, %d skipped, %d failed\n",
 		time.Since(start).Round(time.Second), ok, skipped, fail)
 
+	return verifyUpdateResults(ctx, cfg, results, ok, fail, skipped, skippedCount)
+}
+
+// emptyUpdateOutcome is the no-outdated path: skip listing already printed,
+// then either Code 2 (probes skipped) or the truthful noop message.
+func emptyUpdateOutcome(updates []*model.SourceSummary, skipped int) (int, int, error) {
+	if err := maybePartial(skipped); err != nil {
+		return 0, 0, err
+	}
+	if hasInformational(updates) {
+		fmt.Println("ℹ No update selected; installed inventory was not affirmatively verified")
+	} else {
+		fmt.Println("✓ Nothing to update")
+	}
+	return 0, 0, nil
+}
+
+func verifyUpdateResults(ctx context.Context, cfg Config, results []*updater.Result, ok, fail, skipped, skippedCount int) (int, int, error) {
 	fmt.Println("\n🔍 Verifying...")
 	updates2, _, _, verifyErr := scanForConfig(ctx, cfg, false, false)
 	if verifyErr != nil {
@@ -339,17 +354,19 @@ func runUpdateFromScan(ctx context.Context, cfg Config, plat model.PlatformInfo,
 	conclusive2, skipped2 := partitionConclusive(updates2)
 	skippedCount += printSkippedSources("verify", skipped2)
 	stats := PrintVerifyReport(conclusive2, results, ok, fail, skipped)
+	return ok, stats.failed, updateOutcomeErr(cfg, stats, skippedCount)
+}
 
+// updateOutcomeErr prefers classified failures / strict leftovers over a
+// partial skip so --update still returns stats.failed on real update errors.
+func updateOutcomeErr(cfg Config, stats verifyStats, skipped int) error {
 	if shouldFailExit(cfg, stats) {
 		if stats.failed > 0 {
-			return ok, stats.failed, fmt.Errorf("%d update(s) failed", stats.failed)
+			return fmt.Errorf("%d update(s) failed", stats.failed)
 		}
-		return ok, stats.failed, fmt.Errorf("%d item(s) still outdated", stats.remaining)
+		return fmt.Errorf("%d item(s) still outdated", stats.remaining)
 	}
-	if skippedCount > 0 {
-		return ok, stats.failed, partialErr(skippedCount)
-	}
-	return ok, stats.failed, nil
+	return maybePartial(skipped)
 }
 
 func prepareBatches(ctx context.Context, items []*model.Item) (map[model.Category]*updater.PreparedUpdateBatch, error) {

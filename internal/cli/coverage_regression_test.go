@@ -398,3 +398,59 @@ func TestRunAllSkipsInconclusiveScanWithoutMutation(t *testing.T) {
 		t.Fatalf("partial run must name the skipped source:\n%s", out)
 	}
 }
+
+func TestMaybePartialAndEmptyUpdateOutcome(t *testing.T) {
+	if err := maybePartial(0); err != nil {
+		t.Fatalf("maybePartial(0)=%v, want nil", err)
+	}
+	if ExitCode(maybePartial(2)) != 2 {
+		t.Fatal("maybePartial must be ExitError code 2")
+	}
+
+	out := captureStdout(t, func() {
+		ok, fail, err := emptyUpdateOutcome(nil, 3)
+		if ok != 0 || fail != 0 || ExitCode(err) != 2 {
+			t.Fatalf("ok=%d fail=%d err=%v", ok, fail, err)
+		}
+	})
+	if strings.Contains(out, "Nothing to update") || strings.Contains(out, "not affirmatively verified") {
+		t.Fatalf("partial empty update must not print a noop summary:\n%s", out)
+	}
+
+	info := []*model.SourceSummary{{Items: []*model.Item{{Name: "x", Status: model.StatusInfo}}}}
+	out = captureStdout(t, func() {
+		ok, fail, err := emptyUpdateOutcome(info, 0)
+		if err != nil || ok != 0 || fail != 0 {
+			t.Fatalf("ok=%d fail=%d err=%v", ok, fail, err)
+		}
+	})
+	if strings.Contains(out, "✓ Nothing to update") || !strings.Contains(out, "not affirmatively verified") {
+		t.Fatalf("output=%q", out)
+	}
+
+	out = captureStdout(t, func() {
+		if _, _, err := emptyUpdateOutcome(nil, 0); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if !strings.Contains(out, "✓ Nothing to update") {
+		t.Fatalf("output=%q", out)
+	}
+}
+
+func TestUpdateOutcomeErrPrecedence(t *testing.T) {
+	failed := updateOutcomeErr(Config{}, verifyStats{failed: 2, remaining: 3}, 4)
+	if failed == nil || isPartialErr(failed) || !strings.Contains(failed.Error(), "update(s) failed") {
+		t.Fatalf("classified failures must win over partial skip: %v", failed)
+	}
+	strict := updateOutcomeErr(Config{Strict: true}, verifyStats{remaining: 1}, 4)
+	if strict == nil || isPartialErr(strict) || !strings.Contains(strict.Error(), "still outdated") {
+		t.Fatalf("strict remaining must win over partial skip: %v", strict)
+	}
+	if !isPartialErr(updateOutcomeErr(Config{}, verifyStats{}, 1)) {
+		t.Fatal("clean stats with skips must stay Code 2")
+	}
+	if err := updateOutcomeErr(Config{}, verifyStats{}, 0); err != nil {
+		t.Fatalf("clean success: %v", err)
+	}
+}
