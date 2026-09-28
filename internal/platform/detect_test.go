@@ -31,6 +31,83 @@ func TestDetect_OS(t *testing.T) {
 	}
 }
 
+func TestDistroFromOSRelease(t *testing.T) {
+	tests := []struct {
+		name    string
+		content string
+		want    string
+	}{
+		{
+			name:    "ubuntu",
+			content: "NAME=\"Ubuntu\"\nID=ubuntu\nID_LIKE=debian\nPRETTY_NAME=\"Ubuntu 24.04.5 LTS\"\n",
+			want:    "ubuntu",
+		},
+		{
+			name:    "debian",
+			content: "PRETTY_NAME=\"Debian GNU/Linux 13 (trixie)\"\nID=debian\n",
+			want:    "debian",
+		},
+		{
+			name:    "arch",
+			content: "NAME=\"Arch Linux\"\nID=arch\nBUILD_ID=rolling\n",
+			want:    "arch",
+		},
+		{
+			// CachyOS ships its own branding hook (cachyos-hooks), which rewrites
+			// os-release to ID=cachyos + ID_LIKE=arch.
+			name:    "cachyos",
+			content: "NAME=\"CachyOS Linux\"\nPRETTY_NAME=\"CachyOS\"\nID=cachyos\nID_LIKE=arch\nBUILD_ID=rolling\n",
+			want:    "cachyos",
+		},
+		{
+			// The same machine when that branding never ran: CachyOS keeps the
+			// plain Arch os-release, so it is reported as arch. Derived distros
+			// are only as good as the ID they ship.
+			name:    "cachyos without branding",
+			content: "NAME=\"Arch Linux\"\nPRETTY_NAME=\"Arch Linux\"\nID=arch\nBUILD_ID=rolling\n",
+			want:    "arch",
+		},
+		{
+			name:    "manjaro",
+			content: "NAME=\"Manjaro Linux\"\nID=manjaro\nID_LIKE=arch\n",
+			want:    "manjaro",
+		},
+		{
+			name:    "fedora",
+			content: "NAME=\"Fedora Linux\"\nID=fedora\n",
+			want:    "fedora",
+		},
+		{
+			name:    "opensuse",
+			content: "NAME=\"openSUSE Leap\"\nID=\"opensuse-leap\"\nID_LIKE=\"suse\"\n",
+			want:    "opensuse",
+		},
+		{
+			name:    "alpine",
+			content: "NAME=\"Alpine Linux\"\nID=alpine\n",
+			want:    "alpine",
+		},
+		{
+			name:    "unknown id falls back to linux",
+			content: "NAME=\"Void\"\nID=void\n",
+			want:    "linux",
+		},
+		{
+			name:    "empty content falls back to linux",
+			content: "",
+			want:    "linux",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := distroFromOSRelease(tt.content); got != tt.want {
+				t.Errorf("distroFromOSRelease() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestHasFunction(t *testing.T) {
 	// Go binary should always be findable via LookPath
 	if !has("go") {

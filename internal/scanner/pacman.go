@@ -9,7 +9,7 @@ import (
 	"github.com/lgldsilva/updash/internal/model"
 )
 
-// PacmanSource scans Arch/Manjaro packages.
+// PacmanSource scans Arch-family packages (Arch, CachyOS, Manjaro).
 type PacmanSource struct{}
 
 func (s *PacmanSource) Category() model.Category { return model.CatPacman }
