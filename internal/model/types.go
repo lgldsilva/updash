@@ -149,7 +149,7 @@ func (t TabID) String() string {
 // PlatformInfo holds detected OS and available package managers.
 type PlatformInfo struct {
 	OS      string // "darwin", "linux"
-	Distro  string // "ubuntu", "manjaro", "macos"
+	Distro  string // "ubuntu", "arch", "cachyos", "manjaro", "macos"
 	HasBrew bool
 	HasMAS  bool
 

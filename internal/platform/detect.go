@@ -81,29 +81,37 @@ func Detect() model.PlatformInfo {
 
 func detectLinuxDistro(p *model.PlatformInfo) {
 	if b, err := os.ReadFile("/etc/os-release"); err == nil {
-		content := string(b)
-		switch {
-		case strings.Contains(content, "ID=ubuntu"), strings.Contains(content, "ID_LIKE=ubuntu"):
-			p.Distro = "ubuntu"
-		case strings.Contains(content, "ID=manjaro"):
-			p.Distro = "manjaro"
-		case strings.Contains(content, "ID=arch"), strings.Contains(content, "ID_LIKE=arch"):
-			p.Distro = "arch"
-		case strings.Contains(content, "ID=debian"), strings.Contains(content, "ID_LIKE=debian"):
-			p.Distro = "debian"
-		case strings.Contains(content, "ID=fedora"):
-			p.Distro = "fedora"
-		case strings.Contains(content, "ID=opensuse"), strings.Contains(content, "ID_LIKE=suse"), strings.Contains(content, "ID_LIKE=\"suse\""):
-			p.Distro = "opensuse"
-		case strings.Contains(content, "ID=alpine"):
-			p.Distro = "alpine"
-		default:
-			p.Distro = "linux"
-		}
+		p.Distro = distroFromOSRelease(string(b))
 	} else if b, err := os.ReadFile("/etc/lsb-release"); err == nil {
 		if strings.Contains(string(b), "Ubuntu") {
 			p.Distro = "ubuntu"
 		}
+	}
+}
+
+// distroFromOSRelease maps the contents of /etc/os-release to a distro tag.
+// Derived distros must be matched before their parent: CachyOS and Manjaro both
+// carry ID_LIKE=arch, so their ID checks come first.
+func distroFromOSRelease(content string) string {
+	switch {
+	case strings.Contains(content, "ID=ubuntu"), strings.Contains(content, "ID_LIKE=ubuntu"):
+		return "ubuntu"
+	case strings.Contains(content, "ID=manjaro"):
+		return "manjaro"
+	case strings.Contains(content, "ID=cachyos"):
+		return "cachyos"
+	case strings.Contains(content, "ID=arch"), strings.Contains(content, "ID_LIKE=arch"):
+		return "arch"
+	case strings.Contains(content, "ID=debian"), strings.Contains(content, "ID_LIKE=debian"):
+		return "debian"
+	case strings.Contains(content, "ID=fedora"):
+		return "fedora"
+	case strings.Contains(content, "ID=opensuse"), strings.Contains(content, "ID_LIKE=suse"), strings.Contains(content, "ID_LIKE=\"suse\""):
+		return "opensuse"
+	case strings.Contains(content, "ID=alpine"):
+		return "alpine"
+	default:
+		return "linux"
 	}
 }
 
