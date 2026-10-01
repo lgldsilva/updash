@@ -145,6 +145,29 @@ func TestCheckReport_ProblemsTakeExitPrecedence(t *testing.T) {
 	}
 }
 
+func TestCheckReportIncludesNpmPrefix(t *testing.T) {
+	updates := []*model.SourceSummary{{
+		Category: model.CatNpm,
+		Label:    "npm (global)",
+		Outdated: 1,
+		Items: []*model.Item{{
+			Name: "legacy-pkg", Category: model.CatNpm, Status: model.StatusOutdated,
+			CurrentVer: "1.0.0", AvailableVer: "2.0.0", Prefix: "/home/u/.npm-global",
+		}},
+	}}
+	rep := BuildCheckReport(updates, nil)
+	if len(rep.Updates) != 1 || rep.Updates[0].Prefix != "/home/u/.npm-global" {
+		t.Fatalf("updates=%+v", rep.Updates)
+	}
+	got, err := FormatCheckJSON(updates, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(got, `"prefix": "/home/u/.npm-global"`) {
+		t.Fatalf("prefix missing:\n%s", got)
+	}
+}
+
 func TestCheckReport_CountsInfoWithoutTreatingItAsError(t *testing.T) {
 	rep := BuildCheckReport([]*model.SourceSummary{{Category: model.CatBun, Items: []*model.Item{{Name: "bun-pkg", Category: model.CatBun, Status: model.StatusInfo}}}}, nil)
 	if rep.Info != 1 || rep.Errors != 0 || rep.Unverified != 0 {

@@ -468,17 +468,31 @@ func RunClean(ctx context.Context, cfg Config) (int, int, error) {
 
 func hasInformational(groups ...[]*model.SourceSummary) bool {
 	for _, summaries := range groups {
-		for _, summary := range summaries {
-			if summary != nil {
-				for _, item := range summary.Items {
-					if item != nil && item.Status == model.StatusInfo && item.Log == "" {
-						return true
-					}
-				}
+		if summariesHaveOpenInfo(summaries) {
+			return true
+		}
+	}
+	return false
+}
+
+func summariesHaveOpenInfo(summaries []*model.SourceSummary) bool {
+	for _, summary := range summaries {
+		if summary == nil {
+			continue
+		}
+		for _, item := range summary.Items {
+			if openInfoItem(item) {
+				return true
 			}
 		}
 	}
 	return false
+}
+
+// openInfoItem is a StatusInfo row that never reached a conclusion. A log
+// (a shadowed npm copy) is a known fact and does not count.
+func openInfoItem(item *model.Item) bool {
+	return item != nil && item.Status == model.StatusInfo && item.Log == ""
 }
 
 // RunAll updates then cleans.
@@ -695,10 +709,30 @@ func runCategoryUpdateSection(
 		results = executePreparedBatch(batchCtx, prepared, env.opts)
 	} else {
 		elevCtx, batchSkipped, skipReason := ensurePlannedElevation(batchCtx, updater.PlansRequireElevation(prepared.Plans()), env.cfg, env.elevSession)
-		results = categoryResultsAfterElevation(batchCtx, elevCtx, cat, prepared, groupItems, env.opts, batchSkipped, skipReason)
+		results = categoryResultsAfterElevation(cat, categoryElevation{
+			batchCtx:     batchCtx,
+			elevCtx:      elevCtx,
+			prepared:     prepared,
+			items:        groupItems,
+			opts:         env.opts,
+			batchSkipped: batchSkipped,
+			skipReason:   skipReason,
+		})
 	}
 	ok, fail, skipped = tallyUpdateResults(results)
 	return ok, fail, skipped, results
+}
+
+// categoryElevation is the privilege outcome for one category batch.
+// Grouped so categoryResultsAfterElevation stays under Sonar's parameter limit.
+type categoryElevation struct {
+	batchCtx     context.Context
+	elevCtx      context.Context
+	prepared     *updater.PreparedUpdateBatch
+	items        []*model.Item
+	opts         updater.Options
+	batchSkipped bool
+	skipReason   string
 }
 
 // categoryResultsAfterElevation runs the batch, or skips it when elevation was
@@ -706,22 +740,14 @@ func runCategoryUpdateSection(
 // elevated groups and still updates user-owned prefixes. Other categories stay
 // whole-batch skips. The npm path uses batchCtx so it does not inherit a
 // cancelled elevation context.
-func categoryResultsAfterElevation(
-	batchCtx, elevCtx context.Context,
-	cat model.Category,
-	prepared *updater.PreparedUpdateBatch,
-	groupItems []*model.Item,
-	opts updater.Options,
-	batchSkipped bool,
-	skipReason string,
-) []*updater.Result {
-	if !batchSkipped {
-		return executePreparedBatch(elevCtx, prepared, opts)
+func categoryResultsAfterElevation(cat model.Category, in categoryElevation) []*updater.Result {
+	if !in.batchSkipped {
+		return executePreparedBatch(in.elevCtx, in.prepared, in.opts)
 	}
-	if cat == model.CatNpm && updater.PlansHaveUnelevatedWork(prepared.Plans()) {
-		return executeNpmSkippingElevated(batchCtx, prepared, opts, skipReason)
+	if cat == model.CatNpm && updater.PlansHaveUnelevatedWork(in.prepared.Plans()) {
+		return executeNpmSkippingElevated(in.batchCtx, in.prepared, in.opts, in.skipReason)
 	}
-	return skipBatchResults(groupItems, skipReason)
+	return skipBatchResults(in.items, in.skipReason)
 }
 
 func runPreparedBrewUpdateBatch(

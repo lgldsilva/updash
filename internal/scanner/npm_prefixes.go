@@ -16,6 +16,9 @@ import (
 // only: the same package name is already present in the active prefix.
 const npmShadowNote = "shadowed by active npm prefix copy"
 
+// npmPrefixLabel is the display name of an unverified per-prefix probe.
+const npmPrefixLabel = "npm prefix "
+
 // npmLegacyPrefixCandidates lists well-known non-default global npm prefixes
 // (the community-standard ~/.npm-global used for sudo-free installs, typically
 // orphaned after a move to nvm). Seam for tests.
@@ -179,7 +182,7 @@ func scanLegacyPrefixData(ctx context.Context) (scans []legacyScan, problems []*
 	for _, prefix := range prefixes {
 		versions, err := npmLsGlobalVersionsFor(ctx, prefix)
 		if err != nil {
-			problems = append(problems, unverifiedNpmItem("npm prefix "+prefix, err))
+			problems = append(problems, unverifiedNpmItem(npmPrefixLabel+prefix, err))
 			continue
 		}
 		if len(versions) == 0 {
@@ -187,7 +190,7 @@ func scanLegacyPrefixData(ctx context.Context) (scans []legacyScan, problems []*
 		}
 		entries, err := npmOutdatedBatch(ctx, prefix, keysOf(versions))
 		if err != nil {
-			problems = append(problems, unverifiedNpmItem("npm prefix "+prefix, err))
+			problems = append(problems, unverifiedNpmItem(npmPrefixLabel+prefix, err))
 			continue
 		}
 		scans = append(scans, legacyScan{prefix: prefix, versions: versions, entries: entries})
@@ -213,7 +216,7 @@ func itemsWhenActiveScanFailed(activeErr error, legacy []legacyScan, problems []
 	items = append(items, problems...)
 	cause := errors.New("active npm prefix scan failed; shadow detection skipped")
 	for _, sc := range legacy {
-		items = append(items, unverifiedNpmItem("npm prefix "+sc.prefix, cause))
+		items = append(items, unverifiedNpmItem(npmPrefixLabel+sc.prefix, cause))
 	}
 	return items
 }

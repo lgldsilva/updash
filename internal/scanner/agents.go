@@ -85,7 +85,7 @@ func agentCatalog() []agentDef {
 		// `update --check --json` probe is the freshness channel (no npm
 		// package exists to ask the registry about).
 		{name: "Grok", binary: binGrok, verCmd: []string{binGrok, flagVersion}, mode: agentUpdateAuto, updateCmd: []string{binGrok, cmdUpdate},
-			latestCmd: []string{binGrok, cmdUpdate, "--check", "--json"}, latestJSONKey: "latestVersion"},
+			latestCmd: []string{binGrok, cmdUpdate, "--check", flagJSON}, latestJSONKey: "latestVersion"},
 		{name: "Antigravity", binary: binAntigravity, verCmd: []string{binAntigravity, flagVersion}, mode: agentUpdateManual},
 		{name: "Agy", binary: "agy", verCmd: []string{"agy", flagVersion}, mode: agentUpdateManual},
 		// MiMo Code (Xiaomi) distributes a native binary whose `mimo upgrade`
@@ -242,7 +242,7 @@ func probeAgentItem(ctx context.Context, plat model.PlatformInfo, a agentDef) *m
 // installed versions (depth 0). stdout only: npm ls --json output must not be
 // corrupted by stderr warnings (see the execCombined doc in runner.go).
 func npmInstalledVersions(ctx context.Context) map[string]string {
-	out, err := execCommand(ctx, binNpm, "ls", flagGlobal, "--json", "--depth=0")
+	out, err := execCommand(ctx, binNpm, "ls", flagGlobal, flagJSON, "--depth=0")
 	versions := ParseNpmLsGlobalVersions(out)
 	if err != nil && len(versions) == 0 {
 		return nil
@@ -354,7 +354,7 @@ func agentItemPackage(it *model.Item, npmByName map[string]string) string {
 // body with a command error, or a body that is not JSON, is a failed probe.
 func npmOutdatedLatestFor(ctx context.Context, pkgs []string) (map[string]string, error) {
 	sort.Strings(pkgs)
-	args := append([]string{"outdated", flagGlobal, "--json"}, pkgs...)
+	args := append([]string{"outdated", flagGlobal, flagJSON}, pkgs...)
 	out, err := execCommand(ctx, binNpm, args...)
 	if err != nil && strings.TrimSpace(string(out)) == "" {
 		return nil, err

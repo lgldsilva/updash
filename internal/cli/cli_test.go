@@ -440,7 +440,11 @@ func TestCategoryResultsAfterElevation_runsWhenReady(t *testing.T) {
 		called = true
 		return []*updater.Result{{Item: &model.Item{Name: "curl"}, Success: true}}
 	}
-	res := categoryResultsAfterElevation(context.Background(), context.Background(), model.CatApt, &updater.PreparedUpdateBatch{}, nil, updater.Options{}, false, "")
+	res := categoryResultsAfterElevation(model.CatApt, categoryElevation{
+		batchCtx: context.Background(),
+		elevCtx:  context.Background(),
+		prepared: &updater.PreparedUpdateBatch{},
+	})
 	if !called || len(res) != 1 || !res[0].Success {
 		t.Fatalf("called=%v res=%v", called, res)
 	}
@@ -506,6 +510,115 @@ func TestRunCategoryUpdateSection_brewPasswordSkip(t *testing.T) {
 	})
 	if !strings.Contains(out, "Brew") {
 		t.Fatalf("output=%q", out)
+	}
+}
+
+func TestCategoryResultsAfterElevation_grantedRunsBatch(t *testing.T) {
+	restoreHooks(t)
+	items := []*model.Item{{Name: "curl", Category: model.CatApt}}
+	batch, err := updater.PrepareUpdateBatch(context.Background(), model.CatApt, items)
+	if err != nil {
+		t.Fatal(err)
+	}
+	called := false
+	executePreparedBatch = func(_ context.Context, got *updater.PreparedUpdateBatch, _ updater.Options) []*updater.Result {
+		called = true
+		if got != batch {
+			t.Fatalf("batch = %p, want %p", got, batch)
+		}
+		return []*updater.Result{{Item: items[0], Success: true}}
+	}
+	executeNpmSkippingElevated = func(context.Context, *updater.PreparedUpdateBatch, updater.Options, string) []*updater.Result {
+		t.Fatal("granted elevation must run the prepared batch")
+		return nil
+	}
+	results := categoryResultsAfterElevation(model.CatApt, categoryElevation{
+		batchCtx: context.Background(),
+		elevCtx:  context.Background(),
+		prepared: batch,
+		items:    items,
+	})
+	if !called || len(results) != 1 || !results[0].Success {
+		t.Fatalf("called=%v results=%+v", called, results)
+	}
+}
+
+func TestRunCategoryUpdateSection_npmKeepsUserPrefixWhenElevationDeclined(t *testing.T) {
+	restoreHooks(t)
+	user := &model.Item{Name: "user-pkg", Prefix: "/home/u/.npm-global", Category: model.CatNpm, Status: model.StatusOutdated}
+	sys := &model.Item{Name: "sys-pkg", Prefix: "/usr", Category: model.CatNpm, Status: model.StatusOutdated}
+	items := []*model.Item{sys, user}
+	batch, err := updater.PrepareUpdateBatch(context.Background(), model.CatNpm, items)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !updater.PlansRequireElevation(batch.Plans()) || !updater.PlansHaveUnelevatedWork(batch.Plans()) {
+		t.Fatalf("plans = %+v, want one elevated and one user prefix", batch.Plans())
+	}
+	executePreparedBatch = func(context.Context, *updater.PreparedUpdateBatch, updater.Options) []*updater.Result {
+		t.Fatal("declined elevation must not run the whole npm batch")
+		return nil
+	}
+	executeNpmSkippingElevated = func(_ context.Context, got *updater.PreparedUpdateBatch, _ updater.Options, reason string) []*updater.Result {
+		if reason == "" || len(got.Items()) != 2 {
+			t.Fatalf("reason=%q items=%d", reason, len(got.Items()))
+		}
+		return []*updater.Result{
+			{Item: user, Success: true},
+			{Item: sys, Error: "⊘ " + reason},
+		}
+	}
+	var sess *elevate.Session
+	env := updateBatchEnv{
+		summaries:   []*model.SourceSummary{{Category: model.CatNpm, Icon: "⬡", Label: "npm"}},
+		prepared:    map[model.Category]*updater.PreparedUpdateBatch{model.CatNpm: batch},
+		cfg:         Config{SkipPassword: true},
+		elevSession: &sess,
+	}
+	var ok, fail, skipped int
+	out := captureStdout(t, func() {
+		ok, fail, skipped, _ = runCategoryUpdateSection(context.Background(), env, model.CatNpm, items)
+	})
+	if ok != 1 || fail != 0 || skipped != 1 {
+		t.Fatalf("ok=%d fail=%d skipped=%d out=%q", ok, fail, skipped, out)
+	}
+	if !strings.Contains(out, "user-pkg") || !strings.Contains(out, "sys-pkg") {
+		t.Fatalf("output=%q", out)
+	}
+}
+
+func TestRunCategoryUpdateSection_npmAllElevatedSkipsWholeBatch(t *testing.T) {
+	restoreHooks(t)
+	sys := &model.Item{Name: "sys-pkg", Prefix: "/usr", Category: model.CatNpm, Status: model.StatusOutdated}
+	items := []*model.Item{sys}
+	batch, err := updater.PrepareUpdateBatch(context.Background(), model.CatNpm, items)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updater.PlansHaveUnelevatedWork(batch.Plans()) {
+		t.Fatalf("plans = %+v, want a fully elevated npm batch", batch.Plans())
+	}
+	executeNpmSkippingElevated = func(context.Context, *updater.PreparedUpdateBatch, updater.Options, string) []*updater.Result {
+		t.Fatal("a fully elevated npm batch must be skipped whole")
+		return nil
+	}
+	var sess *elevate.Session
+	env := updateBatchEnv{
+		summaries:   []*model.SourceSummary{{Category: model.CatNpm, Icon: "⬡", Label: "npm"}},
+		prepared:    map[model.Category]*updater.PreparedUpdateBatch{model.CatNpm: batch},
+		cfg:         Config{SkipPassword: true},
+		elevSession: &sess,
+	}
+	var ok, fail, skipped int
+	var res []*updater.Result
+	captureStdout(t, func() {
+		ok, fail, skipped, res = runCategoryUpdateSection(context.Background(), env, model.CatNpm, items)
+	})
+	if ok != 0 || fail != 0 || skipped != 1 || len(res) != 1 || !strings.HasPrefix(res[0].Error, "⊘ ") {
+		t.Fatalf("ok=%d fail=%d skipped=%d res=%+v", ok, fail, skipped, res)
+	}
+	if sys.Status != model.StatusOutdated {
+		t.Fatalf("status=%v, want still outdated", sys.Status)
 	}
 }
 

@@ -77,7 +77,7 @@ func printUpdateSummary(s *model.SourceSummary) (outdated, needsSudo, manualOnly
 	}
 	fmt.Printf("  %s %s: %d outdated\n", s.Icon, s.Label, s.Outdated)
 	for _, it := range s.Items {
-		if it.Status != model.StatusOutdated {
+		if it == nil || it.Status != model.StatusOutdated {
 			continue
 		}
 		printOutdatedLine(it)
