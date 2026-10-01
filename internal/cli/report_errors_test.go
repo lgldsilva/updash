@@ -56,6 +56,7 @@ func TestPrintUpdateSummaryShowsProbeBesideOutdated(t *testing.T) {
 			{Name: "left-pad", Status: model.StatusOutdated, CurrentVer: "1.0.0", AvailableVer: "2.0.0"},
 			{Name: "npm prefix /home/u/.npm-global", Status: model.StatusUnverified, CurrentVer: "error", Error: "timeout"},
 			{Name: "npm", Status: model.StatusError, CurrentVer: "error", Error: "ls failed"},
+			{Name: "shadowed", Status: model.StatusInfo, CurrentVer: "1.0.0", Log: "shadowed by active npm prefix copy"},
 		},
 	}
 	out := captureStdout(t, func() { printUpdateSummary(s) })
@@ -65,6 +66,10 @@ func TestPrintUpdateSummaryShowsProbeBesideOutdated(t *testing.T) {
 	if !strings.Contains(out, "✘ ⬡ npm: error — ls failed") {
 		t.Fatalf("error item missing:\n%s", out)
 	}
+	if !strings.Contains(out, "shadowed by active npm prefix copy") {
+		t.Fatalf("shadow note missing:\n%s", out)
+	}
+	printProbeItems(&model.SourceSummary{Items: []*model.Item{nil, {Status: model.StatusOK}}})
 }
 
 func TestShadowNoteIsAffirmative(t *testing.T) {
@@ -74,7 +79,11 @@ func TestShadowNoteIsAffirmative(t *testing.T) {
 	if hasNonAffirmative(shadow) {
 		t.Fatal("shadow note must not count as non-affirmative")
 	}
-	open := []*model.SourceSummary{{Items: []*model.Item{{Name: "agent", Status: model.StatusInfo}}}}
+	open := []*model.SourceSummary{{Items: []*model.Item{
+		nil,
+		{Name: "agent", Status: model.StatusInfo},
+		{Name: "ok", Status: model.StatusOK},
+	}}}
 	if !hasNonAffirmative(open) {
 		t.Fatal("info without a log is still non-affirmative")
 	}

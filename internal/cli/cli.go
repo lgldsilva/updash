@@ -719,7 +719,7 @@ func categoryResultsAfterElevation(
 		return executePreparedBatch(elevCtx, prepared, opts)
 	}
 	if cat == model.CatNpm && updater.PlansHaveUnelevatedWork(prepared.Plans()) {
-		return updater.ExecuteNpmSkippingElevated(batchCtx, prepared, opts, skipReason)
+		return executeNpmSkippingElevated(batchCtx, prepared, opts, skipReason)
 	}
 	return skipBatchResults(groupItems, skipReason)
 }

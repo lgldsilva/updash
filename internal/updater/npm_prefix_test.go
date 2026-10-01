@@ -203,8 +203,13 @@ func TestExecutePreparedNpm_MultiPrefixGroups(t *testing.T) {
 }
 
 func TestBatchNpmUpgrade_MultiPrefixGroups(t *testing.T) {
-	prevRun := runUpdateCmd
-	t.Cleanup(func() { runUpdateCmd = prevRun })
+	prevRun, prevPrefix := runUpdateCmd, npmPrefixRunner
+	t.Cleanup(func() { runUpdateCmd, npmPrefixRunner = prevRun, prevPrefix })
+	// CI's ambient npm prefix is /usr, which would elevate that group and
+	// leave runUpdateCmd. Pin a user prefix so both groups stay unelevated.
+	npmPrefixRunner = func(context.Context) ([]byte, error) {
+		return []byte("/home/u/.nvm/versions/node/v24\n"), nil
+	}
 	var ran []string
 	runUpdateCmd = func(ctx context.Context, opts Options, name string, args ...string) (string, string, error) {
 		ran = append(ran, strings.Join(args, " "))
