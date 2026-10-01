@@ -266,7 +266,7 @@ func scanProblemCount(summaries []*model.SourceSummary) int {
 }
 
 func scanNonAffirmativeCount(summaries []*model.SourceSummary) int {
-	return scanProblemCount(summaries) + countSummariesStatus(summaries, model.StatusInfo)
+	return scanProblemCount(summaries) + countOpenInfo(summaries)
 }
 
 func (s *State) writeScanWait(b *strings.Builder, waiting bool) {

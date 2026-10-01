@@ -18,6 +18,10 @@ const (
 	// a media server, queue workers) that contention alone can push a
 	// normally-sub-5s probe well past 45s.
 	agentSourceTimeout = 90 * time.Second
+	// npm global now covers the ambient prefix plus discovered non-default
+	// prefixes — several npm cold-starts and registry round-trips that share
+	// the same RunAll contention as the agents above.
+	npmSourceTimeout = 90 * time.Second
 )
 
 // EnabledSources returns scanners for the current platform (exported for TUI orchestration).
@@ -45,6 +49,8 @@ func SourceTimeout(cat model.Category) time.Duration {
 		return aptSourceTimeout
 	case model.CatAgent, model.CatOpenCodePlugins:
 		return agentSourceTimeout
+	case model.CatNpm:
+		return npmSourceTimeout
 	default:
 		return defaultSourceTimeout
 	}

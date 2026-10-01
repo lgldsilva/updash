@@ -471,7 +471,7 @@ func hasInformational(groups ...[]*model.SourceSummary) bool {
 		for _, summary := range summaries {
 			if summary != nil {
 				for _, item := range summary.Items {
-					if item != nil && item.Status == model.StatusInfo {
+					if item != nil && item.Status == model.StatusInfo && item.Log == "" {
 						return true
 					}
 				}
@@ -695,14 +695,33 @@ func runCategoryUpdateSection(
 		results = executePreparedBatch(batchCtx, prepared, env.opts)
 	} else {
 		elevCtx, batchSkipped, skipReason := ensurePlannedElevation(batchCtx, updater.PlansRequireElevation(prepared.Plans()), env.cfg, env.elevSession)
-		if batchSkipped {
-			results = skipBatchResults(groupItems, skipReason)
-		} else {
-			results = executePreparedBatch(elevCtx, prepared, env.opts)
-		}
+		results = categoryResultsAfterElevation(batchCtx, elevCtx, cat, prepared, groupItems, env.opts, batchSkipped, skipReason)
 	}
 	ok, fail, skipped = tallyUpdateResults(results)
 	return ok, fail, skipped, results
+}
+
+// categoryResultsAfterElevation runs the batch, or skips it when elevation was
+// declined. npm is one plan per prefix: a declined password skips only the
+// elevated groups and still updates user-owned prefixes. Other categories stay
+// whole-batch skips. The npm path uses batchCtx so it does not inherit a
+// cancelled elevation context.
+func categoryResultsAfterElevation(
+	batchCtx, elevCtx context.Context,
+	cat model.Category,
+	prepared *updater.PreparedUpdateBatch,
+	groupItems []*model.Item,
+	opts updater.Options,
+	batchSkipped bool,
+	skipReason string,
+) []*updater.Result {
+	if !batchSkipped {
+		return executePreparedBatch(elevCtx, prepared, opts)
+	}
+	if cat == model.CatNpm && updater.PlansHaveUnelevatedWork(prepared.Plans()) {
+		return updater.ExecuteNpmSkippingElevated(batchCtx, prepared, opts, skipReason)
+	}
+	return skipBatchResults(groupItems, skipReason)
 }
 
 func runPreparedBrewUpdateBatch(

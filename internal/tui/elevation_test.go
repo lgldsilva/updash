@@ -7,6 +7,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/lgldsilva/updash/internal/elevate"
 	"github.com/lgldsilva/updash/internal/model"
+	"github.com/lgldsilva/updash/internal/updater"
 )
 
 func TestCanDeferMASElevation(t *testing.T) {
@@ -112,6 +113,32 @@ func TestGroupOutdatedByCategory_BlocksAmbiguousIdentity(t *testing.T) {
 	}
 	if groups := groupOutdatedByCategory(summaries, copyItems([]*model.Item{item})); len(groups) != 0 {
 		t.Fatalf("ambiguous source identity must be blocked, got %+v", groups)
+	}
+}
+
+type elevBatchStub struct {
+	cat   model.Category
+	items []*model.Item
+	plans []updater.CommandPlan
+}
+
+func (s elevBatchStub) Category() model.Category     { return s.cat }
+func (s elevBatchStub) Items() []*model.Item         { return s.items }
+func (s elevBatchStub) Plans() []updater.CommandPlan { return s.plans }
+
+func TestResultsAfterElevationDenied_NonNpmFailsAll(t *testing.T) {
+	items := []*model.Item{{Name: "git", Status: model.StatusOutdated}}
+	group := &preparedUpdateGroup{
+		category: model.CatApt,
+		batch: elevBatchStub{
+			cat:   model.CatApt,
+			items: items,
+			plans: []updater.CommandPlan{{Name: "apt-get", Scope: updater.CommandScopeExact, Elevated: true}},
+		},
+	}
+	results := resultsAfterElevationDenied(workerEnv{}, group, errTest("cancelled"), nil)
+	if len(results) != 1 || results[0].Success || items[0].Status != model.StatusError {
+		t.Fatalf("results=%+v status=%v", results[0], items[0].Status)
 	}
 }
 

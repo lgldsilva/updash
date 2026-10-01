@@ -29,3 +29,6 @@ Thumbs.db
 sonar-out/
 coverage.out
 .zcode/
+
+# Mimosa security plugin local state
+.mimosa/

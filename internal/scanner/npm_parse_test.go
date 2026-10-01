@@ -44,7 +44,9 @@ func TestParseNpmOutdatedJSON_empty(t *testing.T) {
 func TestNpmScan_MalformedJSONIsError(t *testing.T) {
 	enableMocks()
 	defer disableMocks()
-	setMock("npm", []string{"outdated", "-g", "--json"}, "not valid json", nil)
+	withoutLegacyNpmPrefixes(t)
+	setMock("npm", []string{"ls", "-g", "--json", "--depth=0"}, `{"dependencies":{"left-pad":{"version":"1.0.0"}}}`, nil)
+	setMock("npm", []string{"outdated", "-g", "--json", "left-pad"}, "not valid json", nil)
 
 	items, err := (&NpmSource{}).Scan(t.Context(), model.PlatformInfo{})
 	if err != nil {
@@ -90,5 +92,22 @@ func TestParseNpmOutdatedMap(t *testing.T) {
 	}
 	if ParseNpmOutdatedMap([]byte(`{`)) != nil {
 		t.Fatal("invalid should be nil")
+	}
+	if ParseNpmOutdatedMap([]byte(`{}`)) != nil {
+		t.Fatal("empty object should stay nil")
+	}
+}
+
+func TestParseNpmOutdatedLatestDistinguishesEmptyFromInvalid(t *testing.T) {
+	empty, err := parseNpmOutdatedLatest(nil)
+	if err != nil || len(empty) != 0 {
+		t.Fatalf("empty stdout: map=%v err=%v", empty, err)
+	}
+	obj, err := parseNpmOutdatedLatest([]byte("{}"))
+	if err != nil || len(obj) != 0 {
+		t.Fatalf("{}: map=%v err=%v", obj, err)
+	}
+	if _, err := parseNpmOutdatedLatest([]byte("not-json")); err == nil {
+		t.Fatal("invalid JSON must error")
 	}
 }

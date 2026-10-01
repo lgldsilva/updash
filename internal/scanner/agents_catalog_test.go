@@ -2,6 +2,7 @@ package scanner
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/lgldsilva/updash/internal/model"
@@ -80,17 +81,89 @@ func TestOpenCodeFlaggedOutdatedViaNpm(t *testing.T) {
 	enableMocks()
 	defer disableMocks()
 
-	setMock("npm", []string{"outdated", "-g", "--json"},
+	setMock("npm", []string{"outdated", "-g", "--json", "opencode-ai"},
 		`{"opencode-ai":{"current":"1.18.0","wanted":"1.18.16","latest":"1.18.16"}}`, nil)
 
 	items := []*model.Item{{
 		Name: "OpenCode", Category: model.CatAgent,
 		Status: model.StatusOK, PackageID: "opencode-ai", CurrentVer: "1.18.0",
 	}}
-	applyNpmOutdatedToAgents(context.Background(), items, agentCatalog())
+	if err := applyNpmOutdatedToAgents(context.Background(), items, agentCatalog(), map[string]string{"opencode-ai": "1.18.0"}); err != nil {
+		t.Fatal(err)
+	}
 
 	if items[0].Status != model.StatusOutdated || items[0].AvailableVer != "1.18.16" {
 		t.Fatalf("OpenCode not flagged outdated via opencode-ai: %+v", items[0])
+	}
+}
+
+func TestApplyNpmOutdated_ExitOneWithJSONStillFlags(t *testing.T) {
+	enableMocks()
+	defer disableMocks()
+	setMock("npm", []string{"outdated", "-g", "--json", "@github/copilot"},
+		`{"@github/copilot":{"current":"1.0.90","latest":"1.0.91"}}`, errors.New("exit status 1"))
+
+	it := copilotInfoItem()
+	if err := applyNpmOutdatedToAgents(context.Background(), []*model.Item{it}, agentCatalog(), map[string]string{"@github/copilot": "1.0.90"}); err != nil {
+		t.Fatal(err)
+	}
+	if it.Status != model.StatusOutdated || it.AvailableVer != "1.0.91" {
+		t.Fatalf("exit 1 with JSON must still flag outdated: %+v", it)
+	}
+}
+
+func TestApplyNpmOutdated_FailureDoesNotMarkFresh(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		stdout string
+		err    error
+	}{
+		{name: "command failure", stdout: "", err: errors.New("npm failed")},
+		{name: "invalid json", stdout: "not-json", err: nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			enableMocks()
+			defer disableMocks()
+			setMock("npm", []string{"outdated", "-g", "--json", "@github/copilot"}, tc.stdout, tc.err)
+
+			it := copilotInfoItem()
+			installed := map[string]string{"@github/copilot": "1.0.90"}
+			err := applyNpmOutdatedToAgents(context.Background(), []*model.Item{it}, agentCatalog(), installed)
+			if err == nil {
+				t.Fatal("expected probe error")
+			}
+			markNpmManagedUnverified([]*model.Item{it}, installed, err)
+			if it.Status != model.StatusUnverified || it.Error == "" {
+				t.Fatalf("managed agent must stay unverified: %+v", it)
+			}
+		})
+	}
+}
+
+func TestApplyNpmOutdated_EmptySuccessMarksFresh(t *testing.T) {
+	for _, stdout := range []string{"", "{}"} {
+		t.Run(stdout, func(t *testing.T) {
+			enableMocks()
+			defer disableMocks()
+			setMock("npm", []string{"outdated", "-g", "--json", "@github/copilot"}, stdout, nil)
+
+			it := copilotInfoItem()
+			installed := map[string]string{"@github/copilot": "1.0.90"}
+			if err := applyNpmOutdatedToAgents(context.Background(), []*model.Item{it}, agentCatalog(), installed); err != nil {
+				t.Fatal(err)
+			}
+			markNpmManagedFresh([]*model.Item{it}, installed)
+			if it.Status != model.StatusOK {
+				t.Fatalf("empty outdated payload must mark fresh: %+v", it)
+			}
+		})
+	}
+}
+
+func copilotInfoItem() *model.Item {
+	return &model.Item{
+		Name: "Copilot CLI", Category: model.CatAgent,
+		Status: model.StatusInfo, PackageID: "@github/copilot", CurrentVer: "1.0.90",
 	}
 }
 

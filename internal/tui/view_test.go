@@ -70,6 +70,35 @@ func TestRenderUpdatesTab_UnverifiedOnlyIsNotAllUpdated(t *testing.T) {
 	}
 }
 
+func TestTotalScanNonAffirmative_ShadowNoteIsConcluded(t *testing.T) {
+	s := New()
+	s.Summaries = []*model.SourceSummary{{Items: []*model.Item{
+		{Name: "pkg", Status: model.StatusInfo, Log: "shadowed by active npm prefix copy"},
+	}}}
+	if s.TotalScanNonAffirmative() != 0 {
+		t.Fatalf("shadow note counted as non-affirmative: %d", s.TotalScanNonAffirmative())
+	}
+	s.Summaries[0].Items[0].Log = ""
+	if s.TotalScanNonAffirmative() != 1 {
+		t.Fatal("empty-log info must stay non-affirmative")
+	}
+}
+
+func TestRenderUpdatesTab_ShadowNoteIsUpToDate(t *testing.T) {
+	s := New()
+	s.Summaries = []*model.SourceSummary{{
+		Category: model.CatNpm,
+		Label:    "npm (global)",
+		Items: []*model.Item{{
+			Name: "pkg", Status: model.StatusInfo, CurrentVer: "1.0.0", Log: "shadowed by active npm prefix copy",
+		}},
+	}}
+	out := strings.ToLower(s.renderUpdatesTab())
+	if strings.Contains(out, "not verified") {
+		t.Fatalf("shadow note must not read as unverified freshness: %s", out)
+	}
+}
+
 func TestRenderUpdatesTab_InfoOnlyIsNotAllUpdated(t *testing.T) {
 	s := New()
 	s.Summaries = []*model.SourceSummary{{Category: model.CatAI, Label: "AI tools", Items: []*model.Item{{Name: "note", Category: model.CatAI, Status: model.StatusInfo, CurrentVer: "version check not supported"}}}}

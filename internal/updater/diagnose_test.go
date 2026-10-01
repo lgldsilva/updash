@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"io"
 	"os/exec"
+	"strings"
 	"testing"
 
 	"github.com/lgldsilva/updash/internal/model"
@@ -109,12 +110,31 @@ func TestSuggestCommand_agentsAndPlugins(t *testing.T) {
 		{&model.Item{Category: model.CatAgent, Name: "OpenCode"}, "opencode upgrade"},
 		{&model.Item{Category: model.CatAgent, Name: "Claude Code"}, "claude update"},
 		{&model.Item{Category: model.CatAgent, Name: "Codex"}, "npm install -g --allow-scripts=@openai/codex @openai/codex@latest"},
-		{&model.Item{Category: model.CatAgent, Name: "Copilot CLI"}, "copilot update"},
+		{&model.Item{Category: model.CatAgent, Name: "Copilot CLI"}, "npm install -g --allow-scripts=@github/copilot @github/copilot@latest"},
+		{&model.Item{Category: model.CatAgent, Name: "MimoCode"}, "mimo upgrade"},
+		{&model.Item{Category: model.CatAgent, Name: "Grok"}, "grok update"},
 		{&model.Item{Category: model.CatAgent, Name: "Cursor"}, ""},
 	}
 	for _, tc := range cases {
 		if got := SuggestCommand(tc.it); got != tc.want {
 			t.Fatalf("%s: got %q want %q", tc.it.Name, got, tc.want)
 		}
+	}
+}
+
+func TestSuggestCommand_CrushUsesOwningPrefix(t *testing.T) {
+	withCrushBinary(t, "/usr/local/bin/crush", "/home/u/.npm-global/lib/node_modules/@charmland/crush/run-crush.js")
+	got := SuggestCommand(&model.Item{Category: model.CatAgent, Name: "Crush"})
+	want := "npm install -g --prefix /home/u/.npm-global --allow-scripts=@charmland/crush @charmland/crush@latest"
+	if got != want {
+		t.Fatalf("got %q want %q", got, want)
+	}
+}
+
+func TestSuggestCommand_CrushManualLayout(t *testing.T) {
+	withCrushBinary(t, "/opt/crush/bin/crush", "/opt/crush/bin/crush")
+	got := SuggestCommand(&model.Item{Category: model.CatAgent, Name: "Crush"})
+	if got == "" || strings.Contains(got, "npm install") {
+		t.Fatalf("non-npm crush must stay manual, got %q", got)
 	}
 }

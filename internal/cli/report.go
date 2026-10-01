@@ -40,7 +40,7 @@ func hasNonAffirmative(groups ...[]*model.SourceSummary) bool {
 		for _, s := range summaries {
 			if s != nil {
 				for _, it := range s.Items {
-					if it != nil && (it.Status == model.StatusError || it.Status == model.StatusUnverified || it.Status == model.StatusInfo) {
+					if itemIsOpenQuestion(it) {
 						return true
 					}
 				}
@@ -48,6 +48,23 @@ func hasNonAffirmative(groups ...[]*model.SourceSummary) bool {
 		}
 	}
 	return false
+}
+
+// itemIsOpenQuestion is an error, an unverified probe, or an informational
+// row that never reached a conclusion. A StatusInfo row with a log (a shadowed
+// npm copy) is a known fact and does not count.
+func itemIsOpenQuestion(it *model.Item) bool {
+	if it == nil {
+		return false
+	}
+	switch it.Status {
+	case model.StatusError, model.StatusUnverified:
+		return true
+	case model.StatusInfo:
+		return it.Log == ""
+	default:
+		return false
+	}
 }
 
 func printUpdateSummary(s *model.SourceSummary) (outdated, needsSudo, manualOnly int) {
@@ -67,7 +84,32 @@ func printUpdateSummary(s *model.SourceSummary) (outdated, needsSudo, manualOnly
 		outdated++
 		countScanHints(it, &needsSudo, &manualOnly)
 	}
+	// Errors and unverified probes in the same source must stay visible when
+	// outdated items are present. Use the item name so a legacy prefix is
+	// distinguishable from the source label.
+	printProbeItems(s)
+	// Shadowed legacy-prefix copies ride along as inventory notes: they are
+	// never update targets, but the drift they represent is worth seeing.
+	for _, it := range s.Items {
+		if it != nil && it.Status == model.StatusInfo && it.Log != "" {
+			fmt.Printf("    ℹ %s %s (%s)\n", it.Name, it.CurrentVer, it.Log)
+		}
+	}
 	return outdated, needsSudo, manualOnly
+}
+
+func printProbeItems(s *model.SourceSummary) {
+	for _, it := range s.Items {
+		if it == nil {
+			continue
+		}
+		switch it.Status {
+		case model.StatusError:
+			fmt.Printf("  ✘ %s %s: %s\n", s.Icon, it.Name, probeLine(it))
+		case model.StatusUnverified:
+			fmt.Printf("  ? %s %s: %s\n", s.Icon, it.Name, probeLine(it))
+		}
+	}
 }
 
 func printSourceTruth(s *model.SourceSummary) {
@@ -81,6 +123,10 @@ func printSourceTruth(s *model.SourceSummary) {
 		case model.StatusUnverified:
 			fmt.Printf("  ? %s %s: %s\n", s.Icon, s.Label, probeLine(it))
 		case model.StatusInfo:
+			if it.Log != "" {
+				fmt.Printf("  ℹ %s %s: %s (%s)\n", s.Icon, it.Name, it.CurrentVer, it.Log)
+				continue
+			}
 			fmt.Printf("  ℹ %s %s: freshness not verified\n", s.Icon, it.Name)
 		}
 	}

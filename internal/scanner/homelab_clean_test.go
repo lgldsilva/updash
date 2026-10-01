@@ -212,6 +212,7 @@ func TestHomelabCleanSource_projectsBuilds_optIn(t *testing.T) {
 	it := findItem(items, "dev-cache:projects-builds")
 	if it == nil {
 		t.Fatalf("expected projects-builds item with opt-in, got %+v", items)
+		return // t.Fatalf exits the test; the return keeps nilness analysis honest
 	}
 	if it.Status != model.StatusCleanCandidate || it.PackageID != projects {
 		t.Fatalf("item=%+v", it)
@@ -247,6 +248,7 @@ func TestHomelabCleanSource_projectsBuilds_protectsRecentDescendants(t *testing.
 	it := findItem(items, "dev-cache:projects-builds")
 	if it == nil {
 		t.Fatalf("expected projects-builds item (build dir), got %+v", items)
+		return // t.Fatalf exits the test; the return keeps nilness analysis honest
 	}
 	if it.RemoveCount != 1 {
 		t.Fatalf("RemoveCount=%d, want 1 (build only; node_modules protected)", it.RemoveCount)
@@ -269,6 +271,7 @@ func TestHomelabCleanSource_projectsBuilds_rejectsHomeAsRoot(t *testing.T) {
 	it := findItem(items, "dev-cache:projects-builds")
 	if it == nil {
 		t.Fatalf("unsafe root must surface as an unverified item, got %+v", items)
+		return // t.Fatalf exits the test; the return keeps nilness analysis honest
 	}
 	if it.Status != model.StatusUnverified {
 		t.Fatalf("unsafe root must not produce an affirmative candidate: %+v", it)

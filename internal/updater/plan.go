@@ -196,18 +196,7 @@ func planUpdateCommands(ctx context.Context, cat model.Category, items []*model.
 		if len(updatable) == 0 {
 			return []CommandPlan{manualPlan(npmManagedElsewhereNote)}, nil
 		}
-		args := npmGlobalUpdateArgs(updatable)
-		if len(args) == 0 {
-			return nil, fmt.Errorf("npm update requires at least one package name")
-		}
-		if allow := npmAllowScriptsFlag(updatable); allow != "" {
-			args = append(args, allow)
-		}
-		elevated, err := npmGlobalElevation(ctx)
-		if err != nil {
-			return nil, err
-		}
-		return []CommandPlan{{Name: npmCommand, Args: args, Scope: CommandScopeExact, Elevated: elevated}}, nil
+		return npmPrefixGroupPlans(ctx, updatable)
 	case model.CatPnpm:
 		return exactPlans("pnpm", []string{commandUpdate, flagGlobal}, items)
 	case model.CatBun:
@@ -323,13 +312,19 @@ func packageIDsOrNames(items []*model.Item) ([]string, error) {
 func agentPlans(items []*model.Item) ([]CommandPlan, error) {
 	plans := make([]CommandPlan, 0, len(items))
 	for _, item := range items {
-		cmd := scanner.AgentUpdateCommand(item.Name)
 		// OpenCode resolves its own install method and prompts when it fails;
 		// updash decides the method (or the npm fallback) up front instead.
 		if item.Name == agentOpenCode {
-			plans = append(plans, openCodeUpgradePlan(cmd))
+			plans = append(plans, openCodeUpgradePlan(scanner.AgentUpdateCommand(item.Name)))
 			continue
 		}
+		// Crush lives in whatever npm prefix owns the PATH binary; updating it
+		// there avoids installing a shadowing second copy into the ambient one.
+		if item.Name == agentCrush {
+			plans = append(plans, crushUpgradePlan())
+			continue
+		}
+		cmd := scanner.AgentUpdateCommand(item.Name)
 		if len(cmd) > 0 {
 			plans = append(plans, CommandPlan{Name: cmd[0], Args: cmd[1:], Scope: CommandScopeExact})
 			continue
@@ -374,6 +369,18 @@ func PlansRequireWholeCategory(plans []CommandPlan) bool {
 func PlansRequireElevation(plans []CommandPlan) bool {
 	for _, plan := range plans {
 		if plan.Elevated {
+			return true
+		}
+	}
+	return false
+}
+
+// PlansHaveUnelevatedWork reports whether declining elevation can still leave
+// a real command to run. Manual plans are not work. npm uses this so a
+// user-owned prefix is updated when a /usr prefix in the same batch needs sudo.
+func PlansHaveUnelevatedWork(plans []CommandPlan) bool {
+	for _, plan := range plans {
+		if plan.Scope != CommandScopeManual && !plan.Elevated {
 			return true
 		}
 	}

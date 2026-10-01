@@ -33,6 +33,12 @@ func TestApplyAgentOutdated(t *testing.T) {
 
 	ApplyAgentOutdated(nil, "1")
 	ApplyAgentOutdated(it, "")
+
+	unverified := &model.Item{Name: "MimoCode", CurrentVer: "installed", Status: model.StatusUnverified, Error: "probe failed"}
+	ApplyAgentOutdated(unverified, "0.1.15")
+	if unverified.Status != model.StatusUnverified || unverified.AvailableVer != "" || unverified.Error != "probe failed" {
+		t.Fatalf("unverified item rewritten: %+v", unverified)
+	}
 }
 
 func TestNormalizeAgentVer(t *testing.T) {

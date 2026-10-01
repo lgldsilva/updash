@@ -5,7 +5,12 @@ import (
 	"time"
 )
 
-const agentProbeTimeout = 5 * time.Second
+// agentProbeTimeout is the budget for a local `--version` probe. Node-based
+// CLIs cold-start in 1–3s on an idle machine, but RunAll fires every source
+// concurrently — on a busy homelab (network-mounted homes, parallel sources)
+// that contention alone pushes a normally-2s probe past 5s, which reads as
+// "verification failed" and flags a healthy agent unverified.
+const agentProbeTimeout = 10 * time.Second
 
 // registryLatestTimeout is the budget for registry lookups (`npm view <pkg>
 // version`, or a custom latest command). Unlike a local --version probe, these

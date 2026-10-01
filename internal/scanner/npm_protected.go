@@ -15,6 +15,10 @@ func ProtectedNpmPackages() map[string]struct{} {
 	return map[string]struct{}{
 		"opencode-ai":      {},
 		"@opencode-ai/cli": {},
+		// Crush's agent item is its single update owner: the planner targets
+		// the npm prefix that actually owns the binary, which the generic
+		// `npm update -g` batch cannot know.
+		"@charmland/crush": {},
 	}
 }
 
