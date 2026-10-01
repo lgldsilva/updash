@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"os/exec"
+	"path/filepath"
 
 	"github.com/lgldsilva/updash/internal/elevate"
 )
@@ -23,6 +24,11 @@ var npmPrefixRunner = func(ctx context.Context) ([]byte, error) {
 
 // lookPath resolves a binary on PATH. Variable so tests can stub it.
 var lookPath = exec.LookPath
+
+// evalSymlinks resolves a path to its target. Variable so tests can stub
+// prefix resolution (the Crush planner maps the PATH binary back to the npm
+// prefix that owns it).
+var evalSymlinks = filepath.EvalSymlinks
 
 // runUpdateCmd is the subprocess primitive for the update path: it builds the
 // command, wires buffers (or streams to the terminal when Verbose/Interactive),

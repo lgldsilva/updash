@@ -111,6 +111,21 @@ func executePreparedPlans(ctx context.Context, items []*model.Item, plans []Comm
 }
 
 func executePreparedNpm(ctx context.Context, items []*model.Item, plans []CommandPlan, opts Options) []*Result {
+	return runPreparedNpm(ctx, items, plans, opts, "")
+}
+
+// ExecuteNpmSkippingElevated runs a prepared npm batch. When reason is
+// non-empty, elevated prefix groups are skipped (their results start with
+// "⊘ ") and every other group still runs. An empty reason runs every plan.
+// Protected packages are marked success before either path.
+func ExecuteNpmSkippingElevated(ctx context.Context, batch *PreparedUpdateBatch, opts Options, reason string) []*Result {
+	if batch == nil || len(batch.items) == 0 {
+		return nil
+	}
+	return runPreparedNpm(ctx, batch.items, batch.plans, opts, reason)
+}
+
+func runPreparedNpm(ctx context.Context, items []*model.Item, plans []CommandPlan, opts Options, skipElevatedReason string) []*Result {
 	updatable, protected := partitionNpmItems(items)
 	results := make([]*Result, 0, len(items))
 	for _, item := range protected {
@@ -120,10 +135,32 @@ func executePreparedNpm(ctx context.Context, items []*model.Item, plans []Comman
 	if len(updatable) == 0 {
 		return results
 	}
-	if len(plans) != 1 {
+	// Plans and groups are zipped in groupNpmByPrefix order: one command per
+	// prefix, each result pinned back to the items it targeted.
+	groups := groupNpmByPrefix(updatable)
+	if len(plans) != len(groups) {
 		return append(results, failedBatch(updatable, fmt.Errorf("invalid prepared npm plan"))...)
 	}
-	return append(results, batchMarkAll(updatable, runCommandPlan(ctx, updatable[0], plans[0], opts))...)
+	for i, group := range groups {
+		if skipElevatedReason != "" && plans[i].Elevated {
+			results = append(results, skippedElevatedResults(group, skipElevatedReason)...)
+			continue
+		}
+		results = append(results, batchMarkAll(group, runCommandPlan(ctx, group[0], plans[i], opts))...)
+	}
+	return results
+}
+
+func skippedElevatedResults(items []*model.Item, reason string) []*Result {
+	msg := "⊘ " + reason
+	results := make([]*Result, len(items))
+	for i, it := range items {
+		if it != nil {
+			it.Status = model.StatusOutdated
+		}
+		results[i] = &Result{Item: it, Error: msg}
+	}
+	return results
 }
 
 func executePreparedApt(ctx context.Context, items []*model.Item, plans []CommandPlan, opts Options) []*Result {
@@ -581,7 +618,7 @@ func scoopPackageNames(items []*model.Item) []string {
 }
 
 // npmManagedElsewhereNote explains why a protected npm item is skipped here.
-const npmManagedElsewhereNote = "managed by opencode upgrade (single owner)"
+const npmManagedElsewhereNote = "managed by its agent updater (single owner)"
 
 func batchNpmUpgrade(ctx context.Context, items []*model.Item, opts Options) []*Result {
 	for _, it := range items {
@@ -599,14 +636,18 @@ func batchNpmUpgrade(ctx context.Context, items []*model.Item, opts Options) []*
 	if len(updatable) == 0 {
 		return results
 	}
+	groups := groupNpmByPrefix(updatable)
 	plans, err := planUpdateCommands(ctx, model.CatNpm, updatable)
-	if err != nil || len(plans) != 1 {
-		if err == nil {
-			err = fmt.Errorf("invalid npm update plan")
-		}
+	if err != nil {
 		return append(results, failedBatch(updatable, err)...)
 	}
-	return append(results, batchMarkAll(updatable, runCommandPlan(ctx, updatable[0], plans[0], opts))...)
+	if len(plans) != len(groups) {
+		return append(results, failedBatch(updatable, fmt.Errorf("invalid npm update plan"))...)
+	}
+	for i, group := range groups {
+		results = append(results, batchMarkAll(group, runCommandPlan(ctx, group[0], plans[i], opts))...)
+	}
+	return results
 }
 
 // partitionNpmItems splits a batch into packages the generic npm update may
@@ -623,26 +664,6 @@ func partitionNpmItems(items []*model.Item) (updatable, protected []*model.Item)
 		}
 	}
 	return updatable, protected
-}
-
-// npmGlobalUpdateArgs builds the explicit package list for `npm update -g`:
-// only the non-protected, deduplicated names. Targeting names instead of a bare
-// `npm update -g` is what keeps protected packages out and matches the
-// per-package model used by brew. Pure (no I/O).
-func npmGlobalUpdateArgs(items []*model.Item) []string {
-	seen := make(map[string]bool, len(items))
-	names := make([]string, 0, len(items))
-	for _, it := range items {
-		if it == nil || it.Name == "" || seen[it.Name] {
-			continue
-		}
-		seen[it.Name] = true
-		names = append(names, it.Name)
-	}
-	if len(names) == 0 {
-		return nil
-	}
-	return append([]string{commandUpdate, flagGlobal}, names...)
 }
 
 // npmUpdateCmd builds the global npm update command for the given (already

@@ -94,6 +94,7 @@ func (s Status) String() string {
 type Item struct {
 	Name         string   // display name (e.g., "btop", "OpenCode")
 	PackageID    string   // source-specific ID (e.g. MAS adam ID)
+	Prefix       string   // npm global prefix when the item lives outside the default one ("" = default)
 	Category     Category // group
 	CurrentVer   string   // installed version ("" if N/A)
 	AvailableVer string   // version available ("" if up to date)

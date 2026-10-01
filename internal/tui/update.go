@@ -717,38 +717,61 @@ func runUpdateGroup(env workerEnv, group *preparedUpdateGroup, done, total int, 
 		Items:    itemIdentities(items),
 	})
 
-	sess, results, skipped := tryMASElevation(env, group, program)
-	if skipped {
-		program.Send(UpdateBatchDoneMsg{Generation: env.generation, Results: results, Done: done + len(items), Total: total, Source: group.source, Items: itemIdentities(items)})
-		return 0, len(items), len(items)
+	sess, elevErr := tryMASElevation(env, group, program)
+	if elevErr != nil {
+		results := resultsAfterElevationDenied(env, group, elevErr, program)
+		ok, fail = countResults(results)
+		program.Send(UpdateBatchDoneMsg{Generation: env.generation, Results: results, Done: done + len(results), Total: total, Source: group.source, Items: itemIdentities(items)})
+		return ok, fail, len(results)
 	}
 
-	results = execUpdateBatch(env.withSession(sess), group, program)
+	results := execUpdateBatch(env.withSession(sess), group, program)
 	ok, fail = countResults(results)
 	program.Send(UpdateBatchDoneMsg{Generation: env.generation, Results: results, Done: done + len(results), Total: total, Source: group.source, Items: itemIdentities(items)})
 	return ok, fail, len(results)
 }
 
-// tryMASElevation blocks (on the worker) until sudo is ready for the MAS
-// batch, prompting via ElevRequiredMsg when needed. The returned session
-// must back the batch context.
-func tryMASElevation(env workerEnv, group *preparedUpdateGroup, program *tea.Program) (sess *elevate.Session, results []*updater.Result, skipped bool) {
-	items := group.batch.Items()
-	requiresElevation := plansRequireElevation(group.batch.Plans())
-	if !requiresElevation {
-		return env.sess, nil, false
+// tryMASElevation blocks (on the worker) until sudo is ready for the batch,
+// prompting via ElevRequiredMsg when needed. The returned session must back
+// the batch context. A denial is returned as an error and does not mutate
+// items; the caller decides which plans can still run.
+func tryMASElevation(env workerEnv, group *preparedUpdateGroup, program *tea.Program) (*elevate.Session, error) {
+	if !plansRequireElevation(group.batch.Plans()) {
+		return env.sess, nil
 	}
 	waitCtx, cancel := context.WithTimeout(env.ctx, updater.BatchTimeout(group.category))
 	defer cancel()
-	var err error
-	sess, err = waitForElevation(waitCtx, program, env.generation, group.label()+" updates need your administrator password", env.sess)
-	if err != nil {
-		for _, it := range items {
-			it.Status = model.StatusError
-		}
-		return nil, masElevFailResults(items, err), true
+	return waitForElevation(waitCtx, program, env.generation, group.label()+" updates need your administrator password", env.sess)
+}
+
+// resultsAfterElevationDenied skips only the elevated npm prefix groups when
+// the rest of the batch can run without sudo. Every other batch fails closed
+// the way a whole-category elevation denial used to.
+func resultsAfterElevationDenied(env workerEnv, group *preparedUpdateGroup, elevErr error, program *tea.Program) []*updater.Result {
+	if batch, ok := npmBatchSkippingElevated(group); ok {
+		opts := updater.SilentOptions()
+		log := newOutputLog(program, env.generation)
+		opts.Output = log
+		results := updater.ExecuteNpmSkippingElevated(env.ctx, batch, opts, elevErr.Error())
+		log.Flush()
+		return results
 	}
-	return sess, nil, false
+	items := group.batch.Items()
+	for _, it := range items {
+		it.Status = model.StatusError
+	}
+	return masElevFailResults(items, elevErr)
+}
+
+func npmBatchSkippingElevated(group *preparedUpdateGroup) (*updater.PreparedUpdateBatch, bool) {
+	if group == nil || group.category != model.CatNpm {
+		return nil, false
+	}
+	batch, ok := group.batch.(*updater.PreparedUpdateBatch)
+	if !ok || !updater.PlansHaveUnelevatedWork(group.batch.Plans()) {
+		return nil, false
+	}
+	return batch, true
 }
 
 func execUpdateBatch(env workerEnv, group *preparedUpdateGroup, program *tea.Program) []*updater.Result {
@@ -948,7 +971,7 @@ func sourceIsNonAffirmative(summaries []*model.SourceSummary, source SourceIdent
 			return true
 		}
 		for _, item := range summary.Items {
-			if item.Status == model.StatusInfo {
+			if item != nil && item.Status == model.StatusInfo && item.Log == "" {
 				return true
 			}
 		}

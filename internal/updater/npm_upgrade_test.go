@@ -16,39 +16,49 @@ func TestPartitionNpmItems(t *testing.T) {
 		{Name: "left-pad", Category: model.CatNpm},
 		{Name: "opencode-ai", Category: model.CatNpm},
 		{Name: "@opencode-ai/cli", Category: model.CatNpm},
+		{Name: "@charmland/crush", Category: model.CatNpm},
 		{Name: "react", Category: model.CatNpm},
 	}
 	updatable, protected := partitionNpmItems(items)
-	if len(updatable) != 2 || len(protected) != 2 {
-		t.Fatalf("split = %d updatable / %d protected, want 2/2", len(updatable), len(protected))
+	if len(updatable) != 2 || len(protected) != 3 {
+		t.Fatalf("split = %d updatable / %d protected, want 2/3", len(updatable), len(protected))
 	}
 	for _, it := range protected {
-		if it.Name != "opencode-ai" && it.Name != "@opencode-ai/cli" {
-			t.Errorf("protected must only hold opencode packages, got %q", it.Name)
+		if it.Name == "left-pad" || it.Name == "react" {
+			t.Errorf("non-protected package %q leaked into protected list", it.Name)
 		}
 	}
 }
 
-func TestNpmGlobalUpdateArgs_BuildsAndDedups(t *testing.T) {
+func TestNpmUpdateArgs_BuildsAndDedups(t *testing.T) {
 	items := []*model.Item{
 		{Name: "left-pad"},
 		{Name: "left-pad"}, // duplicate
 		{Name: "react"},
 		{Name: ""}, // ignored
 	}
-	got := npmGlobalUpdateArgs(items)
+	got := npmUpdateArgs("", items)
 	want := []string{commandUpdate, flagGlobal, "left-pad", "react"}
 	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("npmGlobalUpdateArgs = %v, want %v", got, want)
+		t.Fatalf("npmUpdateArgs = %v, want %v", got, want)
 	}
 }
 
-func TestNpmGlobalUpdateArgs_EmptyNeverBuildsBareGlobalUpdate(t *testing.T) {
-	if got := npmGlobalUpdateArgs(nil); len(got) != 0 {
-		t.Fatalf("npmGlobalUpdateArgs(nil) = %v, want no command", got)
+func TestNpmUpdateArgs_PinsExplicitPrefix(t *testing.T) {
+	items := []*model.Item{{Name: "left-pad", Prefix: "/home/u/.npm-global"}}
+	got := npmUpdateArgs("/home/u/.npm-global", items)
+	want := []string{commandUpdate, flagGlobal, flagPrefix, "/home/u/.npm-global", "left-pad"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("npmUpdateArgs = %v, want %v", got, want)
 	}
-	if got := npmGlobalUpdateArgs([]*model.Item{{Name: ""}}); len(got) != 0 {
-		t.Fatalf("npmGlobalUpdateArgs(empty name) = %v, want no command", got)
+}
+
+func TestNpmUpdateArgs_EmptyNeverBuildsBareGlobalUpdate(t *testing.T) {
+	if got := npmUpdateArgs("", nil); len(got) != 0 {
+		t.Fatalf("npmUpdateArgs(nil) = %v, want no command", got)
+	}
+	if got := npmUpdateArgs("", []*model.Item{{Name: ""}}); len(got) != 0 {
+		t.Fatalf("npmUpdateArgs(empty name) = %v, want no command", got)
 	}
 }
 
@@ -61,7 +71,7 @@ func TestNpmPipeline_ExcludesProtectedFromArgs(t *testing.T) {
 		{Name: "@opencode-ai/cli"},
 	}
 	updatable, _ := partitionNpmItems(items)
-	args := npmGlobalUpdateArgs(updatable)
+	args := npmUpdateArgs("", updatable)
 	joined := strings.Join(args, " ")
 	if !strings.Contains(joined, "left-pad") || !strings.Contains(joined, "react") {
 		t.Errorf("non-protected names missing from args: %v", args)

@@ -47,6 +47,56 @@ func TestPrintSourceTruthWithoutCauseKeepsLegacyLine(t *testing.T) {
 	}
 }
 
+func TestPrintUpdateSummaryShowsProbeBesideOutdated(t *testing.T) {
+	s := &model.SourceSummary{
+		Label:    "npm (global)",
+		Icon:     "⬡",
+		Outdated: 1,
+		Items: []*model.Item{
+			{Name: "left-pad", Status: model.StatusOutdated, CurrentVer: "1.0.0", AvailableVer: "2.0.0"},
+			{Name: "npm prefix /home/u/.npm-global", Status: model.StatusUnverified, CurrentVer: "error", Error: "timeout"},
+			{Name: "npm", Status: model.StatusError, CurrentVer: "error", Error: "ls failed"},
+			{Name: "shadowed", Status: model.StatusInfo, CurrentVer: "1.0.0", Log: "shadowed by active npm prefix copy"},
+		},
+	}
+	out := captureStdout(t, func() { printUpdateSummary(s) })
+	if !strings.Contains(out, "? ⬡ npm prefix /home/u/.npm-global: error — timeout") {
+		t.Fatalf("unverified prefix missing:\n%s", out)
+	}
+	if !strings.Contains(out, "✘ ⬡ npm: error — ls failed") {
+		t.Fatalf("error item missing:\n%s", out)
+	}
+	if !strings.Contains(out, "shadowed by active npm prefix copy") {
+		t.Fatalf("shadow note missing:\n%s", out)
+	}
+	printProbeItems(&model.SourceSummary{Items: []*model.Item{nil, {Status: model.StatusOK}}})
+}
+
+func TestShadowNoteIsAffirmative(t *testing.T) {
+	shadow := []*model.SourceSummary{{Items: []*model.Item{{
+		Name: "pkg", Status: model.StatusInfo, CurrentVer: "1.0.0", Log: "shadowed by active npm prefix copy",
+	}}}}
+	if hasNonAffirmative(shadow) {
+		t.Fatal("shadow note must not count as non-affirmative")
+	}
+	open := []*model.SourceSummary{{Items: []*model.Item{
+		nil,
+		{Name: "agent", Status: model.StatusInfo},
+		{Name: "ok", Status: model.StatusOK},
+	}}}
+	if !hasNonAffirmative(open) {
+		t.Fatal("info without a log is still non-affirmative")
+	}
+	out := captureStdout(t, func() {
+		if _, _, err := emptyUpdateOutcome(shadow, 0); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if strings.Contains(out, "not affirmatively verified") || !strings.Contains(out, "✓ Nothing to update") {
+		t.Fatalf("shadow note tripped the noop warning:\n%s", out)
+	}
+}
+
 func TestCheckJSONIncludesErrorCause(t *testing.T) {
 	updates := []*model.SourceSummary{{
 		Category: model.CatPnpm,

@@ -288,13 +288,22 @@ func (s *State) TotalScanInconclusive() int {
 // TotalScanNonAffirmative also includes informational sources: they are not
 // errors, but they cannot support an "all up to date" conclusion.
 func (s *State) TotalScanNonAffirmative() int {
-	return s.TotalScanInconclusive() + countSummariesStatus(s.Summaries, model.StatusInfo) + countSummariesStatus(s.CleanItems, model.StatusInfo)
+	return s.TotalScanInconclusive() + countOpenInfo(s.Summaries) + countOpenInfo(s.CleanItems)
 }
 
-func countSummariesStatus(summaries []*model.SourceSummary, want model.Status) int {
+// countOpenInfo counts StatusInfo rows that never reached a conclusion.
+// A non-empty Log (a shadowed npm copy) is a known fact.
+func countOpenInfo(summaries []*model.SourceSummary) int {
 	var n int
 	for _, summary := range summaries {
-		n += countStatus(summary.Items, want)
+		if summary == nil {
+			continue
+		}
+		for _, it := range summary.Items {
+			if it != nil && it.Status == model.StatusInfo && it.Log == "" {
+				n++
+			}
+		}
 	}
 	return n
 }

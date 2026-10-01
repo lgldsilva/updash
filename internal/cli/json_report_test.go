@@ -96,6 +96,29 @@ func TestWriteCheckJSON_and_Format(t *testing.T) {
 	}
 }
 
+// Legacy-prefix npm items carry their prefix into the machine-readable report
+// (omitempty keeps the field off default-prefix items).
+func TestCheckReport_NpmPrefixField(t *testing.T) {
+	updates := []*model.SourceSummary{
+		{Category: model.CatNpm, Label: "npm (global)", Items: []*model.Item{
+			{Name: "legacy-pkg", Category: model.CatNpm, Prefix: "/home/u/.npm-global",
+				CurrentVer: "1.0.0", AvailableVer: "2.0.0", Status: model.StatusOutdated},
+			{Name: "core-pkg", Category: model.CatNpm,
+				CurrentVer: "1.0.0", AvailableVer: "2.0.0", Status: model.StatusOutdated},
+		}},
+	}
+	s, err := FormatCheckJSON(updates, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(s, `"prefix": "/home/u/.npm-global"`) {
+		t.Fatalf("prefix missing from json: %s", s)
+	}
+	if strings.Count(s, `"prefix"`) != 1 {
+		t.Fatalf("prefix must be omitted for default-prefix items: %s", s)
+	}
+}
+
 func TestExitCodeForCheck(t *testing.T) {
 	if ExitCodeForCheck(Config{}, 5, 1) != 0 {
 		t.Fatal("non-strict should be 0")

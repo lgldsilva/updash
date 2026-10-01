@@ -35,6 +35,7 @@ type ReportItem struct {
 	Reclaimable string `json:"reclaimable,omitempty"`
 	KeepPolicy  string `json:"keep_policy,omitempty"`
 	PackageID   string `json:"package_id,omitempty"`
+	Prefix      string `json:"prefix,omitempty"` // npm prefix for non-default-prefix items
 	RemoveCount int    `json:"remove_count,omitempty"`
 }
 
@@ -178,6 +179,7 @@ func itemToReport(it *model.Item) ReportItem {
 		Reclaimable: it.Reclaimable,
 		KeepPolicy:  it.KeepPolicy,
 		PackageID:   it.PackageID,
+		Prefix:      it.Prefix,
 		RemoveCount: it.RemoveCount,
 	}
 }

@@ -433,6 +433,54 @@ func TestRunCategoryUpdateSection_skipElevated(t *testing.T) {
 	}
 }
 
+func TestCategoryResultsAfterElevation_runsWhenReady(t *testing.T) {
+	restoreHooks(t)
+	called := false
+	executePreparedBatch = func(context.Context, *updater.PreparedUpdateBatch, updater.Options) []*updater.Result {
+		called = true
+		return []*updater.Result{{Item: &model.Item{Name: "curl"}, Success: true}}
+	}
+	res := categoryResultsAfterElevation(context.Background(), context.Background(), model.CatApt, &updater.PreparedUpdateBatch{}, nil, updater.Options{}, false, "")
+	if !called || len(res) != 1 || !res[0].Success {
+		t.Fatalf("called=%v res=%v", called, res)
+	}
+}
+
+func TestRunCategoryUpdateSection_npmSkipsOnlyElevatedGroups(t *testing.T) {
+	restoreHooks(t)
+	var sess *elevate.Session
+	items := []*model.Item{
+		{Name: "user-pkg", Prefix: "/home/u/.npm-global", Category: model.CatNpm, Status: model.StatusOutdated},
+		{Name: "sys-pkg", Prefix: "/usr", Category: model.CatNpm, Status: model.StatusOutdated},
+	}
+	batch, err := updater.PrepareUpdateBatch(context.Background(), model.CatNpm, items)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var gotReason string
+	executeNpmSkippingElevated = func(_ context.Context, got *updater.PreparedUpdateBatch, _ updater.Options, reason string) []*updater.Result {
+		if got != batch {
+			t.Fatal("npm skip path received a different batch")
+		}
+		gotReason = reason
+		return []*updater.Result{
+			{Item: items[0], Success: true},
+			{Item: items[1], Success: false, Error: "⊘ " + reason},
+		}
+	}
+	env := updateBatchEnv{
+		plat:        model.PlatformInfo{OS: "linux"},
+		summaries:   []*model.SourceSummary{{Category: model.CatNpm, Icon: "⬡", Label: "npm (global)"}},
+		cfg:         Config{SkipPassword: true},
+		elevSession: &sess,
+		prepared:    map[model.Category]*updater.PreparedUpdateBatch{model.CatNpm: batch},
+	}
+	ok, fail, skipped, res := runCategoryUpdateSection(context.Background(), env, model.CatNpm, items)
+	if ok != 1 || fail != 0 || skipped != 1 || len(res) != 2 || gotReason == "" {
+		t.Fatalf("ok=%d fail=%d skipped=%d reason=%q res=%d", ok, fail, skipped, gotReason, len(res))
+	}
+}
+
 func TestRunCategoryUpdateSection_brewPasswordSkip(t *testing.T) {
 	var sess *elevate.Session
 	env := updateBatchEnv{

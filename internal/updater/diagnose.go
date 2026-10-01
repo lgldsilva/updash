@@ -119,9 +119,24 @@ func suggestAgentCommand(name string) string {
 		return "gemini update"
 	case strings.Contains(name, "Codex"):
 		return "npm install -g --allow-scripts=@openai/codex @openai/codex@latest"
+	case strings.Contains(name, "MimoCode"):
+		return "mimo upgrade"
+	case strings.Contains(name, "Crush"):
+		return suggestCrushCommand()
 	case strings.Contains(name, "Copilot"):
-		return "copilot update"
+		return "npm install -g --allow-scripts=@github/copilot @github/copilot@latest"
 	default:
 		return ""
 	}
+}
+
+// suggestCrushCommand repeats the prefix-aware plan. A layout that is not
+// npm-managed stays on the manual note instead of an unscoped npm install,
+// which would create a second copy in the ambient prefix.
+func suggestCrushCommand() string {
+	plan := crushUpgradePlan()
+	if plan.Scope != CommandScopeExact {
+		return plan.Manual
+	}
+	return strings.TrimSpace(plan.Name + " " + strings.Join(plan.Args, " "))
 }

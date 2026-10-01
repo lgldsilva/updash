@@ -113,6 +113,7 @@ func TestParseCargoInstallUpdateLine(t *testing.T) {
 			}
 			if got == nil {
 				t.Fatalf("expected item, got nil")
+				return // t.Fatalf exits the test; the return keeps nilness analysis honest
 			}
 			if got.Name != tt.want.Name || got.CurrentVer != tt.want.CurrentVer ||
 				got.AvailableVer != tt.want.AvailableVer || got.Status != tt.want.Status {

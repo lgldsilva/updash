@@ -9,7 +9,7 @@ import (
 
 func TestProtectedNpmPackages(t *testing.T) {
 	protected := ProtectedNpmPackages()
-	for _, name := range []string{"opencode-ai", "@opencode-ai/cli"} {
+	for _, name := range []string{"opencode-ai", "@opencode-ai/cli", "@charmland/crush"} {
 		if _, ok := protected[name]; !ok {
 			t.Errorf("ProtectedNpmPackages() missing %q", name)
 		}
@@ -28,8 +28,16 @@ func TestProtectedNpmPackages(t *testing.T) {
 func TestNpmScan_DropsProtected(t *testing.T) {
 	enableMocks()
 	defer disableMocks()
+	withoutLegacyNpmPrefixes(t)
 
-	setMock("npm", []string{"outdated", "-g", "--json"}, `{
+	setMock("npm", []string{"ls", "-g", "--json", "--depth=0"}, `{
+		"dependencies": {
+			"opencode-ai": {"version": "1.18.0"},
+			"@opencode-ai/cli": {"version": "0.1.0"},
+			"left-pad": {"version": "1.0.0"}
+		}
+	}`, nil)
+	setMock("npm", []string{"outdated", "-g", "--json", "@opencode-ai/cli", "left-pad", "opencode-ai"}, `{
 		"opencode-ai": {"current":"1.18.0","wanted":"1.18.16","latest":"1.18.16"},
 		"@opencode-ai/cli": {"current":"0.1.0","wanted":"0.2.0","latest":"0.2.0"},
 		"left-pad": {"current":"1.0.0","wanted":"1.3.0","latest":"1.3.0"}

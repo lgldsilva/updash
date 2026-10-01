@@ -200,15 +200,18 @@ func TestMASScan_Empty(t *testing.T) {
 // --- NPM Scanner ---
 
 const npmOutdatedJSON = `{
-	"@charmland/crush": {"current": "0.79.1", "wanted": "0.84.1", "latest": "0.84.1"},
+	"left-pad": {"current": "1.0.0", "wanted": "1.3.0", "latest": "1.3.0"},
 	"npm": {"current": "11.17.0", "wanted": "12.0.1", "latest": "12.0.1"}
 }`
 
 func TestNpmScan_Outdated(t *testing.T) {
 	enableMocks()
 	defer disableMocks()
+	withoutLegacyNpmPrefixes(t)
 
-	setMock("npm", []string{"outdated", "-g", "--json"}, npmOutdatedJSON, nil)
+	setMock("npm", []string{"ls", "-g", "--json", "--depth=0"},
+		`{"dependencies":{"left-pad":{"version":"1.0.0"},"npm":{"version":"11.17.0"}}}`, nil)
+	setMock("npm", []string{"outdated", "-g", "--json", "left-pad", "npm"}, npmOutdatedJSON, nil)
 
 	src := &NpmSource{}
 	items, err := src.Scan(context.Background(), model.PlatformInfo{})
@@ -222,9 +225,9 @@ func TestNpmScan_Outdated(t *testing.T) {
 	// Map iteration order is random — look up by name
 	for _, it := range items {
 		switch it.Name {
-		case "@charmland/crush":
-			if it.AvailableVer != "0.84.1" {
-				t.Errorf("@charmland/crush version = %q, want %q", it.AvailableVer, "0.84.1")
+		case "left-pad":
+			if it.AvailableVer != "1.3.0" {
+				t.Errorf("left-pad version = %q, want %q", it.AvailableVer, "1.3.0")
 			}
 		case "npm":
 			if it.AvailableVer != "12.0.1" {
@@ -239,8 +242,9 @@ func TestNpmScan_Outdated(t *testing.T) {
 func TestNpmScan_Empty(t *testing.T) {
 	enableMocks()
 	defer disableMocks()
+	withoutLegacyNpmPrefixes(t)
 
-	setMock("npm", []string{"outdated", "-g", "--json"}, `{}`, nil)
+	setMock("npm", []string{"ls", "-g", "--json", "--depth=0"}, `{"dependencies":{}}`, nil)
 
 	src := &NpmSource{}
 	items, _ := src.Scan(context.Background(), model.PlatformInfo{})
@@ -1076,8 +1080,10 @@ func TestSDKMANScan_NoDirectory(t *testing.T) {
 func TestNpmScan_ParseError(t *testing.T) {
 	enableMocks()
 	defer disableMocks()
+	withoutLegacyNpmPrefixes(t)
 
-	setMock("npm", []string{"outdated", "-g", "--json"}, "not valid json", nil)
+	setMock("npm", []string{"ls", "-g", "--json", "--depth=0"}, `{"dependencies":{"left-pad":{"version":"1.0.0"}}}`, nil)
+	setMock("npm", []string{"outdated", "-g", "--json", "left-pad"}, "not valid json", nil)
 
 	src := &NpmSource{}
 	items, _ := src.Scan(context.Background(), model.PlatformInfo{})

@@ -2,9 +2,11 @@ package scanner
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"os/exec"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -69,20 +71,37 @@ type agentDef struct {
 	npmPackage string   // npm package name: drives registry latest lookup + npm-based update
 	updateCmd  []string // explicit upgrade command (required for auto mode without npmPackage)
 	latestCmd  []string // optional: command whose stdout holds the latest version
+	// latestJSONKey switches latestCmd parsing from generic semver extraction
+	// to reading a top-level JSON string field (e.g. grok update --check
+	// --json → "latestVersion").
+	latestJSONKey string
 }
 
 func agentCatalog() []agentDef {
 	return []agentDef{
 		{name: "Claude Code", binary: binClaude, verCmd: []string{binClaude, flagVersion}, mode: agentUpdateAuto, npmPackage: "@anthropic-ai/claude-code", updateCmd: []string{binClaude, cmdUpdate}},
 		{name: "OpenCode", binary: binOpenCode, verCmd: []string{binOpenCode, flagVersion}, mode: agentUpdateAuto, npmPackage: "opencode-ai", updateCmd: []string{binOpenCode, cmdUpgrade}},
-		{name: "Grok", binary: binGrok, verCmd: []string{binGrok, flagVersion}, mode: agentUpdateAuto, updateCmd: []string{binGrok, cmdUpdate}},
+		// Grok ships as a native binary updated by its own subcommand; its
+		// `update --check --json` probe is the freshness channel (no npm
+		// package exists to ask the registry about).
+		{name: "Grok", binary: binGrok, verCmd: []string{binGrok, flagVersion}, mode: agentUpdateAuto, updateCmd: []string{binGrok, cmdUpdate},
+			latestCmd: []string{binGrok, cmdUpdate, "--check", "--json"}, latestJSONKey: "latestVersion"},
 		{name: "Antigravity", binary: binAntigravity, verCmd: []string{binAntigravity, flagVersion}, mode: agentUpdateManual},
 		{name: "Agy", binary: "agy", verCmd: []string{"agy", flagVersion}, mode: agentUpdateManual},
-		{name: "MimoCode", binary: "mimo", verCmd: []string{"mimo", flagVersion}, mode: agentUpdateManual},
+		// MiMo Code (Xiaomi) distributes a native binary whose `mimo upgrade`
+		// self-updater mirrors the curl-installer layout; @mimo-ai/cli is the
+		// published package used only as the freshness source.
+		{name: "MimoCode", binary: "mimo", verCmd: []string{"mimo", flagVersion}, mode: agentUpdateAuto, npmPackage: "@mimo-ai/cli", updateCmd: []string{"mimo", cmdUpgrade}},
 		{name: "Codex", binary: "codex", verCmd: []string{"codex", flagVersion}, mode: agentUpdateAuto, npmPackage: "@openai/codex", updateCmd: npmGlobalInstallCmd("@openai/codex")},
 		{name: "Gemini CLI", binary: binGemini, verCmd: []string{binGemini, flagVersion}, mode: agentUpdateAuto, npmPackage: "@google/gemini-cli", updateCmd: []string{binGemini, cmdUpdate}},
-		{name: "Copilot CLI", binary: binCopilot, verCmd: []string{binCopilot, flagVersion}, mode: agentUpdateAuto, updateCmd: []string{binCopilot, cmdUpdate}},
-		{name: "Crush", binary: "crush", verCmd: []string{"crush", flagVersion}, mode: agentUpdateManual},
+		// Copilot CLI rides the same npm channel as the generic @github/copilot
+		// item (no duplicate updater): npm metadata flags staleness, the
+		// npm-managed fallback installs the new version.
+		{name: "Copilot CLI", binary: binCopilot, verCmd: []string{binCopilot, flagVersion}, mode: agentUpdateAuto, npmPackage: "@github/copilot"},
+		// Crush is npm-published (@charmland/crush) but frequently installed
+		// into a non-default prefix; the updater resolves the owning prefix at
+		// plan time (agentPlans hook).
+		{name: "Crush", binary: "crush", verCmd: []string{"crush", flagVersion}, mode: agentUpdateAuto, npmPackage: "@charmland/crush"},
 		{name: "Cursor", binary: binCursor, verCmd: []string{binCursor, flagVersion}, mode: agentUpdateManual},
 		{name: binPi, binary: binPi, verCmd: []string{binPi, flagVersion}, mode: agentUpdateAuto, npmPackage: "@earendil-works/pi-coding-agent", updateCmd: npmGlobalInstallCmd("@earendil-works/pi-coding-agent")},
 		{name: "Qwen Code", binary: "qwen", verCmd: []string{"qwen", flagVersion}, mode: agentUpdateAuto, npmPackage: "@qwen-code/qwen-code", updateCmd: npmGlobalInstallCmd("@qwen-code/qwen-code")},
@@ -153,20 +172,17 @@ func (s *AgentSource) Scan(ctx context.Context, plat model.PlatformInfo) ([]*mod
 	}
 	items := probeAgentsConcurrently(ctx, plat, installed)
 	if plat.HasNpm {
-		// `npm ls -g` runs concurrently with `npm outdated -g`: both are
-		// independent npm invocations with ~1s cold start each.
-		var (
-			wg        sync.WaitGroup
-			npmGlobal map[string]bool
-		)
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			npmGlobal = npmInstalledPackages(ctx)
-		}()
-		applyNpmOutdatedToAgents(ctx, items, catalog)
-		wg.Wait()
-		resolveRegistryLatestFrom(ctx, items, catalog, npmGlobal)
+		installedVersions := npmInstalledVersions(ctx)
+		if err := applyNpmOutdatedToAgents(ctx, items, catalog, installedVersions); err != nil {
+			// A failed or unreadable `npm outdated` is not "nothing is
+			// outdated". Leave managed agents unverified instead of OK.
+			markNpmManagedUnverified(items, installedVersions, err)
+		} else {
+			// npm omits up-to-date packages from `npm outdated`, so a managed
+			// agent absent from a successful merge is affirmatively fresh.
+			markNpmManagedFresh(items, installedVersions)
+		}
+		resolveRegistryLatestFrom(ctx, items, catalog, nameSet(installedVersions))
 	}
 	return items, nil
 }
@@ -174,7 +190,7 @@ func (s *AgentSource) Scan(ctx context.Context, plat model.PlatformInfo) ([]*mod
 // probeAgentsConcurrently probes every installed agent's version in
 // parallel. Each probe already has its own budget (agentProbeTimeout); a
 // serial loop over ~10 CLIs — several of them Node-based with a slow cold
-// start — sums well past the 45s per-source scan timeout on modest
+// start — sums well past the 90s per-source scan timeout on modest
 // hardware. Probing is independent per tool, so there's nothing to
 // serialize for.
 func probeAgentsConcurrently(ctx context.Context, plat model.PlatformInfo, installed []agentDef) []*model.Item {
@@ -222,41 +238,134 @@ func probeAgentItem(ctx context.Context, plat model.PlatformInfo, a agentDef) *m
 	return it
 }
 
-// npmInstalledPackages lists globally npm-installed package names (depth 0).
-// stdout only: npm ls --json output must not be corrupted by stderr warnings
-// (see the execCombined doc in runner.go).
-func npmInstalledPackages(ctx context.Context) map[string]bool {
+// npmInstalledVersions maps the globally npm-installed package names to their
+// installed versions (depth 0). stdout only: npm ls --json output must not be
+// corrupted by stderr warnings (see the execCombined doc in runner.go).
+func npmInstalledVersions(ctx context.Context) map[string]string {
 	out, err := execCommand(ctx, binNpm, "ls", flagGlobal, "--json", "--depth=0")
-	installed := ParseNpmLsGlobal(out)
-	if err != nil && len(installed) == 0 {
+	versions := ParseNpmLsGlobalVersions(out)
+	if err != nil && len(versions) == 0 {
 		return nil
 	}
-	return installed
+	return versions
 }
 
-func applyNpmOutdatedToAgents(ctx context.Context, items []*model.Item, catalog []agentDef) {
-	out, err := execCommand(ctx, binNpm, "outdated", flagGlobal, "--json")
-	if err != nil && len(out) == 0 {
-		return
+func nameSet(versions map[string]string) map[string]bool {
+	set := make(map[string]bool, len(versions))
+	for name := range versions {
+		set[name] = true
 	}
-	latestByPkg := ParseNpmOutdatedMap(out)
-	if len(latestByPkg) == 0 {
-		return
+	return set
+}
+
+// markNpmManagedFresh affirms agents whose npm package is installed and was
+// not flagged by a successful npm-outdated merge: their installed version
+// equals the latest npm knows about.
+func markNpmManagedFresh(items []*model.Item, installedVersions map[string]string) {
+	for _, it := range items {
+		if it == nil || it.Status != model.StatusInfo || it.PackageID == "" {
+			continue
+		}
+		if _, managed := installedVersions[it.PackageID]; managed {
+			it.Status = model.StatusOK
+		}
 	}
+}
+
+// markNpmManagedUnverified records that the npm-outdated probe could not be
+// trusted. Only StatusInfo rows are touched: a version probe that already
+// failed stays unverified with its own cause.
+func markNpmManagedUnverified(items []*model.Item, installedVersions map[string]string, cause error) {
+	msg := errCause(cause)
+	if msg == "" {
+		msg = "npm outdated probe failed"
+	}
+	for _, it := range items {
+		if it == nil || it.Status != model.StatusInfo || it.PackageID == "" {
+			continue
+		}
+		if _, managed := installedVersions[it.PackageID]; !managed {
+			continue
+		}
+		it.Status = model.StatusUnverified
+		it.Error = msg
+	}
+}
+
+// applyNpmOutdatedToAgents merges `npm outdated -g` (batched by explicit name)
+// into the agent items. The batch is restricted to packages npm actually
+// manages: `npm outdated <name>` stalls on names that are not installed.
+// A nil error means the payload was valid JSON (including an empty object):
+// absence from that map is "not outdated". A non-nil error means the probe
+// failed or the payload could not be parsed.
+func applyNpmOutdatedToAgents(ctx context.Context, items []*model.Item, catalog []agentDef, installedVersions map[string]string) error {
+	pkgs := managedAgentPackages(items, catalog, installedVersions)
+	if len(pkgs) == 0 {
+		return nil
+	}
+	latestByPkg, err := npmOutdatedLatestFor(ctx, pkgs)
+	if err != nil {
+		return err
+	}
+	applyLatestToAgents(items, catalog, latestByPkg)
+	return nil
+}
+
+func managedAgentPackages(items []*model.Item, catalog []agentDef, installedVersions map[string]string) []string {
+	npmByName := agentNpmNames(catalog)
+	pkgs := make([]string, 0, len(items))
+	seen := make(map[string]bool, len(items))
+	for _, it := range items {
+		pkg := agentItemPackage(it, npmByName)
+		if pkg == "" || seen[pkg] {
+			continue
+		}
+		if _, managed := installedVersions[pkg]; !managed {
+			continue
+		}
+		seen[pkg] = true
+		pkgs = append(pkgs, pkg)
+	}
+	return pkgs
+}
+
+func agentNpmNames(catalog []agentDef) map[string]string {
 	npmByName := make(map[string]string, len(catalog))
 	for _, a := range catalog {
 		if a.npmPackage != "" {
 			npmByName[a.name] = a.npmPackage
 		}
 	}
+	return npmByName
+}
+
+func agentItemPackage(it *model.Item, npmByName map[string]string) string {
+	if it == nil {
+		return ""
+	}
+	if it.PackageID != "" {
+		return it.PackageID
+	}
+	return npmByName[it.Name]
+}
+
+// npmOutdatedLatestFor runs one explicit-name outdated probe. npm exits 1
+// when something is outdated and still prints JSON; that is success. An empty
+// body with a command error, or a body that is not JSON, is a failed probe.
+func npmOutdatedLatestFor(ctx context.Context, pkgs []string) (map[string]string, error) {
+	sort.Strings(pkgs)
+	args := append([]string{"outdated", flagGlobal, "--json"}, pkgs...)
+	out, err := execCommand(ctx, binNpm, args...)
+	if err != nil && strings.TrimSpace(string(out)) == "" {
+		return nil, err
+	}
+	return parseNpmOutdatedLatest(out)
+}
+
+func applyLatestToAgents(items []*model.Item, catalog []agentDef, latestByPkg map[string]string) {
+	npmByName := agentNpmNames(catalog)
 	for _, it := range items {
-		pkg := it.PackageID
-		if pkg == "" {
-			pkg = npmByName[it.Name]
-		}
-		if pkg == "" {
-			continue
-		}
+		pkg := agentItemPackage(it, npmByName)
 		if latest, ok := latestByPkg[pkg]; ok {
 			ApplyAgentOutdated(it, latest)
 		}
@@ -266,9 +375,9 @@ func applyNpmOutdatedToAgents(ctx context.Context, items []*model.Item, catalog 
 // resolveRegistryLatest flags agents whose npm package is NOT installed via
 // global npm (native installer, brew, pnpm/bun store) by asking the registry
 // for the latest version. Agents already handled by `npm outdated -g` or
-// without an npmPackage are skipped.
+// without a freshness channel are skipped.
 func resolveRegistryLatest(ctx context.Context, items []*model.Item, catalog []agentDef) {
-	resolveRegistryLatestFrom(ctx, items, catalog, npmInstalledPackages(ctx))
+	resolveRegistryLatestFrom(ctx, items, catalog, nameSet(npmInstalledVersions(ctx)))
 }
 
 // resolveRegistryLatestFrom is resolveRegistryLatest with a pre-fetched
@@ -287,11 +396,20 @@ func resolveRegistryLatestFrom(ctx context.Context, items []*model.Item, catalog
 	}
 	targets := make([]probeTarget, 0, len(items))
 	for _, it := range items {
-		if it.Status == model.StatusOutdated {
-			continue // already flagged by the npm-outdated merge
+		if it.Status == model.StatusOutdated || it.Status == model.StatusOK || it.Status == model.StatusUnverified {
+			continue // npm merge already decided, or the version probe failed
 		}
 		a, ok := defByName[it.Name]
-		if !ok || a.npmPackage == "" || installed[a.npmPackage] {
+		if !ok {
+			continue
+		}
+		// latestCmd is a self-contained freshness probe (e.g. `grok update
+		// --check --json`): it needs no npm package and ignores npm state.
+		if len(a.latestCmd) > 0 {
+			targets = append(targets, probeTarget{it: it, a: a})
+			continue
+		}
+		if a.npmPackage == "" || installed[a.npmPackage] {
 			continue
 		}
 		targets = append(targets, probeTarget{it: it, a: a})
@@ -308,16 +426,16 @@ func resolveRegistryLatestFrom(ctx context.Context, items []*model.Item, catalog
 	})
 }
 
-// registryLatest returns the newest published version of the agent's npm
-// package: an explicit latestCmd wins, otherwise `npm view <pkg> version`
-// (which honours the user's .npmrc registry/proxy).
+// registryLatest returns the newest published version of the agent: an
+// explicit latestCmd wins, otherwise `npm view <pkg> version` (which honours
+// the user's .npmrc registry/proxy).
 func registryLatest(ctx context.Context, a agentDef) string {
 	if len(a.latestCmd) > 0 {
 		out, err := execCommandBudget(ctx, registryLatestTimeout, a.latestCmd[0], a.latestCmd[1:]...)
-		if err == nil {
-			return parseAgentVersion(string(out))
+		if err != nil {
+			return ""
 		}
-		return ""
+		return parseAgentLatest(a, string(out))
 	}
 	out, err := execCommandBudget(ctx, registryLatestTimeout, binNpm, "view", a.npmPackage, "version")
 	if err != nil {
@@ -326,10 +444,37 @@ func registryLatest(ctx context.Context, a agentDef) string {
 	return strings.TrimSpace(string(out))
 }
 
+// parseAgentLatest interprets a latestCmd payload: a JSON probe
+// (latestJSONKey set) reads the key's string value, the generic semver
+// extraction handles everything else.
+func parseAgentLatest(a agentDef, out string) string {
+	if a.latestJSONKey == "" {
+		return parseAgentVersion(out)
+	}
+	return jsonStringValue(out, a.latestJSONKey)
+}
+
+// jsonStringValue extracts a top-level string field from a JSON object
+// ("" when the payload is not JSON or the key is absent).
+func jsonStringValue(out, key string) string {
+	var data map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(out), &data); err != nil {
+		return ""
+	}
+	var value string
+	if err := json.Unmarshal(data[key], &value); err != nil {
+		return ""
+	}
+	return value
+}
+
 // ApplyAgentOutdated marks an agent item outdated when latest differs from current.
 // Pure helper for unit tests and npm-merge paths.
 func ApplyAgentOutdated(it *model.Item, latest string) {
-	if it == nil || latest == "" {
+	if it == nil || latest == "" || it.Status == model.StatusUnverified {
+		// Unverified means the current version is unknown (often the
+		// "installed" placeholder). A registry or npm latest must not turn
+		// that into a false outdated row.
 		return
 	}
 	cur := normalizeAgentVer(it.CurrentVer)
@@ -340,6 +485,11 @@ func ApplyAgentOutdated(it *model.Item, latest string) {
 		return
 	}
 	if cur == lat {
+		// The freshness channel confirmed the installed version is current:
+		// upgrade the probe-only info state to an affirmative OK.
+		if it.Status == model.StatusInfo {
+			it.Status = model.StatusOK
+		}
 		return
 	}
 	if compareAgentVersions(cur, lat) >= 0 {
