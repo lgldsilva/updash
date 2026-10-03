@@ -9,6 +9,7 @@ import (
 	"github.com/lgldsilva/updash/internal/cleaner"
 	"github.com/lgldsilva/updash/internal/elevate"
 	"github.com/lgldsilva/updash/internal/model"
+	"github.com/lgldsilva/updash/internal/scanner"
 	"github.com/lgldsilva/updash/internal/updater"
 )
 
@@ -466,7 +467,7 @@ func (s *State) collectOutdatedItems(selectedOnly bool) []*model.Item {
 	skipped := 0
 	inconclusive := 0
 	for _, it := range flattenSummaries(s.Summaries, hasUpdateItems, isUpdateNavigable, s.AppliedFilter) {
-		if it.Status != model.StatusOutdated {
+		if !updateCandidate(it, selectedOnly) {
 			continue
 		}
 		if selectedOnly && !it.Selected {
@@ -490,6 +491,19 @@ func (s *State) collectOutdatedItems(selectedOnly bool) []*model.Item {
 		s.AddLog(fmt.Sprintf("⚠ %d item(s) skipped: source state is inconclusive", inconclusive), false)
 	}
 	return out
+}
+
+// updateCandidate is an outdated row, or (on update-all) an auto agent whose
+// update command is the freshness check. Selection stays outdated-only: info
+// rows have no checkbox.
+func updateCandidate(it *model.Item, selectedOnly bool) bool {
+	if it == nil {
+		return false
+	}
+	if it.Status == model.StatusOutdated {
+		return true
+	}
+	return !selectedOnly && it.Status == model.StatusInfo && scanner.AgentUpdatesWithoutFreshness(it.Name)
 }
 
 // IsManualOnlyItem reports whether an item must be updated manually

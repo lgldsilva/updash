@@ -293,7 +293,7 @@ func runUpdateFromScan(ctx context.Context, cfg Config, plat model.PlatformInfo,
 	skippedCount := printSkippedSources("update", skippedSums)
 	updates = conclusive
 
-	items := collectOutdated(updates, cfg.Only)
+	items := collectUpdateTargets(updates, cfg.Only)
 	if len(items) == 0 {
 		return emptyUpdateOutcome(updates, skippedCount)
 	}
@@ -777,13 +777,46 @@ func updatePlanErrorResults(items []*model.Item, err error) []*updater.Result {
 func collectOutdated(summaries []*model.SourceSummary, only string) []*model.Item {
 	var items []*model.Item
 	for _, s := range summaries {
+		if s == nil {
+			continue
+		}
 		for _, it := range s.Items {
-			if it.Status == model.StatusOutdated && itemMatchesFilter(s, it, only) {
+			if it != nil && it.Status == model.StatusOutdated && itemMatchesFilter(s, it, only) {
 				items = append(items, it)
 			}
 		}
 	}
 	return items
+}
+
+// collectUpdateTargets is the --update batch: outdated items, plus auto agents
+// whose update command is itself the freshness check. Those stay StatusInfo
+// (no latest channel) but still run, because the command is idempotent.
+func collectUpdateTargets(summaries []*model.SourceSummary, only string) []*model.Item {
+	items := collectOutdated(summaries, only)
+	seen := make(map[*model.Item]bool, len(items))
+	for _, it := range items {
+		seen[it] = true
+	}
+	for _, s := range summaries {
+		if s == nil {
+			continue
+		}
+		for _, it := range s.Items {
+			if it == nil || seen[it] || !itemMatchesFilter(s, it, only) {
+				continue
+			}
+			if !idempotentAgentUpdate(it) {
+				continue
+			}
+			items = append(items, it)
+		}
+	}
+	return items
+}
+
+func idempotentAgentUpdate(it *model.Item) bool {
+	return it != nil && it.Status == model.StatusInfo && scanner.AgentUpdatesWithoutFreshness(it.Name)
 }
 
 func collectCleanable(summaries []*model.SourceSummary, only string) []*model.Item {

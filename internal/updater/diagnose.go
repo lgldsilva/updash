@@ -108,6 +108,11 @@ func SuggestCommand(item *model.Item) string {
 }
 
 func suggestAgentCommand(name string) string {
+	if name != agentCrush {
+		if cmd := scanner.AgentUpdateCommand(name); len(cmd) > 0 {
+			return strings.Join(cmd, " ")
+		}
+	}
 	switch {
 	case strings.Contains(name, "Claude"):
 		return "claude update"

@@ -62,6 +62,10 @@ const (
 // agentDef is the single data-driven description of one AI coding assistant:
 // how to probe its version, how to learn the latest release, and how to
 // upgrade it. Adding an agent = adding one entry here (no updater changes).
+// An auto agent with updateCmd but no freshness channel (no latestCmd and no
+// npmPackage) is still upgraded by running that command: it is an idempotent
+// remote check, so --update runs it even when the scan cannot mark the item
+// outdated. See AgentUpdatesWithoutFreshness.
 type agentDef struct {
 	name       string
 	binary     string
@@ -87,7 +91,13 @@ func agentCatalog() []agentDef {
 		{name: "Grok", binary: binGrok, verCmd: []string{binGrok, flagVersion}, mode: agentUpdateAuto, updateCmd: []string{binGrok, cmdUpdate},
 			latestCmd: []string{binGrok, cmdUpdate, "--check", "--json"}, latestJSONKey: "latestVersion"},
 		{name: "Antigravity", binary: binAntigravity, verCmd: []string{binAntigravity, flagVersion}, mode: agentUpdateManual},
-		{name: "Agy", binary: "agy", verCmd: []string{"agy", flagVersion}, mode: agentUpdateManual},
+		// Agy is the standalone Antigravity CLI (~/.local/bin/agy), not the
+		// AUR IDE package. `agy update` is non-interactive and idempotent
+		// (already-current exits 0), but there is no check-only flag and
+		// `agy changelog` prints the version embedded in the binary. With no
+		// freshness channel, --update runs `agy update` even while the scan
+		// stays "freshness not verified". Today Agy is the only such agent.
+		{name: "Agy", binary: "agy", verCmd: []string{"agy", flagVersion}, mode: agentUpdateAuto, updateCmd: []string{"agy", "update"}},
 		// MiMo Code (Xiaomi) distributes a native binary whose `mimo upgrade`
 		// self-updater mirrors the curl-installer layout; @mimo-ai/cli is the
 		// published package used only as the freshness source.
@@ -157,6 +167,54 @@ func AgentKeepPolicy(name string) string {
 		return a.keepPolicy
 	}
 	return policyManual
+}
+
+// AgentUpdatesWithoutFreshness reports an auto agent whose updateCmd is an
+// idempotent remote check and that has neither latestCmd nor an npm package.
+// --update and TUI update-all run that command even when the scan could not
+// mark the item outdated. The item stays informational ("freshness not
+// verified"); a successful version probe is not an unverified source.
+func AgentUpdatesWithoutFreshness(name string) bool {
+	a, ok := lookupAgentDef(name)
+	if !ok || a.mode != agentUpdateAuto {
+		return false
+	}
+	return len(a.updateCmd) > 0 && len(a.latestCmd) == 0 && a.npmPackage == ""
+}
+
+// AgentUpdateCheckNote is the scan hint for an agent updated without a
+// freshness channel ("" otherwise). The wording must not contain "manual":
+// that substring marks an item manual-only and would skip the update.
+func AgentUpdateCheckNote(name string) string {
+	if !AgentUpdatesWithoutFreshness(name) {
+		return ""
+	}
+	cmd := AgentUpdateCommand(name)
+	if len(cmd) == 0 {
+		return ""
+	}
+	return "checked on update: " + strings.Join(cmd, " ")
+}
+
+const (
+	// AgyUpdateUpdated labels `agy update` stdout that installed a release.
+	AgyUpdateUpdated = "updated"
+	// AgyUpdateCurrent labels stdout that reports the installed build is current.
+	AgyUpdateCurrent = "current"
+)
+
+// ClassifyAgyUpdateOutput labels `agy update` stdout. The process exit code
+// still decides success: a zero exit stays a success even when the text
+// matches neither phrase, so an idempotent update is never inconclusive.
+func ClassifyAgyUpdateOutput(out string) string {
+	switch {
+	case strings.Contains(out, "Update successful"):
+		return AgyUpdateUpdated
+	case strings.Contains(out, "already on the latest version"):
+		return AgyUpdateCurrent
+	default:
+		return ""
+	}
 }
 
 func (s *AgentSource) Scan(ctx context.Context, plat model.PlatformInfo) ([]*model.Item, error) {
@@ -234,6 +292,12 @@ func probeAgentItem(ctx context.Context, plat model.PlatformInfo, a agentDef) *m
 	it.CurrentVer, ok = probeAgentVersionOK(ctx, a.verCmd)
 	if !ok {
 		it.Status = model.StatusUnverified
+		return it
+	}
+	// Version answered: freshness may still be unknown, but the item is not
+	// an unverified source. Record how --update will check it.
+	if note := AgentUpdateCheckNote(a.name); note != "" {
+		it.KeepPolicy = note
 	}
 	return it
 }

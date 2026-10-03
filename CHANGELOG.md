@@ -15,6 +15,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/); versions follow 
 - CI cross-build job (darwin/windows/linux × amd64/arm64) in the PR gate; `validate.sh` cross-build gate
 
 ### Changed
+- Agy (Google Antigravity CLI, standalone `agy` — not the AUR IDE package) updates via `agy update`. The CLI has no check-only latest probe, so an auto agent with an idempotent `updateCmd` and no freshness channel is included in `--update` and TUI update-all even while the scan still reports freshness as not verified. A zero exit (including "already on the latest version") is success; a working `agy --version` is informational, not an unverified source
 - Agent update dispatch is catalog-driven (no more `strings.Contains`); manual agents keep explicit notes (Aider → pipx, Amazon Q → doctor)
 - nvm/omz/SDKMAN updates degrade to a manual note when bash is missing (bare Windows hosts); nvm scan understands nvm-windows paths
 

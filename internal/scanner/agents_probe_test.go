@@ -19,6 +19,9 @@ func TestAgentSkipVersionProbe(t *testing.T) {
 	if agentSkipVersionProbe(plat, "claude") {
 		t.Fatal("claude should not skip")
 	}
+	if agentSkipVersionProbe(plat, "agy") {
+		t.Fatal("agy --version returns; it must not skip the probe")
+	}
 
 	t.Setenv("DISPLAY", ":0")
 	if agentSkipVersionProbe(plat, "cursor") {

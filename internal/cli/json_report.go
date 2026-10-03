@@ -7,21 +7,26 @@ import (
 	"os"
 
 	"github.com/lgldsilva/updash/internal/model"
+	"github.com/lgldsilva/updash/internal/scanner"
 )
 
 // CheckReport is the machine-readable form of --check (and --check --json).
 type CheckReport struct {
-	Platform   string         `json:"platform,omitempty"`
-	Outdated   int            `json:"outdated"`
-	Cleanable  int            `json:"cleanable"`
-	Errors     int            `json:"errors"`
-	Unverified int            `json:"unverified"`
-	Info       int            `json:"info"`
-	Problems   []ReportItem   `json:"problems,omitempty"`
-	Updates    []ReportItem   `json:"updates"`
-	Cleanup    []ReportItem   `json:"cleanup"`
-	Sources    []ReportSource `json:"sources,omitempty"`
-	ElapsedMS  int64          `json:"elapsed_ms,omitempty"`
+	Platform   string       `json:"platform,omitempty"`
+	Outdated   int          `json:"outdated"`
+	Cleanable  int          `json:"cleanable"`
+	Errors     int          `json:"errors"`
+	Unverified int          `json:"unverified"`
+	Info       int          `json:"info"`
+	Problems   []ReportItem `json:"problems,omitempty"`
+	Updates    []ReportItem `json:"updates"`
+	Cleanup    []ReportItem `json:"cleanup"`
+	// CheckedOnUpdate lists installed items with no freshness channel whose
+	// idempotent update command still runs on --update. They are informational,
+	// not unverified sources, so they stay out of Problems.
+	CheckedOnUpdate []ReportItem   `json:"checked_on_update,omitempty"`
+	Sources         []ReportSource `json:"sources,omitempty"`
+	ElapsedMS       int64          `json:"elapsed_ms,omitempty"`
 }
 
 // ReportItem is one outdated or cleanable entity.
@@ -63,7 +68,32 @@ func BuildCheckReport(updates, cleanup []*model.SourceSummary) CheckReport {
 	rep.Cleanable = appendStatusItems(&rep.Cleanup, &rep.Sources, cleanup, model.StatusCleanCandidate, "cleanup")
 	rep.Errors, rep.Unverified = appendProblems(&rep.Problems, updates, cleanup)
 	rep.Info = countStatus(model.StatusInfo, updates, cleanup)
+	rep.CheckedOnUpdate = checkedOnUpdateItems(updates, cleanup)
 	return rep
+}
+
+// checkedOnUpdateItems is the machine-readable form of agents whose scan
+// stays "freshness not verified" but whose update command runs anyway.
+func checkedOnUpdateItems(groups ...[]*model.SourceSummary) []ReportItem {
+	var out []ReportItem
+	for _, summaries := range groups {
+		for _, s := range summaries {
+			if s == nil {
+				continue
+			}
+			for _, it := range s.Items {
+				if it == nil || it.Status != model.StatusInfo || !scanner.AgentUpdatesWithoutFreshness(it.Name) {
+					continue
+				}
+				row := itemToReport(it)
+				if row.KeepPolicy == "" {
+					row.KeepPolicy = scanner.AgentUpdateCheckNote(it.Name)
+				}
+				out = append(out, row)
+			}
+		}
+	}
+	return out
 }
 
 func countStatus(status model.Status, groups ...[]*model.SourceSummary) int {
