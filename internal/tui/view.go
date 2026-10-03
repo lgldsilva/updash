@@ -6,6 +6,7 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/lgldsilva/updash/internal/model"
+	"github.com/lgldsilva/updash/internal/scanner"
 )
 
 const (
@@ -573,7 +574,18 @@ func (s *State) renderItemStyled(item *model.Item) string {
 			ItemOKStyle.Render("✓ updated"),
 		)
 	case model.StatusInfo:
-		return joinRow(bold.Render(namePlain), lipgloss.NewStyle().Render(tuiIndent), VerCurrentStyle.Render("ⓘ "+truncatePlain(item.CurrentVer, m.ver*2)))
+		parts := []string{
+			bold.Render(namePlain),
+			lipgloss.NewStyle().Render(tuiIndent),
+			VerCurrentStyle.Render("ⓘ " + truncatePlain(item.CurrentVer, m.ver*2)),
+		}
+		if note := scanner.AgentUpdateCheckNote(item.Name); note != "" && m.note > 0 {
+			parts = append(parts,
+				lipgloss.NewStyle().Render(tuiIndent),
+				VerCurrentStyle.Render(truncatePlain(note, m.note)),
+			)
+		}
+		return joinRow(parts...)
 	case model.StatusUnverified:
 		return joinRow(bold.Render(namePlain), lipgloss.NewStyle().Render(tuiIndent), ItemErrorStyle.Render("⚠ unverified — "+truncatePlain(item.CurrentVer, m.ver*2)))
 	default:

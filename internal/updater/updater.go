@@ -175,6 +175,27 @@ func executePreparedApt(ctx context.Context, items []*model.Item, plans []Comman
 	return batchMarkAll(items, &Result{Success: true, Output: output.String()})
 }
 
+// annotateIdempotentAgentResult labels a zero-exit update that has no
+// freshness channel. The exit code already decided success; an unrecognized
+// payload stays a success so "already current" cannot become inconclusive.
+func annotateIdempotentAgentResult(item *model.Item, result *Result) *Result {
+	if result == nil || item == nil || !result.Success || !scanner.AgentUpdatesWithoutFreshness(item.Name) {
+		return result
+	}
+	kind := scanner.ClassifyAgyUpdateOutput(result.Output)
+	if kind == "" {
+		return result
+	}
+	label := strings.Join(scanner.AgentUpdateCommand(item.Name), " ") + ": " + kind
+	if result.Output != "" {
+		result.Output = label + "\n" + result.Output
+	} else {
+		result.Output = label
+	}
+	item.Log = result.Output
+	return result
+}
+
 func executePreparedAgents(ctx context.Context, items []*model.Item, plans []CommandPlan, opts Options) []*Result {
 	if len(items) != len(plans) {
 		return failedBatch(items, fmt.Errorf("internal agent plan does not match selected items"))
@@ -194,7 +215,7 @@ func executePreparedAgents(ctx context.Context, items []*model.Item, plans []Com
 		case agentOpenCode:
 			results[i] = ensureOpenCodeHealthy(ctx, item, result)
 		default:
-			results[i] = npmBrewCollisionDowngrade(item, result)
+			results[i] = annotateIdempotentAgentResult(item, npmBrewCollisionDowngrade(item, result))
 		}
 	}
 	return results
