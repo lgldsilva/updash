@@ -281,8 +281,28 @@ func writeFakeAgy(t *testing.T, updateStdout string, updateExit int) string {
 	if err := os.WriteFile(filepath.Join(dir, "agy"), []byte(body), 0o755); err != nil {
 		t.Fatal(err)
 	}
+	// A value already in the environment wins (GitHub sets CI=true). Drop the
+	// keys so the stamp shows the values updash itself injects.
+	dropInheritedUpdateEnv(t)
 	t.Setenv("PATH", dir)
 	return dir
+}
+
+func dropInheritedUpdateEnv(t *testing.T) {
+	t.Helper()
+	for _, key := range []string{"CI", "NONINTERACTIVE", "DEBIAN_FRONTEND", "NO_COLOR"} {
+		prev, ok := os.LookupEnv(key)
+		if err := os.Unsetenv(key); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() {
+			if !ok {
+				_ = os.Unsetenv(key)
+				return
+			}
+			_ = os.Setenv(key, prev)
+		})
+	}
 }
 
 func shQuote(s string) string {

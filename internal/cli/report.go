@@ -295,34 +295,50 @@ func agentFreshnessNote(it *model.Item) string {
 // cannot show as outdated (there is no latest channel). Skips and items
 // already counted as remaining-outdated failures are left alone.
 func blindUpdateFailures(updates []*model.SourceSummary, results []*updater.Result) []*model.Item {
-	outdated := map[itemKey]bool{}
-	for _, s := range updates {
-		if s == nil {
-			continue
-		}
-		for _, it := range s.Items {
-			if it != nil && it.Status == model.StatusOutdated {
-				outdated[keyOf(it)] = true
-			}
-		}
-	}
-	var failed []*model.Item
+	outdated := outdatedItemKeys(updates)
 	seen := map[itemKey]bool{}
+	var failed []*model.Item
 	for _, r := range results {
-		if r == nil || r.Item == nil || r.Success || isSkippedResult(r) {
-			continue
+		if it := blindUpdateFailure(r, outdated, seen); it != nil {
+			failed = append(failed, it)
 		}
-		if !scanner.AgentUpdatesWithoutFreshness(r.Item.Name) {
-			continue
-		}
-		k := keyOf(r.Item)
-		if outdated[k] || seen[k] {
-			continue
-		}
-		seen[k] = true
-		failed = append(failed, r.Item)
 	}
 	return failed
+}
+
+func outdatedItemKeys(updates []*model.SourceSummary) map[itemKey]bool {
+	outdated := map[itemKey]bool{}
+	for _, s := range updates {
+		collectOutdatedKeys(outdated, s)
+	}
+	return outdated
+}
+
+func collectOutdatedKeys(outdated map[itemKey]bool, s *model.SourceSummary) {
+	if s == nil {
+		return
+	}
+	for _, it := range s.Items {
+		if it != nil && it.Status == model.StatusOutdated {
+			outdated[keyOf(it)] = true
+		}
+	}
+}
+
+func blindUpdateFailure(r *updater.Result, outdated, seen map[itemKey]bool) *model.Item {
+	if skippedBlindResult(r) || !scanner.AgentUpdatesWithoutFreshness(r.Item.Name) {
+		return nil
+	}
+	k := keyOf(r.Item)
+	if outdated[k] || seen[k] {
+		return nil
+	}
+	seen[k] = true
+	return r.Item
+}
+
+func skippedBlindResult(r *updater.Result) bool {
+	return r == nil || r.Item == nil || r.Success || isSkippedResult(r)
 }
 
 func appendItems(a, b []*model.Item) []*model.Item {

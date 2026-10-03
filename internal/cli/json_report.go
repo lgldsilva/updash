@@ -78,22 +78,33 @@ func checkedOnUpdateItems(groups ...[]*model.SourceSummary) []ReportItem {
 	var out []ReportItem
 	for _, summaries := range groups {
 		for _, s := range summaries {
-			if s == nil {
-				continue
-			}
-			for _, it := range s.Items {
-				if it == nil || it.Status != model.StatusInfo || !scanner.AgentUpdatesWithoutFreshness(it.Name) {
-					continue
-				}
-				row := itemToReport(it)
-				if row.KeepPolicy == "" {
-					row.KeepPolicy = scanner.AgentUpdateCheckNote(it.Name)
-				}
-				out = append(out, row)
-			}
+			out = appendCheckedOnUpdate(out, s)
 		}
 	}
 	return out
+}
+
+func appendCheckedOnUpdate(out []ReportItem, s *model.SourceSummary) []ReportItem {
+	if s == nil {
+		return out
+	}
+	for _, it := range s.Items {
+		if row, ok := checkedOnUpdateRow(it); ok {
+			out = append(out, row)
+		}
+	}
+	return out
+}
+
+func checkedOnUpdateRow(it *model.Item) (ReportItem, bool) {
+	if it == nil || it.Status != model.StatusInfo || !scanner.AgentUpdatesWithoutFreshness(it.Name) {
+		return ReportItem{}, false
+	}
+	row := itemToReport(it)
+	if row.KeepPolicy == "" {
+		row.KeepPolicy = scanner.AgentUpdateCheckNote(it.Name)
+	}
+	return row, true
 }
 
 func countStatus(status model.Status, groups ...[]*model.SourceSummary) int {
