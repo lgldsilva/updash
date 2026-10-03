@@ -12,6 +12,15 @@ import (
 )
 
 func TestAgentUpdatesWithoutFreshness_OnlyAgy(t *testing.T) {
+	assertOnlyAgyLacksFreshness(t)
+	assertAgyUpdateCommand(t)
+	assertAgyCheckNote(t)
+	assertChanneledAgentsStayOut(t)
+	assertAntigravityStaysManual(t)
+}
+
+func assertOnlyAgyLacksFreshness(t *testing.T) {
+	t.Helper()
 	var got []string
 	for _, a := range agentCatalog() {
 		if AgentUpdatesWithoutFreshness(a.name) {
@@ -21,6 +30,10 @@ func TestAgentUpdatesWithoutFreshness_OnlyAgy(t *testing.T) {
 	if len(got) != 1 || got[0] != "Agy" {
 		t.Fatalf("agents without a freshness channel = %v, want [Agy]", got)
 	}
+}
+
+func assertAgyUpdateCommand(t *testing.T) {
+	t.Helper()
 	cmd := AgentUpdateCommand("Agy")
 	if len(cmd) != 2 || cmd[0] != "agy" || cmd[1] != "update" {
 		t.Fatalf("AgentUpdateCommand(Agy) = %v, want [agy update]", cmd)
@@ -28,17 +41,30 @@ func TestAgentUpdatesWithoutFreshness_OnlyAgy(t *testing.T) {
 	if AgentKeepPolicy("Agy") != "" {
 		t.Fatal("auto agent must not expose a catalog keep policy")
 	}
+}
+
+func assertAgyCheckNote(t *testing.T) {
+	t.Helper()
 	note := AgentUpdateCheckNote("Agy")
 	if note != "checked on update: agy update" || strings.Contains(strings.ToLower(note), "manual") {
 		t.Fatalf("note = %q", note)
 	}
-	if AgentUpdatesWithoutFreshness("Grok") || AgentUpdatesWithoutFreshness("Claude Code") ||
-		AgentUpdatesWithoutFreshness("Cursor") || AgentUpdatesWithoutFreshness("Antigravity") {
-		t.Fatal("agents with a freshness channel or manual mode must not match")
+}
+
+func assertChanneledAgentsStayOut(t *testing.T) {
+	t.Helper()
+	for _, name := range []string{"Grok", "Claude Code", "Cursor", "Antigravity"} {
+		if AgentUpdatesWithoutFreshness(name) {
+			t.Fatalf("%s must not update without a freshness channel", name)
+		}
 	}
 	if AgentUpdateCheckNote("Grok") != "" || AgentUpdateCheckNote("no-such") != "" {
 		t.Fatal("only a blind-update agent has a check note")
 	}
+}
+
+func assertAntigravityStaysManual(t *testing.T) {
+	t.Helper()
 	if AgentUpdateCommand("Antigravity") != nil || AgentKeepPolicy("Antigravity") == "" {
 		t.Fatal("Antigravity must stay manual")
 	}
