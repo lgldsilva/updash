@@ -33,6 +33,46 @@ func TestExitOnErr_PreservesCLIExitClass(t *testing.T) {
 	}
 }
 
+func TestParseArgs_UpdateAndCleanIsAll(t *testing.T) {
+	tests := []struct {
+		name    string
+		args    []string
+		mode    string
+		only    string
+		dryRun  bool
+		verbose bool
+	}{
+		{name: "update then clean", args: []string{"--update", "--clean"}, mode: "all", verbose: true},
+		{name: "clean then update", args: []string{"--clean", "--update"}, mode: "all", verbose: true},
+		{name: "update alone", args: []string{"--update"}, mode: "update", verbose: true},
+		{name: "clean alone", args: []string{"--clean"}, mode: "clean", verbose: true},
+		{name: "later check wins", args: []string{"--update", "--clean", "--check"}, mode: "check", verbose: true},
+		{name: "later help wins", args: []string{"--update", "--clean", "--help"}, mode: "help", verbose: true},
+		{
+			name:    "filters survive",
+			args:    []string{"--dry-run", "--only", "npm", "--clean", "--update", "--quiet"},
+			mode:    "all",
+			only:    "npm",
+			dryRun:  true,
+			verbose: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mode, cfg, err := parseArgs(tt.args)
+			if err != nil {
+				t.Fatalf("parseArgs() error = %v", err)
+			}
+			if mode != tt.mode {
+				t.Fatalf("mode = %q, want %q", mode, tt.mode)
+			}
+			if cfg.Only != tt.only || cfg.DryRun != tt.dryRun || cfg.Verbose != tt.verbose {
+				t.Fatalf("cfg = %+v, want only=%q dry=%v verbose=%v", cfg, tt.only, tt.dryRun, tt.verbose)
+			}
+		})
+	}
+}
+
 func TestBubbleModel_ScanInfoIsNotLoggedAsSuccess(t *testing.T) {
 	state := tui.New()
 	state.Summaries = []*model.SourceSummary{{Category: model.CatAI, Label: "AI tools", Items: []*model.Item{{Name: "note", Category: model.CatAI, Status: model.StatusInfo}}}}

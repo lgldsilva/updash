@@ -122,6 +122,7 @@ func runStartup(ctx context.Context, mode string, cfg cli.Config) upgrade.Startu
 func parseArgs(args []string) (mode string, cfg cli.Config, err error) {
 	cfg.Verbose = true
 	mode = "tui"
+	wantUpdate, wantClean := false, false
 
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
@@ -129,8 +130,10 @@ func parseArgs(args []string) (mode string, cfg cli.Config, err error) {
 		case "--check", "-c":
 			mode = "check"
 		case "--update":
+			wantUpdate = true
 			mode = "update"
 		case "--clean":
+			wantClean = true
 			mode = "clean"
 		case "--all", "-a":
 			mode = "all"
@@ -169,6 +172,11 @@ func parseArgs(args []string) (mode string, cfg cli.Config, err error) {
 		default:
 			return "", cfg, fmt.Errorf("unknown argument: %s (try --help)", arg)
 		}
+	}
+	// --update --clean (either order) is --all: update everything, then clean.
+	// A later exclusive mode (--check, --help, …) still wins.
+	if wantUpdate && wantClean && (mode == "update" || mode == "clean") {
+		mode = "all"
 	}
 	if err := cli.ValidateJSONMode(mode, cfg.JSON); err != nil {
 		return "", cfg, err
@@ -463,7 +471,8 @@ Usage:
   updash --check, -c          Scan and show outdated packages
   updash --update             Update outdated packages (CLI, live output)
   updash --clean              Run cleanup operations (CLI)
-  updash --all, -a            Update + clean everything
+  updash --update --clean     Update everything, then clean (same as --all)
+  updash --all, -a            Update then clean (--update --clean is the same)
   updash --upgrade            Self-update from latest GitHub release
   updash --check-upgrade      Check for self-update without installing
   updash --version, -v        Show version
