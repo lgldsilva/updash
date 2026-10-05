@@ -11,7 +11,8 @@ import (
 	"github.com/lgldsilva/updash/internal/updater"
 )
 
-// shouldUseNativeMacAuth reports whether items should use the macOS system auth sheet.
+// shouldUseNativeMacAuth reports whether privileged macOS items should ask for
+// one password and reuse it, instead of letting each sudo prompt on its own.
 func shouldUseNativeMacAuth(plat model.PlatformInfo, items []*model.Item, cfg Config) bool {
 	if plat.OS != "darwin" || cfg.SkipPassword || !nativeMacAvail() {
 		return false
@@ -40,8 +41,10 @@ func itemNeedsNativeElevation(it *model.Item, plat model.PlatformInfo) bool {
 	return elevate.CategoryNeedsElevation(it.Category, plat)
 }
 
-// runNativeElevatedItems primes sudo via the macOS native auth sheet, then runs
-// brew/mas as the logged-in user (Homebrew refuses to run as root).
+// runNativeElevatedItems asks for the administrator password once, then runs
+// brew/mas as the logged-in user (Homebrew refuses to run as root). The
+// password is kept in the session so each privileged step can authenticate
+// through SUDO_ASKPASS instead of a fresh terminal prompt.
 func runNativeElevatedItems(
 	ctx context.Context,
 	plat model.PlatformInfo,
@@ -51,13 +54,7 @@ func runNativeElevatedItems(
 	sess **elevate.Session,
 	preparedBatches ...map[model.Category]*updater.PreparedUpdateBatch,
 ) []*updater.Result {
-	if !stdinIsTTYFn() {
-		fmt.Fprintln(os.Stderr, "⚠ Run in Terminal.app (not a pipe/CI) for the native macOS dialog to appear")
-	}
-	fmt.Println("ℹ macOS will ask for authorization in the native system dialog (lock icon)")
-	fmt.Println("ℹ After that, brew/mas run as your user with cached sudo")
-
-	if err := primeMacSudo(ctx); err != nil {
+	if err := promptNativeSudo(ctx, sess); err != nil {
 		if errors.Is(err, elevate.ErrDialogCancelled) {
 			fmt.Fprintln(os.Stderr, "⊘ Authorization cancelled — privileged packages skipped")
 			return skipBatchResults(items, "authorization cancelled in the macOS dialog")
@@ -66,12 +63,6 @@ func runNativeElevatedItems(
 		return nativeElevatedFailAll(items, "", err)
 	}
 
-	// sudo -v succeeded — reuse normal updater paths with a passwordless session.
-	if *sess == nil || !(*sess).Ready() {
-		s := elevate.NewSession()
-		s.SetPasswordless()
-		*sess = s
-	}
 	ctx = elevate.WithSession(ctx, *sess)
 	env := updateBatchEnv{
 		plat:        plat,
@@ -81,6 +72,26 @@ func runNativeElevatedItems(
 		elevSession: sess,
 	}
 	return executeNativeElevatedGroups(ctx, items, env)
+}
+
+// promptNativeSudo collects one validated password session. A session that is
+// already ready (NOPASSWD sudo, or a password entered earlier in this run)
+// is left as-is so the dialog is not shown again.
+func promptNativeSudo(ctx context.Context, sess **elevate.Session) error {
+	if *sess != nil && (*sess).Ready() {
+		return nil
+	}
+	if !stdinIsTTYFn() {
+		fmt.Fprintln(os.Stderr, "⚠ Run in Terminal.app (not a pipe/CI) for the password dialog to appear")
+	}
+	fmt.Println("ℹ macOS will ask for your password once")
+	fmt.Println("ℹ brew and mas reuse that password for every privileged step")
+	s, err := promptMacSess(ctx, "updash needs your administrator password to complete the updates")
+	if err != nil {
+		return err
+	}
+	*sess = s
+	return nil
 }
 
 func firstPreparedBatch(batches []map[model.Category]*updater.PreparedUpdateBatch) map[model.Category]*updater.PreparedUpdateBatch {
