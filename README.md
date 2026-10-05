@@ -101,7 +101,7 @@ keeps ownership of updates, signatures, and rollback.
 | `--check --json` | Machine-readable report (cron / monitoring) |
 | `--update` | Update outdated items |
 | `--clean` | Run cleanup |
-| `--all`, `-a` | Update then clean |
+| `--all`, `-a` | Update then clean (`--update --clean` is the same) |
 | `--only <cat>` | Limit the run to one canonical category (see below) |
 | `--dry-run` | Print plan without executing |
 | `--strict` | Non-zero exit if anything remains outdated/cleanable |
