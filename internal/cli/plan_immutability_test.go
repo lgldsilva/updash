@@ -127,7 +127,9 @@ func TestRunNativeElevatedItems_reusesPreparedBatch(t *testing.T) {
 		t.Fatal("native elevation must not replan an already prepared batch")
 		return nil
 	}
-	primeMacSudo = func(context.Context) error { return nil }
+	promptMacSess = func(context.Context, string) (*elevate.Session, error) {
+		return readyPasswordlessSession(), nil
+	}
 	stdinIsTTYFn = func() bool { return true }
 
 	var sess *elevate.Session
@@ -159,7 +161,9 @@ func TestRunNativeElevatedItems_preparedSubsetErrorFailsClosed(t *testing.T) {
 		t.Fatal("subset errors must not execute")
 		return nil
 	}
-	primeMacSudo = func(context.Context) error { return nil }
+	promptMacSess = func(context.Context, string) (*elevate.Session, error) {
+		return readyPasswordlessSession(), nil
+	}
 	stdinIsTTYFn = func() bool { return true }
 
 	unknown := &model.Item{Name: "ripgrep", Category: model.CatBrew}

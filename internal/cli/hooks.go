@@ -19,7 +19,6 @@ var (
 	prepareUpdateBatch           = updater.PrepareUpdateBatch
 	executePreparedBatch         = updater.ExecutePreparedBatch
 	executeNpmSkippingElevated   = updater.ExecuteNpmSkippingElevated
-	primeMacSudo                 = elevate.PrimeMacOSUserSudo
 	canElevateNP                 = elevate.CanElevateWithoutPassword
 	nativeMacAvail               = elevate.NativeMacAuthAvailable
 	promptMacSess                = elevate.PromptMacPasswordSession

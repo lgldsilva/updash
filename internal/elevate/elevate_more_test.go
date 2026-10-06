@@ -482,3 +482,51 @@ func TestSudo_validSession(t *testing.T) {
 		t.Fatalf("valid session should use -S -p, args = %v", cmd.Args)
 	}
 }
+
+func TestInstallAskpass_setsEnvAndRemovesFiles(t *testing.T) {
+	cmd := exec.Command("true")
+	const password = "test-pw"
+	cleanup, err := installAskpass(cmd, password)
+	if err != nil {
+		t.Fatal(err)
+	}
+	script := sudoAskpassPath(cmd.Env)
+	if script == "" {
+		t.Fatal("expected SUDO_ASKPASS on the command")
+	}
+	out, err := exec.Command(script).Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(out) != password+"\n" {
+		t.Fatalf("askpass output %q", out)
+	}
+	cleanup()
+	if _, err := os.Stat(script); !os.IsNotExist(err) {
+		t.Fatalf("askpass script still present: %v", err)
+	}
+}
+
+func TestAttachSubprocessSudo_passwordlessDoesNotSetAskpass(t *testing.T) {
+	s := NewSession()
+	s.SetPasswordless()
+	ctx := WithSession(context.Background(), s)
+	cmd := exec.Command("true")
+	cleanup, err := AttachSubprocessSudo(ctx, cmd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+	if path := sudoAskpassPath(cmd.Env); path != "" {
+		t.Fatalf("passwordless session set SUDO_ASKPASS=%s", path)
+	}
+}
+
+func sudoAskpassPath(env []string) string {
+	for _, entry := range env {
+		if strings.HasPrefix(entry, "SUDO_ASKPASS=") {
+			return strings.TrimPrefix(entry, "SUDO_ASKPASS=")
+		}
+	}
+	return ""
+}
