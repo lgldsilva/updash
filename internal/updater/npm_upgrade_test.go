@@ -16,12 +16,13 @@ func TestPartitionNpmItems(t *testing.T) {
 		{Name: "left-pad", Category: model.CatNpm},
 		{Name: "opencode-ai", Category: model.CatNpm},
 		{Name: "@opencode-ai/cli", Category: model.CatNpm},
+		{Name: "@opencode/cli", Category: model.CatNpm},
 		{Name: "@charmland/crush", Category: model.CatNpm},
 		{Name: "react", Category: model.CatNpm},
 	}
 	updatable, protected := partitionNpmItems(items)
-	if len(updatable) != 2 || len(protected) != 3 {
-		t.Fatalf("split = %d updatable / %d protected, want 2/3", len(updatable), len(protected))
+	if len(updatable) != 2 || len(protected) != 4 {
+		t.Fatalf("split = %d updatable / %d protected, want 2/4", len(updatable), len(protected))
 	}
 	for _, it := range protected {
 		if it.Name == "left-pad" || it.Name == "react" {
@@ -69,6 +70,7 @@ func TestNpmPipeline_ExcludesProtectedFromArgs(t *testing.T) {
 		{Name: "opencode-ai"},
 		{Name: "react"},
 		{Name: "@opencode-ai/cli"},
+		{Name: "@opencode/cli"},
 	}
 	updatable, _ := partitionNpmItems(items)
 	args := npmUpdateArgs("", updatable)
@@ -76,7 +78,7 @@ func TestNpmPipeline_ExcludesProtectedFromArgs(t *testing.T) {
 	if !strings.Contains(joined, "left-pad") || !strings.Contains(joined, "react") {
 		t.Errorf("non-protected names missing from args: %v", args)
 	}
-	if strings.Contains(joined, "opencode-ai") || strings.Contains(joined, "@opencode-ai/cli") {
+	if strings.Contains(joined, "opencode-ai") || strings.Contains(joined, "@opencode-ai/cli") || strings.Contains(joined, "@opencode/cli") {
 		t.Errorf("protected package leaked into npm update args: %v", args)
 	}
 }
@@ -88,10 +90,11 @@ func TestBatchNpmUpgrade_SkipsWhenOnlyProtected(t *testing.T) {
 	items := []*model.Item{
 		{Name: "opencode-ai", Category: model.CatNpm, Status: model.StatusOutdated},
 		{Name: "@opencode-ai/cli", Category: model.CatNpm, Status: model.StatusOutdated},
+		{Name: "@opencode/cli", Category: model.CatNpm, Status: model.StatusOutdated},
 	}
 	results := batchNpmUpgrade(context.Background(), items, SilentOptions())
-	if len(results) != 2 {
-		t.Fatalf("expected 2 results, got %d", len(results))
+	if len(results) != 3 {
+		t.Fatalf("expected 3 results, got %d", len(results))
 	}
 	for i, it := range items {
 		if it.Status != model.StatusOK {
