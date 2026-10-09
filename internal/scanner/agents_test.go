@@ -102,6 +102,16 @@ func TestParseAgentVersion(t *testing.T) {
 			want:  "1.1.2",
 		},
 		{
+			name:  "opencode_v2_prefix",
+			input: "opencode v2.0.24",
+			want:  "2.0.24",
+		},
+		{
+			name:  "opencode_v1_bare",
+			input: "1.18.4",
+			want:  "1.18.4",
+		},
+		{
 			name:  "codex",
 			input: "0.144.4",
 			want:  "0.144.4",

@@ -75,6 +75,25 @@ func TestEnsureOpenCodeHealthy_BrokenStub(t *testing.T) {
 	}
 }
 
+func TestEnsureOpenCodeHealthy_V2ReinstallHint(t *testing.T) {
+	prevRunner, prevLook := outputRunner, lookPath
+	outputRunner = func(ctx context.Context, name string, args ...string) ([]byte, error) {
+		return nil, errors.New("opencode: launcher missing")
+	}
+	lookPath = func(file string) (string, error) { return "", errors.New("not found") }
+	t.Cleanup(func() { outputRunner, lookPath = prevRunner, prevLook })
+
+	item := &model.Item{
+		Name: agentOpenCode, Category: model.CatAgent,
+		CurrentVer: "2.0.24", PackageID: scanner.OpenCodePackageV2,
+	}
+	got := ensureOpenCodeHealthy(context.Background(), item, &Result{Item: item, Success: true})
+	want := openCodeReinstallHintFor(item)
+	if got.Success || !strings.Contains(got.Error, want) || strings.Contains(got.Error, "opencode-ai") {
+		t.Fatalf("v2 failure hint = %q, want %s", got.Error, want)
+	}
+}
+
 // A failed update is preserved as-is; no health probe needed.
 func TestEnsureOpenCodeHealthy_UpdateFailed(t *testing.T) {
 	item := &model.Item{Name: agentOpenCode, Category: model.CatAgent, Status: model.StatusUpdating}
