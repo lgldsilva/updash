@@ -1,6 +1,6 @@
 # updash — multi-stage Docker image
 # Prints system state; useful for CI/CD or headless runs on servers.
-FROM golang:1.26-alpine AS builder
+FROM golang:1.26.9-alpine AS builder
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
