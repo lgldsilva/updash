@@ -18,6 +18,10 @@ import (
 	"github.com/lgldsilva/updash/internal/scanner"
 )
 
+// attachSubprocessSudo installs SUDO_ASKPASS for a child that calls sudo.
+// Tests replace it so privileged brew/mas runs can be observed without sudo.
+var attachSubprocessSudo = elevate.AttachSubprocessSudo
+
 // Result holds the outcome of an update operation.
 type Result struct {
 	Item    *model.Item
@@ -242,6 +246,17 @@ func groupByCategory(items []*model.Item) map[model.Category][]*model.Item {
 	return groups
 }
 
+// usePrivilegedAskpass wires SUDO_ASKPASS when needed. Interactive CLI runs
+// use the same helper as headless ones: Homebrew executes each privileged
+// cask step on its own PTY, so a terminal sudo ticket does not cover the
+// next launchctl/pkg sudo. A passwordless session installs nothing.
+func usePrivilegedAskpass(ctx context.Context, cmd *exec.Cmd, needed bool) (func(), error) {
+	if cmd == nil || !needed {
+		return func() {}, nil
+	}
+	return attachSubprocessSudo(ctx, cmd)
+}
+
 func upgradeOneBrewWithPlan(ctx context.Context, item *model.Item, plan CommandPlan, opts Options) *Result {
 	item.Status = model.StatusUpdating
 	if plan.Scope == CommandScopeManual {
@@ -252,18 +267,16 @@ func upgradeOneBrewWithPlan(ctx context.Context, item *model.Item, plan CommandP
 	defer cancel()
 
 	cmd := exec.CommandContext(itemCtx, plan.Name, plan.Args...)
-	if scanner.BrewNeedsSudoPrime(item.Name) && !opts.Interactive {
-		cleanup, err := elevate.AttachSubprocessSudo(itemCtx, cmd)
-		if err != nil {
-			item.Status = model.StatusError
-			return &Result{
-				Item:    item,
-				Success: false,
-				Error:   err.Error() + " — informe a senha de admin no diálogo do updash",
-			}
+	cleanup, err := usePrivilegedAskpass(itemCtx, cmd, scanner.BrewNeedsSudoPrime(item.Name))
+	if err != nil {
+		item.Status = model.StatusError
+		return &Result{
+			Item:    item,
+			Success: false,
+			Error:   err.Error() + " — informe a senha de admin no diálogo do updash",
 		}
-		defer cleanup()
 	}
+	defer cleanup()
 
 	var stdout, stderr bytes.Buffer
 	opts.ConfigureCmd(cmd)
@@ -318,23 +331,21 @@ func upgradeMASAppWithPlan(ctx context.Context, item *model.Item, plan CommandPl
 		return manualAgentResult(item, plan.Manual)
 	}
 	cmd := exec.CommandContext(ctx, plan.Name, plan.Args...)
-	if !opts.Interactive {
-		cleanup, err := elevate.AttachSubprocessSudo(ctx, cmd)
-		if err != nil {
-			item.Status = model.StatusError
-			return &Result{
-				Item:    item,
-				Success: false,
-				Error:   err.Error() + " — informe a senha de admin no diálogo do updash",
-			}
+	cleanup, err := usePrivilegedAskpass(ctx, cmd, true)
+	if err != nil {
+		item.Status = model.StatusError
+		return &Result{
+			Item:    item,
+			Success: false,
+			Error:   err.Error() + " — informe a senha de admin no diálogo do updash",
 		}
-		defer cleanup()
 	}
+	defer cleanup()
 	var stdout, stderr bytes.Buffer
 	opts.ConfigureCmd(cmd)
 	wireCapture(cmd, &stdout, &stderr)
 
-	err := cmd.Run()
+	err = cmd.Run()
 	output := stdout.String() + stderr.String()
 	stillOutdated := masStillOutdatedWithRetry(ctx, item)
 
