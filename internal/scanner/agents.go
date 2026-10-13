@@ -84,7 +84,11 @@ type agentDef struct {
 func agentCatalog() []agentDef {
 	return []agentDef{
 		{name: "Claude Code", binary: binClaude, verCmd: []string{binClaude, flagVersion}, mode: agentUpdateAuto, npmPackage: "@anthropic-ai/claude-code", updateCmd: []string{binClaude, cmdUpdate}},
-		{name: "OpenCode", binary: binOpenCode, verCmd: []string{binOpenCode, flagVersion}, mode: agentUpdateAuto, npmPackage: "opencode-ai", updateCmd: []string{binOpenCode, cmdUpgrade}},
+		// npmPackage is the v1 channel default. After a successful version
+		// probe, applyOpenCodeChannel rewrites the item's PackageID from the
+		// installed major (v2 → @opencode/cli). updateCmd still wins, so the
+		// upgrade stays `opencode upgrade` rather than a generic npm install.
+		{name: "OpenCode", binary: binOpenCode, verCmd: []string{binOpenCode, flagVersion}, mode: agentUpdateAuto, npmPackage: OpenCodePackageV1, updateCmd: []string{binOpenCode, cmdUpgrade}},
 		// Grok ships as a native binary updated by its own subcommand; its
 		// `update --check --json` probe is the freshness channel (no npm
 		// package exists to ask the registry about).
@@ -294,6 +298,9 @@ func probeAgentItem(ctx context.Context, plat model.PlatformInfo, a agentDef) *m
 		it.Status = model.StatusUnverified
 		return it
 	}
+	if a.binary == binOpenCode {
+		applyOpenCodeChannel(it)
+	}
 	// Version answered: freshness may still be unknown, but the item is not
 	// an unverified source. Record how --update will check it.
 	if note := AgentUpdateCheckNote(a.name); note != "" {
@@ -413,6 +420,16 @@ func agentItemPackage(it *model.Item, npmByName map[string]string) string {
 	return npmByName[it.Name]
 }
 
+// agentFreshnessPackage is the npm package a registry probe should ask
+// about. The item's PackageID is the channel selected at scan time; the
+// catalog value is only the fallback when the probe never set one.
+func agentFreshnessPackage(it *model.Item, a agentDef) string {
+	if it != nil && it.PackageID != "" {
+		return it.PackageID
+	}
+	return a.npmPackage
+}
+
 // npmOutdatedLatestFor runs one explicit-name outdated probe. npm exits 1
 // when something is outdated and still prints JSON; that is success. An empty
 // body with a command error, or a body that is not JSON, is a failed probe.
@@ -473,9 +490,14 @@ func resolveRegistryLatestFrom(ctx context.Context, items []*model.Item, catalog
 			targets = append(targets, probeTarget{it: it, a: a})
 			continue
 		}
-		if a.npmPackage == "" || installed[a.npmPackage] {
+		// PackageID wins over the catalog default so OpenCode v2 asks
+		// @opencode/cli even when the preserved v1 package opencode-ai is
+		// still installed globally.
+		pkg := agentFreshnessPackage(it, a)
+		if pkg == "" || installed[pkg] {
 			continue
 		}
+		a.npmPackage = pkg
 		targets = append(targets, probeTarget{it: it, a: a})
 	}
 	probeBounded(len(targets), registryProbeConcurrency, func(i int) {

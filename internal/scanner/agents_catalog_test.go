@@ -97,6 +97,44 @@ func TestOpenCodeFlaggedOutdatedViaNpm(t *testing.T) {
 	}
 }
 
+// v2 freshness follows @opencode/cli. A newer opencode-ai must not be what
+// flags the v2 binary, and a newer @opencode/cli must.
+func TestOpenCodeV2FlaggedOutdatedViaChannel(t *testing.T) {
+	enableMocks()
+	defer disableMocks()
+
+	setMock("npm", []string{"outdated", "-g", "--json", OpenCodePackageV2},
+		`{"@opencode/cli":{"current":"2.0.24","wanted":"2.0.30","latest":"2.0.30"}}`, nil)
+
+	items := []*model.Item{{
+		Name: "OpenCode", Category: model.CatAgent,
+		Status: model.StatusOK, PackageID: OpenCodePackageV2, CurrentVer: "2.0.24",
+	}}
+	if err := applyNpmOutdatedToAgents(context.Background(), items, agentCatalog(), map[string]string{OpenCodePackageV2: "2.0.24"}); err != nil {
+		t.Fatal(err)
+	}
+	if items[0].Status != model.StatusOutdated || items[0].AvailableVer != "2.0.30" {
+		t.Fatalf("OpenCode v2 not flagged via @opencode/cli: %+v", items[0])
+	}
+}
+
+// The preserved v1 package being installed must not satisfy the v2 channel:
+// the registry probe asks @opencode/cli, so a newer 2.x becomes visible.
+func TestResolveRegistryLatestFrom_OpenCodeV2IgnoresV1Package(t *testing.T) {
+	enableMocks()
+	defer disableMocks()
+	setMock("npm", []string{"view", OpenCodePackageV2, "version"}, "2.0.30\n", nil)
+
+	it := &model.Item{
+		Name: "OpenCode", Category: model.CatAgent, Status: model.StatusInfo,
+		PackageID: OpenCodePackageV2, CurrentVer: "2.0.24",
+	}
+	resolveRegistryLatestFrom(context.Background(), []*model.Item{it}, agentCatalog(), map[string]bool{OpenCodePackageV1: true})
+	if it.Status != model.StatusOutdated || it.AvailableVer != "2.0.30" {
+		t.Fatalf("v2 standalone must be flagged from @opencode/cli, got %+v", it)
+	}
+}
+
 func TestApplyNpmOutdated_ExitOneWithJSONStillFlags(t *testing.T) {
 	enableMocks()
 	defer disableMocks()

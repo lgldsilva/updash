@@ -315,7 +315,7 @@ func agentPlans(items []*model.Item) ([]CommandPlan, error) {
 		// OpenCode resolves its own install method and prompts when it fails;
 		// updash decides the method (or the npm fallback) up front instead.
 		if item.Name == agentOpenCode {
-			plans = append(plans, openCodeUpgradePlan(scanner.AgentUpdateCommand(item.Name)))
+			plans = append(plans, openCodeUpgradePlan(scanner.AgentUpdateCommand(item.Name), item))
 			continue
 		}
 		// Crush lives in whatever npm prefix owns the PATH binary; updating it

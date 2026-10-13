@@ -4,17 +4,18 @@ import "github.com/lgldsilva/updash/internal/model"
 
 // ProtectedNpmPackages are global npm packages owned by another updash update
 // path, not by the generic `npm update -g` batch. The OpenCode binary is owned
-// by `opencode upgrade` (its agent updateCmd wins over this npmPackage), so its
-// npm distribution packages must never be touched here — updating them without
-// the agent path's validation is exactly how a broken launcher stub gets left
-// behind.
+// by the OpenCode agent item (its updateCmd wins over the channel package), so
+// both dist channels must never be touched here — v1 is opencode-ai /
+// @opencode-ai/cli, v2 is @opencode/cli. Updating either without the agent
+// path's validation is exactly how a broken launcher stub gets left behind.
 //
 // This is the single, data-driven source of truth (not grep): add a package
 // name here when a new agent owns its own npm upgrade.
 func ProtectedNpmPackages() map[string]struct{} {
 	return map[string]struct{}{
-		"opencode-ai":      {},
+		OpenCodePackageV1:  {},
 		"@opencode-ai/cli": {},
+		OpenCodePackageV2:  {},
 		// Crush's agent item is its single update owner: the planner targets
 		// the npm prefix that actually owns the binary, which the generic
 		// `npm update -g` batch cannot know.
