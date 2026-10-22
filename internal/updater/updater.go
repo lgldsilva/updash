@@ -72,7 +72,9 @@ func ExecutePreparedBatch(ctx context.Context, batch *PreparedUpdateBatch, opts 
 	case model.CatNpm:
 		return executePreparedNpm(ctx, items, plans, opts)
 	case model.CatApt:
-		return executePreparedApt(ctx, items, plans, opts)
+		return executeSequentialPlans(ctx, items, plans, opts)
+	case model.CatRustup:
+		return executeSequentialPlans(ctx, items, plans, opts)
 	case model.CatAgent:
 		return executePreparedAgents(ctx, items, plans, opts)
 	case model.CatFlatpak:
@@ -167,7 +169,11 @@ func skippedElevatedResults(items []*model.Item, reason string) []*Result {
 	return results
 }
 
-func executePreparedApt(ctx context.Context, items []*model.Item, plans []CommandPlan, opts Options) []*Result {
+// executeSequentialPlans runs every plan in order against the batch, fail-fast,
+// then marks all items successful. Used when one category emits multiple
+// category-global steps whose count need not match len(items) (apt refresh+
+// install, rustup self update + toolchain update).
+func executeSequentialPlans(ctx context.Context, items []*model.Item, plans []CommandPlan, opts Options) []*Result {
 	var output strings.Builder
 	for _, plan := range plans {
 		result := runCommandPlan(ctx, items[0], plan, opts)
