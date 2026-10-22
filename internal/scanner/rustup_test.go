@@ -157,6 +157,18 @@ func TestRustupScan_FailureWithoutOutputIsError(t *testing.T) {
 	}
 }
 
+// Manager-only outdated output must surface an item named "rustup" so the
+// updater can plan `rustup self update` instead of treating it as a toolchain.
+func TestParseRustupCheck_ManagerOnlyOutdated(t *testing.T) {
+	items := parseRustupCheck("rustup - update available : 1.29.1 -> 1.29.2")
+	if len(items) != 1 {
+		t.Fatalf("items = %+v, want one manager item", items)
+	}
+	if items[0].Name != "rustup" || items[0].Status != model.StatusOutdated {
+		t.Fatalf("manager item = %+v, want Name=rustup StatusOutdated", items[0])
+	}
+}
+
 // rustup 1.29 lowercased the phrase ("update available"); older releases wrote
 // "Update available". Both must be recognised, and the trailing "up to date :"
 // line for rustup itself must not be mistaken for a toolchain update.
