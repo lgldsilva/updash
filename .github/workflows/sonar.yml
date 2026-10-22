@@ -22,7 +22,7 @@ jobs:
     name: SonarCloud
     runs-on: ubuntu-latest
     env:
-      GO_VERSION: '1.26.9'
+      GO_VERSION: '1.26.10'
       # Same boundary as the test job's COVER_PKGS / .ai-standards.env — the
       # coverage denominator the quality gate measures.
       COVER_PKGS: ./internal/model/... ./internal/config/... ./internal/sizefmt/... ./internal/cli/... ./internal/retention/... ./internal/upgrade/...
