@@ -16,7 +16,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
-      GO_VERSION: '1.26.9'
+      GO_VERSION: '1.26.10'
       COVER_PKGS: ./internal/model/... ./internal/config/... ./internal/sizefmt/... ./internal/cli/... ./internal/retention/... ./internal/upgrade/...
       TEST_IO_PKGS: ./internal/scanner/... ./internal/tui/... ./internal/cleaner/... ./internal/updater/... ./internal/elevate/... ./internal/platform/...
     steps:
@@ -61,7 +61,7 @@ jobs:
           - { goos: linux,   goarch: amd64 }
           - { goos: linux,   goarch: arm64 }
     env:
-      GO_VERSION: '1.26.9'
+      GO_VERSION: '1.26.10'
       GOOS: ${{ matrix.goos }}
       GOARCH: ${{ matrix.goarch }}
     steps:
@@ -83,7 +83,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
-      GO_VERSION: '1.26.9'
+      GO_VERSION: '1.26.10'
       GOLANGCI_LINT_VERSION: v2.12.2
     steps:
       - uses: actions/checkout@v4
@@ -118,7 +118,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.26.9'
+          go-version: '1.26.10'
           cache: false
       - name: govulncheck
         run: |
@@ -154,7 +154,7 @@ jobs:
       contents: read
       security-events: write
     env:
-      GO_VERSION: '1.26.9'
+      GO_VERSION: '1.26.10'
       GOSEC_VERSION: '2.27.1'
     steps:
       - uses: actions/checkout@v4
@@ -235,7 +235,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
-      GO_VERSION: '1.26.9'
+      GO_VERSION: '1.26.10'
     steps:
       - uses: actions/checkout@v4
         with:
