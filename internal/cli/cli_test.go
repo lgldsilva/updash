@@ -440,9 +440,7 @@ func TestCategoryResultsAfterElevation_runsWhenReady(t *testing.T) {
 		called = true
 		return []*updater.Result{{Item: &model.Item{Name: "curl"}, Success: true}}
 	}
-	res := categoryResultsAfterElevation(model.CatApt, categoryElevation{
-		batchCtx: context.Background(),
-		elevCtx:  context.Background(),
+	res := categoryResultsAfterElevation(context.Background(), context.Background(), model.CatApt, categoryElevation{
 		prepared: &updater.PreparedUpdateBatch{},
 	})
 	if !called || len(res) != 1 || !res[0].Success {
@@ -532,9 +530,7 @@ func TestCategoryResultsAfterElevation_grantedRunsBatch(t *testing.T) {
 		t.Fatal("granted elevation must run the prepared batch")
 		return nil
 	}
-	results := categoryResultsAfterElevation(model.CatApt, categoryElevation{
-		batchCtx: context.Background(),
-		elevCtx:  context.Background(),
+	results := categoryResultsAfterElevation(context.Background(), context.Background(), model.CatApt, categoryElevation{
 		prepared: batch,
 		items:    items,
 	})

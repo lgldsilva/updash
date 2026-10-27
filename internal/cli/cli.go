@@ -709,9 +709,7 @@ func runCategoryUpdateSection(
 		results = executePreparedBatch(batchCtx, prepared, env.opts)
 	} else {
 		elevCtx, batchSkipped, skipReason := ensurePlannedElevation(batchCtx, updater.PlansRequireElevation(prepared.Plans()), env.cfg, env.elevSession)
-		results = categoryResultsAfterElevation(cat, categoryElevation{
-			batchCtx:     batchCtx,
-			elevCtx:      elevCtx,
+		results = categoryResultsAfterElevation(batchCtx, elevCtx, cat, categoryElevation{
 			prepared:     prepared,
 			items:        groupItems,
 			opts:         env.opts,
@@ -724,10 +722,9 @@ func runCategoryUpdateSection(
 }
 
 // categoryElevation is the privilege outcome for one category batch.
-// Grouped so categoryResultsAfterElevation stays under Sonar's parameter limit.
+// The two contexts stay function parameters, and the remaining arguments
+// stay grouped so the function remains under Sonar's parameter limit.
 type categoryElevation struct {
-	batchCtx     context.Context
-	elevCtx      context.Context
 	prepared     *updater.PreparedUpdateBatch
 	items        []*model.Item
 	opts         updater.Options
@@ -740,12 +737,12 @@ type categoryElevation struct {
 // elevated groups and still updates user-owned prefixes. Other categories stay
 // whole-batch skips. The npm path uses batchCtx so it does not inherit a
 // cancelled elevation context.
-func categoryResultsAfterElevation(cat model.Category, in categoryElevation) []*updater.Result {
+func categoryResultsAfterElevation(batchCtx, elevCtx context.Context, cat model.Category, in categoryElevation) []*updater.Result {
 	if !in.batchSkipped {
-		return executePreparedBatch(in.elevCtx, in.prepared, in.opts)
+		return executePreparedBatch(elevCtx, in.prepared, in.opts)
 	}
 	if cat == model.CatNpm && updater.PlansHaveUnelevatedWork(in.prepared.Plans()) {
-		return executeNpmSkippingElevated(in.batchCtx, in.prepared, in.opts, in.skipReason)
+		return executeNpmSkippingElevated(batchCtx, in.prepared, in.opts, in.skipReason)
 	}
 	return skipBatchResults(in.items, in.skipReason)
 }
