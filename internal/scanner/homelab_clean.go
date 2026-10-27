@@ -17,7 +17,10 @@ import (
 // HomelabCleanSource scans retention-based cleanup targets (logs, caches, AI outputs).
 type HomelabCleanSource struct{}
 
-const policyMtimeDays = "mtime > %dd"
+const (
+	policyMtimeDays  = "mtime > %dd"
+	scanFailedPrefix = "scan failed: "
+)
 
 func (s *HomelabCleanSource) Category() model.Category { return model.CatHomelabClean }
 func (s *HomelabCleanSource) Label() string            { return "Homelab Cleanup" }
@@ -75,6 +78,10 @@ func (s *HomelabCleanSource) Scan(ctx context.Context, plat model.PlatformInfo) 
 		)...)
 	}
 
+	for _, pair := range aiReleaseTargets(home) {
+		items = append(items, scanSupersededReleases("ai-releases:"+pair.name, pair.path)...)
+	}
+
 	logDays := config.HostLogMaxDays()
 	for _, pair := range hostLogTargets(home, plat.OS) {
 		items = append(items, scanAgeDir(
@@ -111,6 +118,50 @@ func aiOutputTargets(home string) []namedPath {
 	}
 }
 
+// aiReleaseTargets are release folders of self-updating AI CLIs that keep every version
+// they ever installed (a few hundred MB each). Only the release in use is kept.
+func aiReleaseTargets(home string) []namedPath {
+	codex := filepath.Join(home, ".codex", "packages")
+	copilot := filepath.Join(home, ".copilot", "pkg")
+	return []namedPath{
+		{"codex-app-server", filepath.Join(codex, "app-server-daemon", "releases")},
+		{"codex-standalone", filepath.Join(codex, "standalone", "releases")},
+		{binGrok, filepath.Join(home, ".grok", "downloads")},
+		{"copilot-universal", filepath.Join(copilot, "universal")},
+		{"copilot-linux-x64", filepath.Join(copilot, "linux-x64")},
+	}
+}
+
+const policyKeepRelease = "keep the release in use (current link, else newest)"
+
+func scanSupersededReleases(name, dir string) []*model.Item {
+	cands, total, err := retention.SupersededReleases(dir)
+	if err != nil {
+		return []*model.Item{{
+			Name:       name,
+			Category:   model.CatHomelabClean,
+			PackageID:  dir,
+			CurrentVer: scanFailedPrefix + err.Error(),
+			Status:     model.StatusUnverified,
+			KeepPolicy: policyKeepRelease,
+		}}
+	}
+	if len(cands) == 0 || total <= 0 {
+		return nil
+	}
+	return []*model.Item{{
+		Name:         name,
+		Category:     model.CatHomelabClean,
+		PackageID:    dir,
+		CurrentVer:   sizefmt.Format(total),
+		Status:       model.StatusCleanCandidate,
+		Reclaimable:  sizefmt.Format(total),
+		RemoveCount:  len(cands),
+		KeepPolicy:   policyKeepRelease,
+		AvailableVer: fmt.Sprintf("%d old release(s)", len(cands)),
+	}}
+}
+
 func hostLogTargets(home, goos string) []namedPath {
 	out := []namedPath{
 		{"user-state", filepath.Join(home, ".local", "state")},
@@ -128,7 +179,7 @@ func scanAgeDir(name, dir string, maxDays int, now time.Time, policy string) []*
 			Name:       name,
 			Category:   model.CatHomelabClean,
 			PackageID:  dir,
-			CurrentVer: "scan failed: " + err.Error(),
+			CurrentVer: scanFailedPrefix + err.Error(),
 			Status:     model.StatusUnverified,
 			KeepPolicy: policy,
 		}}
@@ -282,7 +333,7 @@ func scanProjectBuilds(ctx context.Context, projectsDir string, maxDays int, now
 			Category:   model.CatHomelabClean,
 			PackageID:  projectsDir,
 			Status:     model.StatusUnverified,
-			CurrentVer: "scan failed: " + err.Error(),
+			CurrentVer: scanFailedPrefix + err.Error(),
 			KeepPolicy: policy,
 		}}
 	}
