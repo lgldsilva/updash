@@ -17,7 +17,10 @@ import (
 // HomelabCleanSource scans retention-based cleanup targets (logs, caches, AI outputs).
 type HomelabCleanSource struct{}
 
-const policyMtimeDays = "mtime > %dd"
+const (
+	policyMtimeDays  = "mtime > %dd"
+	scanFailedPrefix = "scan failed: "
+)
 
 func (s *HomelabCleanSource) Category() model.Category { return model.CatHomelabClean }
 func (s *HomelabCleanSource) Label() string            { return "Homelab Cleanup" }
@@ -138,7 +141,7 @@ func scanSupersededReleases(name, dir string) []*model.Item {
 			Name:       name,
 			Category:   model.CatHomelabClean,
 			PackageID:  dir,
-			CurrentVer: "scan failed: " + err.Error(),
+			CurrentVer: scanFailedPrefix + err.Error(),
 			Status:     model.StatusUnverified,
 			KeepPolicy: policyKeepRelease,
 		}}
@@ -176,7 +179,7 @@ func scanAgeDir(name, dir string, maxDays int, now time.Time, policy string) []*
 			Name:       name,
 			Category:   model.CatHomelabClean,
 			PackageID:  dir,
-			CurrentVer: "scan failed: " + err.Error(),
+			CurrentVer: scanFailedPrefix + err.Error(),
 			Status:     model.StatusUnverified,
 			KeepPolicy: policy,
 		}}
@@ -330,7 +333,7 @@ func scanProjectBuilds(ctx context.Context, projectsDir string, maxDays int, now
 			Category:   model.CatHomelabClean,
 			PackageID:  projectsDir,
 			Status:     model.StatusUnverified,
-			CurrentVer: "scan failed: " + err.Error(),
+			CurrentVer: scanFailedPrefix + err.Error(),
 			KeepPolicy: policy,
 		}}
 	}
