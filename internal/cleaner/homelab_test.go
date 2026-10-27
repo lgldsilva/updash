@@ -229,3 +229,49 @@ func TestCleanProjectBuilds_rejectsUnsafeRoot(t *testing.T) {
 		t.Fatal("nothing may be removed when the projects root is unsafe")
 	}
 }
+
+func TestCleanHomelab_supersededReleasesKeepsCurrent(t *testing.T) {
+	root := t.TempDir()
+	releases := filepath.Join(root, "releases")
+	for _, v := range []string{"old", "cur"} {
+		if err := os.MkdirAll(filepath.Join(releases, v), 0o750); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(releases, v, "bin"), []byte("bytes"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.Symlink(filepath.Join(releases, "cur"), filepath.Join(root, "current")); err != nil {
+		t.Fatal(err)
+	}
+	it := &model.Item{Name: "ai-releases:codex-app-server", Category: model.CatHomelabClean, PackageID: releases}
+	res := cleanOne(context.Background(), it, SilentOptions())
+	if !res.Success || res.BytesFreed != 5 {
+		t.Fatalf("res=%+v", res)
+	}
+	if _, err := os.Stat(filepath.Join(releases, "old")); !os.IsNotExist(err) {
+		t.Fatal("old release should be removed")
+	}
+	if _, err := os.Stat(filepath.Join(releases, "cur")); err != nil {
+		t.Fatal("release in use must stay")
+	}
+	again := cleanOne(context.Background(), it, SilentOptions())
+	if !again.Success || again.Output != "only the release in use remains" {
+		t.Fatalf("second run: %+v", again)
+	}
+}
+
+func TestCleanHomelab_supersededReleasesErrors(t *testing.T) {
+	missing := &model.Item{Name: "ai-releases:x", Category: model.CatHomelabClean}
+	if res := cleanOne(context.Background(), missing, SilentOptions()); res.Success {
+		t.Fatal("expected failure without PackageID")
+	}
+	file := filepath.Join(t.TempDir(), "f")
+	if err := os.WriteFile(file, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	bad := &model.Item{Name: "ai-releases:x", Category: model.CatHomelabClean, PackageID: file}
+	if res := cleanOne(context.Background(), bad, SilentOptions()); res.Success {
+		t.Fatal("expected failure for a non-directory")
+	}
+}

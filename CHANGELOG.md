@@ -6,6 +6,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/); versions follow 
 ## [Unreleased]
 
 ### Added
+- Homelab cleanup `ai-releases:*`: self-updating AI CLIs keep every version they ever installed (Codex app-server/standalone releases, Grok downloads, Copilot `pkg`), a few hundred MB each. Only the release in use is kept — the target of the sibling `current` link, else the newest — and the list is recomputed at clean time
 - Linux system scanners: dnf/yum (Fedora/RHEL), zypper (openSUSE), apk (Alpine) — scan + sudo-aware update
 - pnpm and bun global-store scanners with update support
 - Agent catalog entries: pi, Qwen Code, Aider, Amazon Q, Windsurf
@@ -15,10 +16,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/); versions follow 
 - CI cross-build job (darwin/windows/linux × amd64/arm64) in the PR gate; `validate.sh` cross-build gate
 
 ### Changed
+- Agy (Google Antigravity CLI, standalone `agy` — not the AUR IDE package) updates via `agy update`. The CLI has no check-only latest probe, so an auto agent with an idempotent `updateCmd` and no freshness channel is included in `--update` and TUI update-all even while the scan still reports freshness as not verified. A zero exit (including "already on the latest version") is success; a working `agy --version` is informational, not an unverified source
 - Agent update dispatch is catalog-driven (no more `strings.Contains`); manual agents keep explicit notes (Aider → pipx, Amazon Q → doctor)
 - nvm/omz/SDKMAN updates degrade to a manual note when bash is missing (bare Windows hosts); nvm scan understands nvm-windows paths
 
 ### Fixed
+- macOS `--update` asks for the administrator password once and reuses it for brew/mas via `SUDO_ASKPASS`, so privileged cask steps (such as `launchctl` service removal) no longer prompt again on their own terminal
+- OpenCode v2 (`2.x`, npm channel `@opencode/cli`) is no longer checked against the v1 package `opencode-ai`, so a newer v2 release stays visible while a preserved v1 install is still on the machine. The installed major selects the channel. `@opencode/cli` is protected from the generic `npm update -g` batch, same single-owner rule as `opencode-ai`. A v2 standalone whose resolved path is not exactly the current user's `~/.opencode/bin/opencode` is not updated with `opencode upgrade -m curl`, which reinstalls over a version switch and leaves a stale binary. A path that only shares that suffix, or differs in case, does not count. `opencode --version` lines prefixed with the command name (`opencode v2.0.24`) still parse as `2.0.24`
 - npm ≥ 12 blocks dependency install scripts by default (RFC npm/rfcs#868): `npm update -g` and npm-based agent updates now pass `--allow-scripts` for the packages being updated, so wrapper packages like `@anthropic-ai/claude-code` no longer end up with a silently skipped postinstall ("Error: claude native binary not installed")
 - Claude Code updates self-heal: after an update, updash verifies `claude --version` and re-runs the wrapper's postinstall when npm left the placeholder stub in place; retries the update once when it failed because claude was already the broken stub
 - nvm detection on Windows no longer points the updater at unix-only `nvm.sh`

@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/lgldsilva/updash/internal/model"
+	"github.com/lgldsilva/updash/internal/scanner"
 	"github.com/lgldsilva/updash/internal/updater"
 )
 
@@ -159,7 +160,7 @@ func printAgentSummary(s *model.SourceSummary) (outdated, needsSudo, manualOnly 
 			case model.StatusOK:
 				fmt.Printf("    ✓ %s  %s\n", it.Name, it.CurrentVer)
 			case model.StatusInfo:
-				fmt.Printf("    ℹ %s  %s (freshness not verified)\n", it.Name, it.CurrentVer)
+				fmt.Printf("    ℹ %s  %s (%s)\n", it.Name, it.CurrentVer, agentFreshnessNote(it))
 			case model.StatusUnverified:
 				fmt.Printf("    ? %s  %s (verification failed)\n", it.Name, it.CurrentVer)
 			case model.StatusError:
@@ -255,21 +256,99 @@ func PrintVerifyReport(
 	// outdated and NOT resolvable without the user. An item that failed once
 	// but scans clean now, or whose leftover is manual-only (Toolbox, disabled
 	// cask, origin conflict), is not a failed update.
-	stats.failed = len(failed)
+	// Agents with no freshness channel never rescan as outdated, so a failed
+	// idempotent update is the failure — it must not disappear into rc 0.
+	blind := blindUpdateFailures(updates, results)
+	stats.failed = len(failed) + len(blind)
+	stats.manual = len(manual)
 	printVerifyHeader(ok, stats.failed, skipped)
 
-	if stats.remaining == 0 {
+	if stats.remaining == 0 && len(blind) == 0 {
 		fmt.Println("\n✓ Verified — nothing outdated remains")
 		return stats
 	}
-	stats.manual = len(manual)
-
-	fmt.Printf("\n⚠ %d item(s) still outdated:\n", stats.remaining)
+	if stats.remaining > 0 {
+		fmt.Printf("\n⚠ %d item(s) still outdated:\n", stats.remaining)
+	}
 	printVerifyGroup("Need password / Terminal", needPass, resultByItem)
 	printVerifyGroup("Manual update only", manual, resultByItem)
-	printVerifyGroup("Failed", failed, resultByItem)
+	printVerifyGroup("Failed", appendItems(failed, blind), resultByItem)
 	printVerifyGroup("Others", other, resultByItem)
 	return stats
+}
+
+// agentFreshnessNote is the parenthetical on an informational agent row.
+// Agents checked by an idempotent update command say so; everyone else stays
+// the plain "freshness not verified" line.
+func agentFreshnessNote(it *model.Item) string {
+	note := "freshness not verified"
+	if it == nil {
+		return note
+	}
+	if extra := scanner.AgentUpdateCheckNote(it.Name); extra != "" {
+		note += "; " + extra
+	}
+	return note
+}
+
+// blindUpdateFailures are failed idempotent agent updates that a rescan
+// cannot show as outdated (there is no latest channel). Skips and items
+// already counted as remaining-outdated failures are left alone.
+func blindUpdateFailures(updates []*model.SourceSummary, results []*updater.Result) []*model.Item {
+	outdated := outdatedItemKeys(updates)
+	seen := map[itemKey]bool{}
+	var failed []*model.Item
+	for _, r := range results {
+		if it := blindUpdateFailure(r, outdated, seen); it != nil {
+			failed = append(failed, it)
+		}
+	}
+	return failed
+}
+
+func outdatedItemKeys(updates []*model.SourceSummary) map[itemKey]bool {
+	outdated := map[itemKey]bool{}
+	for _, s := range updates {
+		collectOutdatedKeys(outdated, s)
+	}
+	return outdated
+}
+
+func collectOutdatedKeys(outdated map[itemKey]bool, s *model.SourceSummary) {
+	if s == nil {
+		return
+	}
+	for _, it := range s.Items {
+		if it != nil && it.Status == model.StatusOutdated {
+			outdated[keyOf(it)] = true
+		}
+	}
+}
+
+func blindUpdateFailure(r *updater.Result, outdated, seen map[itemKey]bool) *model.Item {
+	if skippedBlindResult(r) || !scanner.AgentUpdatesWithoutFreshness(r.Item.Name) {
+		return nil
+	}
+	k := keyOf(r.Item)
+	if outdated[k] || seen[k] {
+		return nil
+	}
+	seen[k] = true
+	return r.Item
+}
+
+func skippedBlindResult(r *updater.Result) bool {
+	return r == nil || r.Item == nil || r.Success || isSkippedResult(r)
+}
+
+func appendItems(a, b []*model.Item) []*model.Item {
+	if len(b) == 0 {
+		return a
+	}
+	out := make([]*model.Item, 0, len(a)+len(b))
+	out = append(out, a...)
+	out = append(out, b...)
+	return out
 }
 
 // itemKey identifies an item across two independent scan passes, whose

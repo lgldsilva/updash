@@ -139,7 +139,10 @@ func cleanPacman(ctx context.Context, item *model.Item, opts Options) *Result {
 	return runCmd(ctx, item, opts, argv[0], argv[1:]...)
 }
 
-const fmtErrLine = "error: %s\n"
+const (
+	fmtErrLine           = "error: %s\n"
+	errCleanupIncomplete = "cleanup incomplete"
+)
 
 // cleanSDKMAN removes old SDKMAN versions, keeping only the latest per major.
 func cleanSDKMAN(ctx context.Context, item *model.Item, opts Options) *Result {
@@ -239,6 +242,8 @@ func cleanHomelab(ctx context.Context, item *model.Item, opts Options) *Result {
 		strings.HasPrefix(item.Name, "ai-output:"),
 		strings.HasPrefix(item.Name, "host-logs:"):
 		return cleanAgePaths(item, ageDaysForHomelab(item.Name))
+	case strings.HasPrefix(item.Name, "ai-releases:"):
+		return cleanSupersededReleases(item)
 	case item.Name == "container-logs":
 		return cleanContainerLogs(ctx, item, opts)
 	case item.Name == "disk-pressure":
@@ -267,34 +272,29 @@ func cleanProjectBuildsPaths(ctx context.Context, item *model.Item, maxDays int)
 		item.Status = model.StatusError
 		return &Result{Item: item, Success: false, Error: err.Error()}
 	}
-	if len(cands) == 0 {
-		if len(partialErrs) > 0 {
-			item.Status = model.StatusError
-			return &Result{Item: item, Success: false, Error: "cleanup scan incomplete", Output: strings.Join(partialErrs, "\n")}
-		}
-		item.Status = model.StatusCleaned
-		return &Result{Item: item, Success: true, Output: "nothing older than retention"}
-	}
-	paths := make([]string, len(cands))
-	for i, c := range cands {
-		paths[i] = c.Path
-	}
-	freed, errs := retention.RemovePaths(paths)
-	var b strings.Builder
-	fmt.Fprintf(&b, "removed %d project build path(s)\n", len(paths)-len(errs))
-	for _, e := range partialErrs {
-		fmt.Fprintf(&b, "scan warning: %s\n", e)
-	}
-	for _, e := range errs {
-		fmt.Fprintf(&b, "error: %s\n", e)
-	}
-	if len(partialErrs) > 0 || len(errs) > 0 {
+	// Zero candidates plus unreadable projects is not a clean no-op: the scan
+	// cannot prove those trees were empty.
+	if len(cands) == 0 && len(partialErrs) > 0 {
 		item.Status = model.StatusError
-		return &Result{Item: item, Success: false, Error: "cleanup incomplete", Output: b.String(), BytesFreed: freed}
+		return &Result{Item: item, Success: false, Error: "cleanup scan incomplete", Output: strings.Join(partialErrs, "\n")}
 	}
-	item.Status = model.StatusCleaned
-	item.Freed = FormatBytes(freed)
-	return &Result{Item: item, Success: true, Output: b.String(), BytesFreed: freed}
+	return removeRetentionPaths(item, cands, "nothing older than retention", "removed %d project build path(s)\n", partialErrs)
+}
+
+// cleanSupersededReleases recomputes the old releases at clean time (the scan may be
+// stale) and never touches the release in use.
+func cleanSupersededReleases(item *model.Item) *Result {
+	dir := item.PackageID
+	if dir == "" {
+		item.Status = model.StatusError
+		return &Result{Item: item, Success: false, Error: "missing releases path"}
+	}
+	cands, _, err := retention.SupersededReleases(dir)
+	if err != nil {
+		item.Status = model.StatusError
+		return &Result{Item: item, Success: false, Error: err.Error()}
+	}
+	return removeRetentionPaths(item, cands, "only the release in use remains", "removed %d old release(s)\n", nil)
 }
 
 func ageDaysForHomelab(name string) int {
@@ -321,9 +321,17 @@ func cleanAgePaths(item *model.Item, maxDays int) *Result {
 		item.Status = model.StatusError
 		return &Result{Item: item, Success: false, Error: err.Error()}
 	}
+	return removeRetentionPaths(item, cands, "nothing older than retention", "removed %d path(s)\n", nil)
+}
+
+// removeRetentionPaths deletes cands and records the outcome on item.
+// An empty list is a successful no-op reported as emptyOutput. removedFmt
+// formats how many paths were actually removed. warnings are scan notes
+// included in the output; any warning or removal error fails the item.
+func removeRetentionPaths(item *model.Item, cands []retention.PathCandidate, emptyOutput, removedFmt string, warnings []string) *Result {
 	if len(cands) == 0 {
 		item.Status = model.StatusCleaned
-		return &Result{Item: item, Success: true, Output: "nothing older than retention"}
+		return &Result{Item: item, Success: true, Output: emptyOutput}
 	}
 	paths := make([]string, len(cands))
 	for i, c := range cands {
@@ -331,13 +339,16 @@ func cleanAgePaths(item *model.Item, maxDays int) *Result {
 	}
 	freed, errs := retention.RemovePaths(paths)
 	var b strings.Builder
-	fmt.Fprintf(&b, "removed %d path(s)\n", len(paths)-len(errs))
-	for _, e := range errs {
-		fmt.Fprintf(&b, "error: %s\n", e)
+	fmt.Fprintf(&b, removedFmt, len(paths)-len(errs))
+	for _, w := range warnings {
+		fmt.Fprintf(&b, "scan warning: %s\n", w)
 	}
-	if len(errs) > 0 {
+	for _, e := range errs {
+		fmt.Fprintf(&b, fmtErrLine, e)
+	}
+	if len(warnings) > 0 || len(errs) > 0 {
 		item.Status = model.StatusError
-		return &Result{Item: item, Success: false, Error: "cleanup incomplete", Output: b.String(), BytesFreed: freed}
+		return &Result{Item: item, Success: false, Error: errCleanupIncomplete, Output: b.String(), BytesFreed: freed}
 	}
 	item.Status = model.StatusCleaned
 	item.Freed = FormatBytes(freed)

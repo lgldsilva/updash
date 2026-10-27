@@ -18,6 +18,10 @@ import (
 	"github.com/lgldsilva/updash/internal/scanner"
 )
 
+// attachSubprocessSudo installs SUDO_ASKPASS for a child that calls sudo.
+// Tests replace it so privileged brew/mas runs can be observed without sudo.
+var attachSubprocessSudo = elevate.AttachSubprocessSudo
+
 // Result holds the outcome of an update operation.
 type Result struct {
 	Item    *model.Item
@@ -68,7 +72,9 @@ func ExecutePreparedBatch(ctx context.Context, batch *PreparedUpdateBatch, opts 
 	case model.CatNpm:
 		return executePreparedNpm(ctx, items, plans, opts)
 	case model.CatApt:
-		return executePreparedApt(ctx, items, plans, opts)
+		return executeSequentialPlans(ctx, items, plans, opts)
+	case model.CatRustup:
+		return executeSequentialPlans(ctx, items, plans, opts)
 	case model.CatAgent:
 		return executePreparedAgents(ctx, items, plans, opts)
 	case model.CatFlatpak:
@@ -163,7 +169,11 @@ func skippedElevatedResults(items []*model.Item, reason string) []*Result {
 	return results
 }
 
-func executePreparedApt(ctx context.Context, items []*model.Item, plans []CommandPlan, opts Options) []*Result {
+// executeSequentialPlans runs every plan in order against the batch, fail-fast,
+// then marks all items successful. Used when one category emits multiple
+// category-global steps whose count need not match len(items) (apt refresh+
+// install, rustup self update + toolchain update).
+func executeSequentialPlans(ctx context.Context, items []*model.Item, plans []CommandPlan, opts Options) []*Result {
 	var output strings.Builder
 	for _, plan := range plans {
 		result := runCommandPlan(ctx, items[0], plan, opts)
@@ -173,6 +183,27 @@ func executePreparedApt(ctx context.Context, items []*model.Item, plans []Comman
 		}
 	}
 	return batchMarkAll(items, &Result{Success: true, Output: output.String()})
+}
+
+// annotateIdempotentAgentResult labels a zero-exit update that has no
+// freshness channel. The exit code already decided success; an unrecognized
+// payload stays a success so "already current" cannot become inconclusive.
+func annotateIdempotentAgentResult(item *model.Item, result *Result) *Result {
+	if result == nil || item == nil || !result.Success || !scanner.AgentUpdatesWithoutFreshness(item.Name) {
+		return result
+	}
+	kind := scanner.ClassifyAgyUpdateOutput(result.Output)
+	if kind == "" {
+		return result
+	}
+	label := strings.Join(scanner.AgentUpdateCommand(item.Name), " ") + ": " + kind
+	if result.Output != "" {
+		result.Output = label + "\n" + result.Output
+	} else {
+		result.Output = label
+	}
+	item.Log = result.Output
+	return result
 }
 
 func executePreparedAgents(ctx context.Context, items []*model.Item, plans []CommandPlan, opts Options) []*Result {
@@ -194,7 +225,7 @@ func executePreparedAgents(ctx context.Context, items []*model.Item, plans []Com
 		case agentOpenCode:
 			results[i] = ensureOpenCodeHealthy(ctx, item, result)
 		default:
-			results[i] = npmBrewCollisionDowngrade(item, result)
+			results[i] = annotateIdempotentAgentResult(item, npmBrewCollisionDowngrade(item, result))
 		}
 	}
 	return results
@@ -221,6 +252,17 @@ func groupByCategory(items []*model.Item) map[model.Category][]*model.Item {
 	return groups
 }
 
+// usePrivilegedAskpass wires SUDO_ASKPASS when needed. Interactive CLI runs
+// use the same helper as headless ones: Homebrew executes each privileged
+// cask step on its own PTY, so a terminal sudo ticket does not cover the
+// next launchctl/pkg sudo. A passwordless session installs nothing.
+func usePrivilegedAskpass(ctx context.Context, cmd *exec.Cmd, needed bool) (func(), error) {
+	if cmd == nil || !needed {
+		return func() {}, nil
+	}
+	return attachSubprocessSudo(ctx, cmd)
+}
+
 func upgradeOneBrewWithPlan(ctx context.Context, item *model.Item, plan CommandPlan, opts Options) *Result {
 	item.Status = model.StatusUpdating
 	if plan.Scope == CommandScopeManual {
@@ -231,18 +273,16 @@ func upgradeOneBrewWithPlan(ctx context.Context, item *model.Item, plan CommandP
 	defer cancel()
 
 	cmd := exec.CommandContext(itemCtx, plan.Name, plan.Args...)
-	if scanner.BrewNeedsSudoPrime(item.Name) && !opts.Interactive {
-		cleanup, err := elevate.AttachSubprocessSudo(itemCtx, cmd)
-		if err != nil {
-			item.Status = model.StatusError
-			return &Result{
-				Item:    item,
-				Success: false,
-				Error:   err.Error() + " — informe a senha de admin no diálogo do updash",
-			}
+	cleanup, err := usePrivilegedAskpass(itemCtx, cmd, scanner.BrewNeedsSudoPrime(item.Name))
+	if err != nil {
+		item.Status = model.StatusError
+		return &Result{
+			Item:    item,
+			Success: false,
+			Error:   err.Error() + " — informe a senha de admin no diálogo do updash",
 		}
-		defer cleanup()
 	}
+	defer cleanup()
 
 	var stdout, stderr bytes.Buffer
 	opts.ConfigureCmd(cmd)
@@ -297,23 +337,21 @@ func upgradeMASAppWithPlan(ctx context.Context, item *model.Item, plan CommandPl
 		return manualAgentResult(item, plan.Manual)
 	}
 	cmd := exec.CommandContext(ctx, plan.Name, plan.Args...)
-	if !opts.Interactive {
-		cleanup, err := elevate.AttachSubprocessSudo(ctx, cmd)
-		if err != nil {
-			item.Status = model.StatusError
-			return &Result{
-				Item:    item,
-				Success: false,
-				Error:   err.Error() + " — informe a senha de admin no diálogo do updash",
-			}
+	cleanup, err := usePrivilegedAskpass(ctx, cmd, true)
+	if err != nil {
+		item.Status = model.StatusError
+		return &Result{
+			Item:    item,
+			Success: false,
+			Error:   err.Error() + " — informe a senha de admin no diálogo do updash",
 		}
-		defer cleanup()
 	}
+	defer cleanup()
 	var stdout, stderr bytes.Buffer
 	opts.ConfigureCmd(cmd)
 	wireCapture(cmd, &stdout, &stderr)
 
-	err := cmd.Run()
+	err = cmd.Run()
 	output := stdout.String() + stderr.String()
 	stillOutdated := masStillOutdatedWithRetry(ctx, item)
 

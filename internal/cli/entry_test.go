@@ -14,11 +14,11 @@ import (
 
 func restoreHooks(t *testing.T) {
 	t.Helper()
-	od, os, osf, osfc, oc, ou, opb, epb, enpm, op, oe, on, opm, of, oi := detectPlatform, runScannerAll, runScannerFiltered, runScannerFilteredForCleanup, cleanOneFn, updateCategory, prepareUpdateBatch, executePreparedBatch, executeNpmSkippingElevated, primeMacSudo, canElevateNP, nativeMacAvail, promptMacSess, formatBytesFn, stdinIsTTYFn
+	od, os, osf, osfc, oc, ou, opb, epb, enpm, oe, on, opm, of, oi := detectPlatform, runScannerAll, runScannerFiltered, runScannerFilteredForCleanup, cleanOneFn, updateCategory, prepareUpdateBatch, executePreparedBatch, executeNpmSkippingElevated, canElevateNP, nativeMacAvail, promptMacSess, formatBytesFn, stdinIsTTYFn
 	t.Cleanup(func() {
 		detectPlatform, runScannerAll, runScannerFiltered, runScannerFilteredForCleanup, cleanOneFn, updateCategory, prepareUpdateBatch, executePreparedBatch = od, os, osf, osfc, oc, ou, opb, epb
 		executeNpmSkippingElevated = enpm
-		primeMacSudo, canElevateNP, nativeMacAvail, promptMacSess = op, oe, on, opm
+		canElevateNP, nativeMacAvail, promptMacSess = oe, on, opm
 		formatBytesFn, stdinIsTTYFn = of, oi
 	})
 }
@@ -379,6 +379,12 @@ func TestRunOneClean_successPaths(t *testing.T) {
 	}
 }
 
+func readyPasswordlessSession() *elevate.Session {
+	s := elevate.NewSession()
+	s.SetPasswordless()
+	return s
+}
+
 func TestRunNativeElevatedItems(t *testing.T) {
 	restoreHooks(t)
 	var sess *elevate.Session
@@ -389,21 +395,28 @@ func TestRunNativeElevatedItems(t *testing.T) {
 	stdinIsTTYFn = func() bool { return false }
 
 	// cancelled
-	primeMacSudo = func(ctx context.Context) error { return elevate.ErrDialogCancelled }
+	promptMacSess = func(context.Context, string) (*elevate.Session, error) {
+		return nil, elevate.ErrDialogCancelled
+	}
 	res := runNativeElevatedItems(context.Background(), model.PlatformInfo{OS: "darwin"}, items, updater.Options{}, Config{}, &sess)
 	if len(res) != 2 || !strings.Contains(res[0].Error, "⊘") {
 		t.Fatalf("%+v", res)
 	}
 
 	// other error
-	primeMacSudo = func(ctx context.Context) error { return errors.New("boom") }
+	promptMacSess = func(context.Context, string) (*elevate.Session, error) {
+		return nil, errors.New("boom")
+	}
 	res = runNativeElevatedItems(context.Background(), model.PlatformInfo{OS: "darwin"}, items, updater.Options{}, Config{}, &sess)
 	if len(res) != 2 || res[0].Error != "boom" {
 		t.Fatalf("%+v", res)
 	}
 
-	// success
-	primeMacSudo = func(ctx context.Context) error { return nil }
+	// success keeps the prompted session (not a fresh passwordless one)
+	prompted := readyPasswordlessSession()
+	promptMacSess = func(context.Context, string) (*elevate.Session, error) {
+		return prompted, nil
+	}
 	updateCategory = func(ctx context.Context, cat model.Category, items []*model.Item, opts updater.Options) []*updater.Result {
 		out := make([]*updater.Result, len(items))
 		for i, it := range items {
@@ -413,15 +426,43 @@ func TestRunNativeElevatedItems(t *testing.T) {
 	}
 	stdinIsTTYFn = func() bool { return true }
 	sess = nil
-	res = runNativeElevatedItems(context.Background(), model.PlatformInfo{OS: "darwin"}, items, updater.Options{}, Config{}, &sess)
-	if len(res) != 2 || !res[0].Success || sess == nil {
+	out := captureStdout(t, func() {
+		res = runNativeElevatedItems(context.Background(), model.PlatformInfo{OS: "darwin"}, items, updater.Options{}, Config{}, &sess)
+	})
+	if len(res) != 2 || !res[0].Success || sess != prompted {
+		t.Fatalf("res=%+v sess=%v", res, sess)
+	}
+	if !strings.Contains(out, "password once") {
+		t.Fatalf("stdout=%q", out)
+	}
+}
+
+func TestRunNativeElevatedItems_passwordlessSkipsDialog(t *testing.T) {
+	restoreHooks(t)
+	called := false
+	promptMacSess = func(context.Context, string) (*elevate.Session, error) {
+		called = true
+		return nil, errors.New("dialog should not open")
+	}
+	updateCategory = func(ctx context.Context, cat model.Category, items []*model.Item, opts updater.Options) []*updater.Result {
+		return []*updater.Result{{Item: items[0], Success: true}}
+	}
+	sess := readyPasswordlessSession()
+	items := []*model.Item{{Name: "microsoft-office", Category: model.CatBrew}}
+	res := runNativeElevatedItems(context.Background(), model.PlatformInfo{OS: "darwin"}, items, updater.Options{}, Config{}, &sess)
+	if called {
+		t.Fatal("NOPASSWD session must not open the password dialog")
+	}
+	if len(res) != 1 || !res[0].Success || sess == nil || !sess.Ready() {
 		t.Fatalf("res=%+v sess=%v", res, sess)
 	}
 }
 
 func TestRunNativeUpdateSection_withItems(t *testing.T) {
 	restoreHooks(t)
-	primeMacSudo = func(ctx context.Context) error { return elevate.ErrDialogCancelled }
+	promptMacSess = func(context.Context, string) (*elevate.Session, error) {
+		return nil, elevate.ErrDialogCancelled
+	}
 	stdinIsTTYFn = func() bool { return true }
 	var sess *elevate.Session
 	env := updateBatchEnv{

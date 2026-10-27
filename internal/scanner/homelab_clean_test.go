@@ -280,3 +280,42 @@ func TestHomelabCleanSource_projectsBuilds_rejectsHomeAsRoot(t *testing.T) {
 		t.Fatalf("nothing may be selected for removal: %+v", it)
 	}
 }
+
+func TestHomelabCleanSource_supersededAIReleases(t *testing.T) {
+	home := stubHomelabHome(t)
+	releases := filepath.Join(home, ".codex", "packages", "app-server-daemon", "releases")
+	for _, v := range []string{"0.163.0", "0.164.0"} {
+		if err := os.MkdirAll(filepath.Join(releases, v, "bin"), 0o750); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(releases, v, "bin", "codex"), []byte("binary-bytes"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.Symlink(filepath.Join(releases, "0.164.0"), filepath.Join(releases, "..", "current")); err != nil {
+		t.Fatal(err)
+	}
+
+	items, err := (&HomelabCleanSource{}).Scan(context.Background(), model.PlatformInfo{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	it := findItem(items, "ai-releases:codex-app-server")
+	if it == nil || it.Status != model.StatusCleanCandidate || it.RemoveCount != 1 || it.PackageID != releases {
+		t.Fatalf("expected one superseded codex release, got %+v", it)
+	}
+	if findItem(items, "ai-releases:grok") != nil {
+		t.Fatal("missing folders must not produce items")
+	}
+}
+
+func TestScanSupersededReleases_ReportsInspectionFailure(t *testing.T) {
+	file := filepath.Join(t.TempDir(), "not-a-dir")
+	if err := os.WriteFile(file, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	items := scanSupersededReleases("ai-releases:x", file)
+	if len(items) != 1 || items[0].Status != model.StatusUnverified {
+		t.Fatalf("got %+v", items)
+	}
+}

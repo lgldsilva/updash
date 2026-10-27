@@ -113,6 +113,7 @@ func TestSuggestCommand_agentsAndPlugins(t *testing.T) {
 		{&model.Item{Category: model.CatAgent, Name: "Copilot CLI"}, "npm install -g --allow-scripts=@github/copilot @github/copilot@latest"},
 		{&model.Item{Category: model.CatAgent, Name: "MimoCode"}, "mimo upgrade"},
 		{&model.Item{Category: model.CatAgent, Name: "Grok"}, "grok update"},
+		{&model.Item{Category: model.CatAgent, Name: "Agy"}, "agy update"},
 		{&model.Item{Category: model.CatAgent, Name: "Cursor"}, ""},
 	}
 	for _, tc := range cases {

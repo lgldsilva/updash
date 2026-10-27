@@ -31,8 +31,14 @@ func AttachSubprocessSudo(ctx context.Context, cmd *exec.Cmd) (func(), error) {
 	if sess == nil || !sess.valid || sess.passwordless {
 		return noopCleanup, nil
 	}
+	return installAskpass(cmd, sess.password)
+}
 
-	pwPath, err := writeSudoPasswordFile(sess.password)
+// installAskpass points SUDO_ASKPASS at a helper that prints password.
+// Homebrew passes -A to sudo when that variable is set, so each privileged
+// cask step (including ones on a private PTY) reuses this password.
+func installAskpass(cmd *exec.Cmd, password string) (func(), error) {
+	pwPath, err := writeSudoPasswordFile(password)
 	if err != nil {
 		return noopCleanup, err
 	}

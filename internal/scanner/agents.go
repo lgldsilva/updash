@@ -62,6 +62,10 @@ const (
 // agentDef is the single data-driven description of one AI coding assistant:
 // how to probe its version, how to learn the latest release, and how to
 // upgrade it. Adding an agent = adding one entry here (no updater changes).
+// An auto agent with updateCmd but no freshness channel (no latestCmd and no
+// npmPackage) is still upgraded by running that command: it is an idempotent
+// remote check, so --update runs it even when the scan cannot mark the item
+// outdated. See AgentUpdatesWithoutFreshness.
 type agentDef struct {
 	name       string
 	binary     string
@@ -80,14 +84,24 @@ type agentDef struct {
 func agentCatalog() []agentDef {
 	return []agentDef{
 		{name: "Claude Code", binary: binClaude, verCmd: []string{binClaude, flagVersion}, mode: agentUpdateAuto, npmPackage: "@anthropic-ai/claude-code", updateCmd: []string{binClaude, cmdUpdate}},
-		{name: "OpenCode", binary: binOpenCode, verCmd: []string{binOpenCode, flagVersion}, mode: agentUpdateAuto, npmPackage: "opencode-ai", updateCmd: []string{binOpenCode, cmdUpgrade}},
+		// npmPackage is the v1 channel default. After a successful version
+		// probe, applyOpenCodeChannel rewrites the item's PackageID from the
+		// installed major (v2 → @opencode/cli). updateCmd still wins, so the
+		// upgrade stays `opencode upgrade` rather than a generic npm install.
+		{name: "OpenCode", binary: binOpenCode, verCmd: []string{binOpenCode, flagVersion}, mode: agentUpdateAuto, npmPackage: OpenCodePackageV1, updateCmd: []string{binOpenCode, cmdUpgrade}},
 		// Grok ships as a native binary updated by its own subcommand; its
 		// `update --check --json` probe is the freshness channel (no npm
 		// package exists to ask the registry about).
 		{name: "Grok", binary: binGrok, verCmd: []string{binGrok, flagVersion}, mode: agentUpdateAuto, updateCmd: []string{binGrok, cmdUpdate},
 			latestCmd: []string{binGrok, cmdUpdate, "--check", flagJSON}, latestJSONKey: "latestVersion"},
 		{name: "Antigravity", binary: binAntigravity, verCmd: []string{binAntigravity, flagVersion}, mode: agentUpdateManual},
-		{name: "Agy", binary: "agy", verCmd: []string{"agy", flagVersion}, mode: agentUpdateManual},
+		// Agy is the standalone Antigravity CLI (~/.local/bin/agy), not the
+		// AUR IDE package. `agy update` is non-interactive and idempotent
+		// (already-current exits 0), but there is no check-only flag and
+		// `agy changelog` prints the version embedded in the binary. With no
+		// freshness channel, --update runs `agy update` even while the scan
+		// stays "freshness not verified". Today Agy is the only such agent.
+		{name: "Agy", binary: "agy", verCmd: []string{"agy", flagVersion}, mode: agentUpdateAuto, updateCmd: []string{"agy", "update"}},
 		// MiMo Code (Xiaomi) distributes a native binary whose `mimo upgrade`
 		// self-updater mirrors the curl-installer layout; @mimo-ai/cli is the
 		// published package used only as the freshness source.
@@ -157,6 +171,54 @@ func AgentKeepPolicy(name string) string {
 		return a.keepPolicy
 	}
 	return policyManual
+}
+
+// AgentUpdatesWithoutFreshness reports an auto agent whose updateCmd is an
+// idempotent remote check and that has neither latestCmd nor an npm package.
+// --update and TUI update-all run that command even when the scan could not
+// mark the item outdated. The item stays informational ("freshness not
+// verified"); a successful version probe is not an unverified source.
+func AgentUpdatesWithoutFreshness(name string) bool {
+	a, ok := lookupAgentDef(name)
+	if !ok || a.mode != agentUpdateAuto {
+		return false
+	}
+	return len(a.updateCmd) > 0 && len(a.latestCmd) == 0 && a.npmPackage == ""
+}
+
+// AgentUpdateCheckNote is the scan hint for an agent updated without a
+// freshness channel ("" otherwise). The wording must not contain "manual":
+// that substring marks an item manual-only and would skip the update.
+func AgentUpdateCheckNote(name string) string {
+	if !AgentUpdatesWithoutFreshness(name) {
+		return ""
+	}
+	cmd := AgentUpdateCommand(name)
+	if len(cmd) == 0 {
+		return ""
+	}
+	return "checked on update: " + strings.Join(cmd, " ")
+}
+
+const (
+	// AgyUpdateUpdated labels `agy update` stdout that installed a release.
+	AgyUpdateUpdated = "updated"
+	// AgyUpdateCurrent labels stdout that reports the installed build is current.
+	AgyUpdateCurrent = "current"
+)
+
+// ClassifyAgyUpdateOutput labels `agy update` stdout. The process exit code
+// still decides success: a zero exit stays a success even when the text
+// matches neither phrase, so an idempotent update is never inconclusive.
+func ClassifyAgyUpdateOutput(out string) string {
+	switch {
+	case strings.Contains(out, "Update successful"):
+		return AgyUpdateUpdated
+	case strings.Contains(out, "already on the latest version"):
+		return AgyUpdateCurrent
+	default:
+		return ""
+	}
 }
 
 func (s *AgentSource) Scan(ctx context.Context, plat model.PlatformInfo) ([]*model.Item, error) {
@@ -234,6 +296,15 @@ func probeAgentItem(ctx context.Context, plat model.PlatformInfo, a agentDef) *m
 	it.CurrentVer, ok = probeAgentVersionOK(ctx, a.verCmd)
 	if !ok {
 		it.Status = model.StatusUnverified
+		return it
+	}
+	if a.binary == binOpenCode {
+		applyOpenCodeChannel(it)
+	}
+	// Version answered: freshness may still be unknown, but the item is not
+	// an unverified source. Record how --update will check it.
+	if note := AgentUpdateCheckNote(a.name); note != "" {
+		it.KeepPolicy = note
 	}
 	return it
 }
@@ -349,6 +420,16 @@ func agentItemPackage(it *model.Item, npmByName map[string]string) string {
 	return npmByName[it.Name]
 }
 
+// agentFreshnessPackage is the npm package a registry probe should ask
+// about. The item's PackageID is the channel selected at scan time; the
+// catalog value is only the fallback when the probe never set one.
+func agentFreshnessPackage(it *model.Item, a agentDef) string {
+	if it != nil && it.PackageID != "" {
+		return it.PackageID
+	}
+	return a.npmPackage
+}
+
 // npmOutdatedLatestFor runs one explicit-name outdated probe. npm exits 1
 // when something is outdated and still prints JSON; that is success. An empty
 // body with a command error, or a body that is not JSON, is a failed probe.
@@ -409,9 +490,14 @@ func resolveRegistryLatestFrom(ctx context.Context, items []*model.Item, catalog
 			targets = append(targets, probeTarget{it: it, a: a})
 			continue
 		}
-		if a.npmPackage == "" || installed[a.npmPackage] {
+		// PackageID wins over the catalog default so OpenCode v2 asks
+		// @opencode/cli even when the preserved v1 package opencode-ai is
+		// still installed globally.
+		pkg := agentFreshnessPackage(it, a)
+		if pkg == "" || installed[pkg] {
 			continue
 		}
+		a.npmPackage = pkg
 		targets = append(targets, probeTarget{it: it, a: a})
 	}
 	probeBounded(len(targets), registryProbeConcurrency, func(i int) {

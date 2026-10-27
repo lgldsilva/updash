@@ -208,7 +208,7 @@ func planUpdateCommands(ctx context.Context, cat model.Category, items []*model.
 	case model.CatGo:
 		return globalPlan("gup", []string{commandUpdate}, false)
 	case model.CatRustup:
-		return globalPlan("rustup", []string{commandUpdate}, false)
+		return rustupPlans(items)
 	case model.CatCargo:
 		return globalPlan("cargo", []string{"install-update", "-a"}, false)
 	case model.CatSDKMAN:
@@ -315,7 +315,7 @@ func agentPlans(items []*model.Item) ([]CommandPlan, error) {
 		// OpenCode resolves its own install method and prompts when it fails;
 		// updash decides the method (or the npm fallback) up front instead.
 		if item.Name == agentOpenCode {
-			plans = append(plans, openCodeUpgradePlan(scanner.AgentUpdateCommand(item.Name)))
+			plans = append(plans, openCodeUpgradePlan(scanner.AgentUpdateCommand(item.Name), item))
 			continue
 		}
 		// Crush lives in whatever npm prefix owns the PATH binary; updating it

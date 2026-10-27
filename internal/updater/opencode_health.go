@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/lgldsilva/updash/internal/model"
+	"github.com/lgldsilva/updash/internal/scanner"
 )
 
 // agentOpenCode is the catalog name of the OpenCode agent item (see
@@ -18,9 +19,19 @@ const agentOpenCode = "OpenCode"
 // opencodeHealthTimeout caps the post-update `opencode --version` probe.
 const opencodeHealthTimeout = 30 * time.Second
 
-// opencodeReinstallHint is the actionable recovery command surfaced when a
+// opencodeReinstallHint is the v1 recovery command surfaced when a
 // post-update health check fails (broken launcher stub / missing binary).
+// v2 uses the @opencode/cli channel; see openCodeReinstallHintFor.
 const opencodeReinstallHint = "npm install -g --allow-scripts=opencode-ai opencode-ai@latest"
+
+// openCodeReinstallHintFor picks the recovery install for the channel the
+// item was scanned on. A missing version stays on the v1 hint.
+func openCodeReinstallHintFor(item *model.Item) string {
+	if item != nil && (item.PackageID == scanner.OpenCodePackageV2 || scanner.OpenCodeMajor(item.CurrentVer) >= 2) {
+		return "npm install -g --allow-scripts=" + scanner.OpenCodePackageV2 + " " + scanner.OpenCodePackageV2 + "@latest"
+	}
+	return opencodeReinstallHint
+}
 
 // ensureOpenCodeHealthy validates that `opencode upgrade` left a working
 // launcher. An update can report success while the wrapper's postinstall was
@@ -53,7 +64,7 @@ func ensureOpenCodeHealthy(ctx context.Context, item *model.Item, res *Result) *
 	res.Success = false
 	item.Status = model.StatusError
 	detail := openCodeHealthDetail(ver, verErr, binPath, binOK)
-	res.Error = detail + " — launcher may be a broken stub; reinstall with `" + opencodeReinstallHint + "`"
+	res.Error = detail + " — launcher may be a broken stub; reinstall with `" + openCodeReinstallHintFor(item) + "`"
 	if res.Output != "" {
 		res.Output += "\n"
 	}
