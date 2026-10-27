@@ -34,6 +34,7 @@ const (
 	flagDuShort = "-sh"
 
 	flagGlobal      = "-g"
+	flagJSON        = "--json"
 	flagVersion     = "--version"
 	scannerNL       = "\n"
 	cmdInstall      = "install"
