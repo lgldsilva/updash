@@ -1,5 +1,10 @@
 # updash
 
+[![CI](https://github.com/lgldsilva/updash/actions/workflows/ci.yml/badge.svg)](https://github.com/lgldsilva/updash/actions/workflows/ci.yml)
+[![release](https://img.shields.io/github/v/release/lgldsilva/updash)](https://github.com/lgldsilva/updash/releases/latest)
+[![go](https://img.shields.io/badge/go-1.25%2B-blue.svg)](go.mod)
+[![license](https://img.shields.io/badge/license-MIT-lightgrey.svg)](LICENSE)
+
 **System Update Dashboard** for macOS, Linux, and Windows — one binary for package updates, AI tools, and smart cleanup.
 
 ```sh
