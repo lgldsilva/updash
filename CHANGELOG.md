@@ -6,6 +6,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/); versions follow 
 ## [Unreleased]
 
 ### Added
+- Homelab cleanup `ai-releases:*`: self-updating AI CLIs keep every version they ever installed (Codex app-server/standalone releases, Grok downloads, Copilot `pkg`), a few hundred MB each. Only the release in use is kept — the target of the sibling `current` link, else the newest — and the list is recomputed at clean time
 - Linux system scanners: dnf/yum (Fedora/RHEL), zypper (openSUSE), apk (Alpine) — scan + sudo-aware update
 - pnpm and bun global-store scanners with update support
 - Agent catalog entries: pi, Qwen Code, Aider, Amazon Q, Windsurf

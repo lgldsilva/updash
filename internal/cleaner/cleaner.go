@@ -239,6 +239,8 @@ func cleanHomelab(ctx context.Context, item *model.Item, opts Options) *Result {
 		strings.HasPrefix(item.Name, "ai-output:"),
 		strings.HasPrefix(item.Name, "host-logs:"):
 		return cleanAgePaths(item, ageDaysForHomelab(item.Name))
+	case strings.HasPrefix(item.Name, "ai-releases:"):
+		return cleanSupersededReleases(item)
 	case item.Name == "container-logs":
 		return cleanContainerLogs(ctx, item, opts)
 	case item.Name == "disk-pressure":
@@ -289,6 +291,42 @@ func cleanProjectBuildsPaths(ctx context.Context, item *model.Item, maxDays int)
 		fmt.Fprintf(&b, "error: %s\n", e)
 	}
 	if len(partialErrs) > 0 || len(errs) > 0 {
+		item.Status = model.StatusError
+		return &Result{Item: item, Success: false, Error: "cleanup incomplete", Output: b.String(), BytesFreed: freed}
+	}
+	item.Status = model.StatusCleaned
+	item.Freed = FormatBytes(freed)
+	return &Result{Item: item, Success: true, Output: b.String(), BytesFreed: freed}
+}
+
+// cleanSupersededReleases recomputes the old releases at clean time (the scan may be
+// stale) and never touches the release in use.
+func cleanSupersededReleases(item *model.Item) *Result {
+	dir := item.PackageID
+	if dir == "" {
+		item.Status = model.StatusError
+		return &Result{Item: item, Success: false, Error: "missing releases path"}
+	}
+	cands, _, err := retention.SupersededReleases(dir)
+	if err != nil {
+		item.Status = model.StatusError
+		return &Result{Item: item, Success: false, Error: err.Error()}
+	}
+	if len(cands) == 0 {
+		item.Status = model.StatusCleaned
+		return &Result{Item: item, Success: true, Output: "only the release in use remains"}
+	}
+	paths := make([]string, len(cands))
+	for i, c := range cands {
+		paths[i] = c.Path
+	}
+	freed, errs := retention.RemovePaths(paths)
+	var b strings.Builder
+	fmt.Fprintf(&b, "removed %d old release(s)\n", len(paths)-len(errs))
+	for _, e := range errs {
+		fmt.Fprintf(&b, "error: %s\n", e)
+	}
+	if len(errs) > 0 {
 		item.Status = model.StatusError
 		return &Result{Item: item, Success: false, Error: "cleanup incomplete", Output: b.String(), BytesFreed: freed}
 	}
