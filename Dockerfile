@@ -12,7 +12,7 @@ RUN CGO_ENABLED=0 go build -trimpath \
     -ldflags="-s -w -X main.version=${VERSION}" \
     -o /updash ./cmd/updash/
 
-FROM alpine:3.21
+FROM alpine:3.24
 RUN apk add --no-cache ca-certificates \
     && adduser -D -H -u 10001 updash
 COPY --from=builder /updash /usr/local/bin/updash
