@@ -1,6 +1,6 @@
 # updash — GoReleaser Docker image (binary is pre-built by GoReleaser).
 # For standalone builds, use the multi-stage Dockerfile instead.
-FROM alpine:3.21
+FROM alpine:3.24
 RUN apk add --no-cache ca-certificates \
     && adduser -D -H -u 10001 updash
 ARG TARGETPLATFORM
