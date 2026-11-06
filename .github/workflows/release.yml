@@ -26,7 +26,7 @@ permissions:
 
 env:
   GO_VERSION: '1.26.10'
-  GORELEASER_VERSION: v2.13.0
+  GORELEASER_VERSION: v2.20.0
   CYCLODEX_VERSION: v1.10.0
 
 jobs:
@@ -206,8 +206,13 @@ jobs:
           fi
           echo "✓ $TAG exists but is incomplete (no checksums.txt) — recovering"
 
+      # Same install as ci.yml: a lockfile-less `go install @version` is
+      # githubactions:S8545. The action checks the archive against checksums.txt.
       - name: Install goreleaser
-        run: go install github.com/goreleaser/goreleaser/v2@${{ env.GORELEASER_VERSION }}
+        uses: goreleaser/goreleaser-action@a4f02ab5355a589de60d917a659ce617ed19b3de # v7.3.0
+        with:
+          version: ${{ env.GORELEASER_VERSION }}
+          install-only: true
 
       - name: Download SBOM
         uses: actions/download-artifact@v4

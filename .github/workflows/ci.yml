@@ -244,8 +244,14 @@ jobs:
         with:
           go-version: ${{ env.GO_VERSION }}
           cache: false
+      # go install module@version is not lockfile-backed, so Sonar flags it
+      # as githubactions:S8545 on any new line. This action downloads the
+      # pinned release and verifies it against that release's checksums.txt.
       - name: Install goreleaser
-        run: go install github.com/goreleaser/goreleaser/v2@v2.13.0
+        uses: goreleaser/goreleaser-action@a4f02ab5355a589de60d917a659ce617ed19b3de # v7.3.0
+        with:
+          version: v2.20.0
+          install-only: true
       - name: Validate config
         run: goreleaser check --config goreleaser.github.yaml
       - name: Snapshot build

@@ -86,20 +86,28 @@ release:
   replace_existing_artifacts: true
 
 # ── Homebrew ──────────────────────────────────────────────────────────────
-brews:
+# `brews` (formula) has been deprecated since GoReleaser v2.16. Casks install
+# the same prebuilt binary. The tap still needs tap_migrations.json
+# (`"updash": "updash"`) and Formula/updash.rb removed on the first release
+# that publishes the cask, so existing formula installs follow along.
+homebrew_casks:
   - name: updash
     repository:
       owner: lgldsilva
       name: homebrew-tap
       token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
-    directory: Formula
     homepage: "https://github.com/lgldsilva/updash"
     description: "System Update Dashboard — one binary for package updates, AI tools, and smart cleanup"
     license: MIT
-    install: |
-      bin.install "updash"
-    test: |
-      system "#{bin}/updash", "--version"
+    binaries: [updash]
+    # Unsigned binary: without this, macOS Gatekeeper quarantine kills it.
+    # install_steps is the non-deprecated form of the postflight hook.
+    hooks:
+      post:
+        install_steps: |
+          on_macos do
+            run "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "{{ .StagedPath }}/updash"]
+          end
 
 # ── Scoop (Windows) ──────────────────────────────────────────────────────
 scoops:
