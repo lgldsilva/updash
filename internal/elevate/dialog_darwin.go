@@ -5,7 +5,6 @@ package elevate
 import (
 	"context"
 	"fmt"
-	"os/exec"
 	"strings"
 )
 
@@ -22,7 +21,7 @@ func PromptMacPassword(reason string) (string, error) {
 		`display dialog "%s" default answer "" with hidden answer with title "updash" buttons {"Cancel", "OK"} default button "OK"`,
 		safe,
 	)
-	out, err := exec.Command("osascript", "-e", script).Output()
+	out, err := commandContext(context.Background(), "osascript", "-e", script).Output()
 	if err != nil {
 		if strings.Contains(err.Error(), "User canceled") || strings.Contains(string(out), "button returned:Cancel") {
 			return "", ErrDialogCancelled

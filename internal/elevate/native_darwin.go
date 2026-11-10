@@ -5,7 +5,6 @@ package elevate
 import (
 	"context"
 	"fmt"
-	"os/exec"
 	"strings"
 )
 
@@ -21,7 +20,7 @@ try
 on error errMsg number errNum
   error errMsg number errNum
 end try`
-	cmd := exec.CommandContext(ctx, "osascript", "-e", script)
+	cmd := commandContext(ctx, "osascript", "-e", script)
 	out, err := cmd.CombinedOutput()
 	text := strings.TrimSpace(string(out))
 	if err != nil {
