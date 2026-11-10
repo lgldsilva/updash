@@ -23,7 +23,7 @@ type vscodeManifest struct {
 // A manifest that exists but cannot be read or parsed is an error: cleanup
 // must fail closed rather than guess which directory is live.
 func VSCodeActiveExtensionDirs(extDir string) (dirs map[string]bool, ok bool, err error) {
-	data, err := os.ReadFile(filepath.Join(extDir, "extensions.json"))
+	data, err := readInRoot(extDir, "extensions.json")
 	if errors.Is(err, os.ErrNotExist) {
 		return nil, false, nil
 	}
@@ -41,6 +41,17 @@ func VSCodeActiveExtensionDirs(extDir string) (dirs map[string]bool, ok bool, er
 		}
 	}
 	return dirs, true, nil
+}
+
+// readInRoot reads name scoped to dir (os.Root): the manifest cannot be a
+// symlink or path that escapes the extensions directory.
+func readInRoot(dir, name string) ([]byte, error) {
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = root.Close() }()
+	return root.ReadFile(name)
 }
 
 func manifestDirName(e vscodeManifest) string {
