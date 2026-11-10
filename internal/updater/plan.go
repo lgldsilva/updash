@@ -354,17 +354,6 @@ func infraPlans(items []*model.Item) ([]CommandPlan, error) {
 	return plans, nil
 }
 
-// PlansRequireWholeCategory tells a caller whether a partial selection must be
-// rejected or explicitly expanded before execution.
-func PlansRequireWholeCategory(plans []CommandPlan) bool {
-	for _, plan := range plans {
-		if plan.Scope == CommandScopeCategoryGlobal {
-			return true
-		}
-	}
-	return false
-}
-
 // PlansRequireElevation reports the preflight decision embedded in the plan.
 // CLI/TUI should use this value for password/--skip-password handling rather
 // than probing package-manager state again.

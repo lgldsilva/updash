@@ -33,7 +33,7 @@ func TestOutputNeedsPassword_DoesNotTreatTerminationAsPasswordFailure(t *testing
 	}
 }
 
-func TestBatchPnpmUpgrade_ExecutesOnlySelectedPackages(t *testing.T) {
+func TestUpdateCategoryPnpm_ExecutesOnlySelectedPackages(t *testing.T) {
 	original := runUpdateCmd
 	t.Cleanup(func() { runUpdateCmd = original })
 	var calls [][]string
@@ -43,7 +43,7 @@ func TestBatchPnpmUpgrade_ExecutesOnlySelectedPackages(t *testing.T) {
 	}
 
 	items := []*model.Item{{Name: "one", Category: model.CatPnpm}, {Name: "two", Category: model.CatPnpm}}
-	results := batchPnpmUpgrade(context.Background(), items, SilentOptions())
+	results := UpdateCategory(context.Background(), model.CatPnpm, items, SilentOptions())
 	if len(results) != 2 || !results[0].Success || !results[1].Success {
 		t.Fatalf("results = %#v", results)
 	}
@@ -53,7 +53,7 @@ func TestBatchPnpmUpgrade_ExecutesOnlySelectedPackages(t *testing.T) {
 	}
 }
 
-func TestBatchAptUpgrade_StopsWhenRefreshFails(t *testing.T) {
+func TestUpdateCategoryApt_StopsWhenRefreshFails(t *testing.T) {
 	original := runElevatedUpdateCmd
 	t.Cleanup(func() { runElevatedUpdateCmd = original })
 	var calls [][]string
@@ -63,22 +63,13 @@ func TestBatchAptUpgrade_StopsWhenRefreshFails(t *testing.T) {
 	}
 
 	items := []*model.Item{{Name: "curl", Category: model.CatApt}}
-	results := batchAptUpgrade(context.Background(), items, SilentOptions())
+	results := UpdateCategory(context.Background(), model.CatApt, items, SilentOptions())
 	if len(results) != 1 || results[0].Success {
 		t.Fatalf("results = %#v", results)
 	}
 	want := [][]string{{"apt-get", "update"}}
 	if !reflect.DeepEqual(calls, want) {
 		t.Fatalf("commands = %#v, want %#v", calls, want)
-	}
-}
-
-func TestNpmGlobalNeedsSudo_InspectsSystemPrefixBeforeElevationIsReady(t *testing.T) {
-	original := npmPrefixRunner
-	t.Cleanup(func() { npmPrefixRunner = original })
-	npmPrefixRunner = func(context.Context) ([]byte, error) { return []byte("/usr/local\n"), nil }
-	if !npmGlobalNeedsSudo(context.Background()) {
-		t.Fatal("system npm prefix must request elevation")
 	}
 }
 
@@ -213,22 +204,11 @@ func TestPlanUpdateCommands_EmptyAndMissingIDsDoNotBroadenScope(t *testing.T) {
 	}
 }
 
-func TestUpgradeMASApp_MissingIDIsManualAndDoesNotExecute(t *testing.T) {
+func TestUpdateCategoryMAS_MissingIDIsManualAndDoesNotExecute(t *testing.T) {
 	item := &model.Item{Name: "Xcode", Category: model.CatMAS}
-	result := upgradeMASApp(context.Background(), item, SilentOptions())
+	result := UpdateCategory(context.Background(), model.CatMAS, []*model.Item{item}, SilentOptions())[0]
 	if result.Success || !strings.Contains(result.Error, "App Store ID") {
 		t.Fatalf("result=%#v", result)
-	}
-}
-
-func TestPlansRequireWholeCategory(t *testing.T) {
-	global, _ := PlanUpdateCommands(model.CatFlatpak, []*model.Item{{Name: "app"}})
-	if !PlansRequireWholeCategory(global) {
-		t.Fatal("flatpak global plan must require whole-category confirmation")
-	}
-	exact, _ := PlanUpdateCommands(model.CatBrew, []*model.Item{{Name: "git"}})
-	if PlansRequireWholeCategory(exact) {
-		t.Fatal("exact brew plan must permit a partial selection")
 	}
 }
 
@@ -386,27 +366,6 @@ func TestUpdateCategory_EmptyGlobalCategoriesAreNoops(t *testing.T) {
 			got := UpdateCategory(context.Background(), category, nil, SilentOptions())
 			if len(got) != 0 {
 				t.Fatalf("UpdateCategory(%s, nil) = %d results, want no-op", category, len(got))
-			}
-		})
-	}
-}
-
-func TestDirectGlobalBatches_EmptyInputIsNoop(t *testing.T) {
-	batches := []struct {
-		name string
-		run  func(context.Context, []*model.Item, Options) []*Result
-	}{
-		{"dnf", batchDnfUpgrade},
-		{"zypper", batchZypperUpgrade},
-		{"apk", batchApkUpgrade},
-		{"pacman", batchPacmanUpgrade},
-		{"choco", batchChocoUpgrade},
-		{"scoop", batchScoopUpgrade},
-	}
-	for _, batch := range batches {
-		t.Run(batch.name, func(t *testing.T) {
-			if got := batch.run(context.Background(), nil, SilentOptions()); len(got) != 0 {
-				t.Fatalf("got %d results, want no-op", len(got))
 			}
 		})
 	}

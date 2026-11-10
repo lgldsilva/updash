@@ -11,7 +11,7 @@ import (
 )
 
 func TestBubbleModel_IgnoresStaleAsyncMessages(t *testing.T) {
-	state := tui.New()
+	state := tui.NewWithVersion("", "")
 	state.Generation = 4
 	state.Updating = true
 	state.LastSummary = "new operation"
@@ -74,7 +74,7 @@ func TestParseArgs_UpdateAndCleanIsAll(t *testing.T) {
 }
 
 func TestBubbleModel_ScanInfoIsNotLoggedAsSuccess(t *testing.T) {
-	state := tui.New()
+	state := tui.NewWithVersion("", "")
 	state.Summaries = []*model.SourceSummary{{Category: model.CatAI, Label: "AI tools", Items: []*model.Item{{Name: "note", Category: model.CatAI, Status: model.StatusInfo}}}}
 	m := &bubbleModel{state: state}
 	_, _ = m.onScanFinished(tui.ScanFinishedMsg{})

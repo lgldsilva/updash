@@ -12,9 +12,9 @@ import (
 )
 
 func TestNew(t *testing.T) {
-	s := New()
+	s := NewWithVersion("", "")
 	if s == nil {
-		t.Fatal("New() returned nil")
+		t.Fatal("NewWithVersion returned nil")
 	} else {
 		if s.Platform.OS == "" {
 			t.Error("Platform.OS must be set")
@@ -29,7 +29,7 @@ func TestNew(t *testing.T) {
 }
 
 func TestState_AddLog(t *testing.T) {
-	s := New()
+	s := NewWithVersion("", "")
 	s.AddLog("test message", true)
 	if len(s.Logs) != 1 {
 		t.Fatalf("expected 1 log entry, got %d", len(s.Logs))
@@ -51,7 +51,7 @@ func TestState_AddLog(t *testing.T) {
 }
 
 func TestState_TotalOutdated(t *testing.T) {
-	s := New()
+	s := NewWithVersion("", "")
 	s.Summaries = []*model.SourceSummary{
 		{
 			Category: model.CatBrew,
@@ -82,7 +82,7 @@ func TestState_TotalOutdated(t *testing.T) {
 }
 
 func TestState_FlattenUpdateItems_hidesUpToDateAgents(t *testing.T) {
-	s := New()
+	s := NewWithVersion("", "")
 	s.Summaries = []*model.SourceSummary{
 		{
 			Category: model.CatAgent,
@@ -106,7 +106,7 @@ func TestState_FlattenUpdateItems_hidesUpToDateAgents(t *testing.T) {
 }
 
 func TestState_TotalCleanable(t *testing.T) {
-	s := New()
+	s := NewWithVersion("", "")
 	s.CleanItems = []*model.SourceSummary{
 		{
 			Category: model.CatCache,
@@ -124,7 +124,7 @@ func TestState_TotalCleanable(t *testing.T) {
 }
 
 func TestState_CurrentItems(t *testing.T) {
-	s := New()
+	s := NewWithVersion("", "")
 
 	// Updates tab
 	s.ActiveTab = model.TabUpdates
@@ -167,7 +167,7 @@ func TestState_CurrentItems(t *testing.T) {
 }
 
 func TestState_CleanupToggleMatchesCursor(t *testing.T) {
-	s := New()
+	s := NewWithVersion("", "")
 	s.ActiveTab = model.TabCleanup
 	s.CleanItems = []*model.SourceSummary{
 		{
@@ -197,7 +197,7 @@ func TestState_CleanupToggleMatchesCursor(t *testing.T) {
 }
 
 func TestState_HandleKey(t *testing.T) {
-	s := New()
+	s := NewWithVersion("", "")
 
 	// Tab switching
 	if action := s.HandleKey("1"); action != KeyTab {
@@ -223,7 +223,7 @@ func TestState_HandleKey(t *testing.T) {
 }
 
 func TestState_HandleActions(t *testing.T) {
-	s := New()
+	s := NewWithVersion("", "")
 	s.Summaries = []*model.SourceSummary{
 		{
 			Category: model.CatBrew,
@@ -276,7 +276,7 @@ func TestState_HandleActions(t *testing.T) {
 }
 
 func TestState_PageAndEdgeNavigation(t *testing.T) {
-	s := New()
+	s := NewWithVersion("", "")
 	for i := 0; i < 20; i++ {
 		s.Summaries = append(s.Summaries, &model.SourceSummary{
 			Category: model.Category(fmt.Sprintf("cat%d", i)),
@@ -308,7 +308,7 @@ func TestState_PageAndEdgeNavigation(t *testing.T) {
 }
 
 func TestState_SelectedCount(t *testing.T) {
-	s := New()
+	s := NewWithVersion("", "")
 	s.Summaries = []*model.SourceSummary{{
 		Items: []*model.Item{
 			{Selected: true, Status: model.StatusOutdated},
@@ -322,7 +322,7 @@ func TestState_SelectedCount(t *testing.T) {
 }
 
 func TestState_QuickSelection(t *testing.T) {
-	s := New()
+	s := NewWithVersion("", "")
 	s.Summaries = []*model.SourceSummary{
 		{
 			Category: model.CatBrew,
@@ -364,7 +364,7 @@ func TestState_QuickSelection(t *testing.T) {
 }
 
 func TestState_ClampCursor_Empty(t *testing.T) {
-	s := New()
+	s := NewWithVersion("", "")
 	s.Cursor = 5
 	s.ClampCursor()
 	if s.Cursor != 0 {
@@ -373,7 +373,7 @@ func TestState_ClampCursor_Empty(t *testing.T) {
 }
 
 func TestState_FlattenItems(t *testing.T) {
-	s := New()
+	s := NewWithVersion("", "")
 	s.Summaries = []*model.SourceSummary{
 		{Items: []*model.Item{{Name: "a"}, {Name: "b"}}},
 		{Items: []*model.Item{{Name: "c"}}},
@@ -405,7 +405,7 @@ func TestState_FilterItems(t *testing.T) {
 }
 
 func TestState_FilterApplied(t *testing.T) {
-	s := New()
+	s := NewWithVersion("", "")
 	s.Summaries = []*model.SourceSummary{
 		{
 			Category: model.CatBrew,
@@ -423,7 +423,7 @@ func TestState_FilterApplied(t *testing.T) {
 }
 
 func TestState_CancelOperation(t *testing.T) {
-	s := New()
+	s := NewWithVersion("", "")
 	s.Scanning = true
 	s.Updating = true
 	s.HandleAction(KeyCancel)
@@ -439,7 +439,7 @@ func TestState_EscCancelsRunningOperation(t *testing.T) {
 	// The full keyboard chain: HandleKey must surface KeyCancel while an
 	// operation runs, and HandleAction must cancel it. Guards the wiring
 	// regression where main.go dropped KeyCancel on the floor.
-	s := New()
+	s := NewWithVersion("", "")
 	s.Scanning = true
 	if action := s.HandleKey("esc"); action != KeyCancel {
 		t.Fatalf("esc during scan should map to KeyCancel, got %v", action)
@@ -465,7 +465,7 @@ func TestState_CtrlCQuitsWithOverlaysOpen(t *testing.T) {
 	}
 	for _, o := range overlays {
 		t.Run(o.name, func(t *testing.T) {
-			s := New()
+			s := NewWithVersion("", "")
 			o.setup(s)
 			if action := s.HandleKey("ctrl+c"); action != KeyQuit {
 				t.Fatalf("ctrl+c with %s overlay should map to KeyQuit, got %v", o.name, action)
@@ -475,7 +475,7 @@ func TestState_CtrlCQuitsWithOverlaysOpen(t *testing.T) {
 }
 
 func TestState_CancelPasswordAndClearElevation(t *testing.T) {
-	s := New()
+	s := NewWithVersion("", "")
 	s.ShowPassword = true
 	s.PasswordInput = "x"
 	s.PasswordError = "err"
@@ -496,7 +496,7 @@ func TestState_CancelPasswordAndClearElevation(t *testing.T) {
 }
 
 func TestState_ConsumeConfirmCmd_nil(t *testing.T) {
-	s := New()
+	s := NewWithVersion("", "")
 	if cmd := s.ConsumeConfirmCmd(nil); cmd != nil {
 		t.Fatal("expected nil cmd when ConfirmCmd is nil")
 	}
@@ -514,7 +514,7 @@ func TestState_ConsumeConfirmCmd_nil(t *testing.T) {
 }
 
 func TestState_ClampCursorAndLogScanErrors(t *testing.T) {
-	s := New()
+	s := NewWithVersion("", "")
 	s.Cursor = 99
 	s.ClampCursor()
 	if s.Cursor < 0 {
@@ -530,7 +530,7 @@ func TestCollectOutdatedItems_SkipsManualOnly(t *testing.T) {
 	// The TUI must mirror the CLI's partitionUpdatable: manual-only items
 	// (KeepPolicy "manual"/jetbrains/app-store-preferred) never enter an
 	// update batch — they used to be updated or counted as failures here.
-	s := New()
+	s := NewWithVersion("", "")
 	s.Summaries = []*model.SourceSummary{
 		{Category: model.CatBrew, Label: "Homebrew", Items: []*model.Item{
 			{Name: "btop", Status: model.StatusOutdated},
@@ -585,7 +585,7 @@ func TestCountResults_ManualOnlyIsNotFailure(t *testing.T) {
 }
 
 func TestLogUpdateResults_ManualOnlyLogsHint(t *testing.T) {
-	s := New()
+	s := NewWithVersion("", "")
 	s.LogUpdateResults([]*updater.Result{
 		{Item: &model.Item{Name: "ok"}, Success: true},
 		{Item: &model.Item{Name: "cursor", Category: model.CatAgent, KeepPolicy: "⊘ manual reinstall"}, Success: false},
@@ -608,7 +608,7 @@ func TestLogUpdateResults_ManualOnlyLogsHint(t *testing.T) {
 func TestFlattenCleanItems_ShowsErrorOnlySummaries(t *testing.T) {
 	// A cleanup source whose scan failed must stay visible on the Cleanup
 	// tab — hasCleanupItems used to drop error-only summaries entirely.
-	s := New()
+	s := NewWithVersion("", "")
 	s.CleanItems = []*model.SourceSummary{
 		{Category: model.CatCache, Label: "npm Cache", Items: []*model.Item{
 			{Name: "npm-cache", Status: model.StatusError, CurrentVer: "scan failed"},
@@ -622,7 +622,7 @@ func TestFlattenCleanItems_ShowsErrorOnlySummaries(t *testing.T) {
 
 func TestCollectOutdatedItems_RespectsAppliedFilter(t *testing.T) {
 	// "U" must not update items hidden by the active "/" filter.
-	s := New()
+	s := NewWithVersion("", "")
 	s.Summaries = []*model.SourceSummary{
 		{Category: model.CatBrew, Label: "Homebrew", Items: []*model.Item{
 			{Name: "btop", Category: model.CatBrew, Status: model.StatusOutdated},
@@ -640,7 +640,7 @@ func TestCollectOutdatedItems_RespectsAppliedFilter(t *testing.T) {
 }
 
 func TestRunUpdateSelected_BlocksPartialCategoryGlobalPlan(t *testing.T) {
-	s := New()
+	s := NewWithVersion("", "")
 	first := &model.Item{Name: "git", Category: model.CatApt, Status: model.StatusOutdated, Selected: true}
 	second := &model.Item{Name: "curl", Category: model.CatApt, Status: model.StatusOutdated}
 	s.Summaries = []*model.SourceSummary{{
@@ -657,7 +657,7 @@ func TestRunUpdateSelected_BlocksPartialCategoryGlobalPlan(t *testing.T) {
 }
 
 func TestRunUpdateSelected_AllowsCompleteCategoryGlobalPlanOnce(t *testing.T) {
-	s := New()
+	s := NewWithVersion("", "")
 	first := &model.Item{Name: "git", Category: model.CatApt, Status: model.StatusOutdated, Selected: true}
 	second := &model.Item{Name: "curl", Category: model.CatApt, Status: model.StatusOutdated, Selected: true}
 	s.Summaries = []*model.SourceSummary{{
@@ -671,7 +671,7 @@ func TestRunUpdateSelected_AllowsCompleteCategoryGlobalPlanOnce(t *testing.T) {
 }
 
 func TestRunUpdateSelected_BlocksUnverifiedSource(t *testing.T) {
-	s := New()
+	s := NewWithVersion("", "")
 	s.Summaries = []*model.SourceSummary{{
 		Category: model.CatBrew,
 		Label:    "Homebrew",
@@ -688,7 +688,7 @@ func TestRunUpdateSelected_BlocksUnverifiedSource(t *testing.T) {
 }
 
 func TestRunCleanSelected_BlocksUnverifiedSource(t *testing.T) {
-	s := New()
+	s := NewWithVersion("", "")
 	s.ActiveTab = model.TabCleanup
 	s.CleanItems = []*model.SourceSummary{{
 		Category: model.CatCache,
@@ -706,7 +706,7 @@ func TestRunCleanSelected_BlocksUnverifiedSource(t *testing.T) {
 }
 
 func TestRunUpdateSelected_BlocksErroredSource(t *testing.T) {
-	s := New()
+	s := NewWithVersion("", "")
 	s.Summaries = []*model.SourceSummary{{
 		Category: model.CatBrew, Label: "Homebrew",
 		Items: []*model.Item{{Name: "git", Category: model.CatBrew, Status: model.StatusOutdated, Selected: true}, {Name: "scan", Category: model.CatBrew, Status: model.StatusError, CurrentVer: "timeout"}},
@@ -733,7 +733,7 @@ func TestNeedsElevationPrompt_UsesPreparedNpmPlan(t *testing.T) {
 	prepareUpdateBatch = func(_ context.Context, cat model.Category, items []*model.Item) (preparedUpdateBatch, error) {
 		return &preparedBatchStub{category: cat, items: items, plans: []updater.CommandPlan{{Name: "npm", Elevated: true}}}, nil
 	}
-	s := New()
+	s := NewWithVersion("", "")
 	s.Summaries = []*model.SourceSummary{{Category: model.CatNpm, Label: "npm", Items: []*model.Item{{Name: "pkg", Category: model.CatNpm, Status: model.StatusOutdated}}}}
 	if !s.showUpdateConfirm([]*model.Item{{Name: "pkg", Category: model.CatNpm, Status: model.StatusOutdated}}) {
 		t.Fatal("expected elevated npm plan to reach confirmation")
@@ -749,7 +749,7 @@ func TestShowUpdateConfirm_BlocksPlannerError(t *testing.T) {
 	prepareUpdateBatch = func(context.Context, model.Category, []*model.Item) (preparedUpdateBatch, error) {
 		return nil, errTest("prefix unavailable")
 	}
-	s := New()
+	s := NewWithVersion("", "")
 	s.Summaries = []*model.SourceSummary{{Category: model.CatNpm, Label: "npm", Items: []*model.Item{{Name: "pkg", Category: model.CatNpm, Status: model.StatusOutdated}}}}
 	item := &model.Item{Name: "pkg", Category: model.CatNpm, Status: model.StatusOutdated}
 	if s.showUpdateConfirm([]*model.Item{item}) || s.ShowConfirm || !strings.Contains(s.LastSummary, "prefix unavailable") {
@@ -775,7 +775,7 @@ func TestUpdateConfirmation_PreparesOnceAndExecutesSameBatch(t *testing.T) {
 		executed = batch
 		return []*updater.Result{{Item: batch.Items()[0], Success: true}}
 	}
-	s := New()
+	s := NewWithVersion("", "")
 	s.Summaries = []*model.SourceSummary{{Category: model.CatNpm, Label: "npm", Items: []*model.Item{{Name: "pkg", Category: model.CatNpm, Status: model.StatusOutdated}}}}
 	if !s.showUpdateConfirm([]*model.Item{{Name: "pkg", Category: model.CatNpm, Status: model.StatusOutdated}}) {
 		t.Fatalf("confirmation unexpectedly blocked: %s", s.LastSummary)
@@ -809,7 +809,7 @@ func TestHandleKey_TabGatesActions(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			s := New()
+			s := NewWithVersion("", "")
 			s.ActiveTab = tc.tab
 			if got := s.HandleKey(tc.key); got != tc.want {
 				t.Errorf("HandleKey(%q) on %v = %v, want %v", tc.key, tc.tab, got, tc.want)
@@ -819,7 +819,7 @@ func TestHandleKey_TabGatesActions(t *testing.T) {
 }
 
 func TestRefuseBusy_BlocksConflictingOps(t *testing.T) {
-	s := New()
+	s := NewWithVersion("", "")
 	s.Updating = true
 	if !s.refuseBusy("Update") {
 		t.Fatal("refuseBusy should reject while updating")
@@ -835,7 +835,7 @@ func TestRefuseBusy_BlocksConflictingOps(t *testing.T) {
 
 func TestHandlePasswordless(t *testing.T) {
 	t.Run("passwordless proceeds", func(t *testing.T) {
-		s := New()
+		s := NewWithVersion("", "")
 		called := false
 		s.ConfirmCmd = func(p *tea.Program) tea.Cmd { called = true; return nil }
 		s.HandlePasswordless(true, nil)
@@ -847,7 +847,7 @@ func TestHandlePasswordless(t *testing.T) {
 		}
 	})
 	t.Run("needs password opens dialog", func(t *testing.T) {
-		s := New()
+		s := NewWithVersion("", "")
 		called := false
 		s.ConfirmCmd = func(p *tea.Program) tea.Cmd { called = true; return nil }
 		s.HandlePasswordless(false, nil)

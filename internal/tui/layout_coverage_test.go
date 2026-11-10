@@ -41,7 +41,7 @@ func TestMaxFrameWidth_env(t *testing.T) {
 }
 
 func TestBoxWidth_capAndTiny(t *testing.T) {
-	s := New()
+	s := NewWithVersion("", "")
 	s.Width = 300
 	t.Setenv("UPDASH_MAX_WIDTH", "90")
 	t.Setenv("UPDASH_LAYOUT_SAFETY", "0")
@@ -152,20 +152,13 @@ func TestLayoutDebug_writesLog(t *testing.T) {
 	layoutLog("hello %s", "world")
 	layoutLogAlways("overflow-test")
 
-	s := New()
+	s := NewWithVersion("", "")
 	s.Width = 80
 	s.Height = 24
 	s.LogWindowSize(80, 24)
 	s.debugFrame("test", 80, 76, 80, "short")
 	// overflow path
 	s.debugFrame("ov", 10, 8, 10, strings.Repeat("Z", 50))
-
-	if !hasOverflow(strings.Repeat("a", 20), 10) {
-		t.Fatal("expected overflow")
-	}
-	if hasOverflow("ok", 10) {
-		t.Fatal("no overflow")
-	}
 
 	styled := "\x1b[31mred\x1b[0m"
 	if stripANSIForLog(styled) != "red" {
@@ -179,7 +172,7 @@ func TestLayoutDebug_writesLog(t *testing.T) {
 }
 
 func TestMetrics_narrowAndWide(t *testing.T) {
-	n := New()
+	n := NewWithVersion("", "")
 	n.Width = 40
 	t.Setenv("UPDASH_LAYOUT_SAFETY", "0")
 	t.Setenv("UPDASH_MAX_WIDTH", "0")
@@ -187,7 +180,7 @@ func TestMetrics_narrowAndWide(t *testing.T) {
 	if mn.name < 8 || mn.ver < 6 {
 		t.Fatalf("narrow metrics %+v", mn)
 	}
-	w := New()
+	w := NewWithVersion("", "")
 	w.Width = 200
 	mw := w.metrics()
 	if mw.note > 48 {
@@ -199,7 +192,7 @@ func TestMetrics_narrowAndWide(t *testing.T) {
 }
 
 func TestTermWidth_default(t *testing.T) {
-	s := New()
+	s := NewWithVersion("", "")
 	s.Width = 0
 	if s.termWidth() != defaultTermWidth {
 		t.Fatalf("default term %d", s.termWidth())
@@ -218,7 +211,7 @@ func TestTermWidth_default(t *testing.T) {
 }
 
 func TestFrame_withWideContent(t *testing.T) {
-	s := New()
+	s := NewWithVersion("", "")
 	s.Width = 100
 	s.Height = 30
 	s.Platform.OS = "darwin"

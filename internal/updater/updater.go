@@ -7,9 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
 	"os/exec"
-	"sort"
 	"strings"
 	"time"
 
@@ -28,24 +26,6 @@ type Result struct {
 	Success bool
 	Output  string
 	Error   string
-}
-
-// UpdateAll runs update commands for the given items (silent/buffered — for TUI).
-func UpdateAll(ctx context.Context, items []*model.Item) []*Result {
-	return UpdateAllWithOptions(ctx, items, SilentOptions())
-}
-
-// UpdateAllWithOptions runs updates with the given execution options.
-func UpdateAllWithOptions(ctx context.Context, items []*model.Item, opts Options) []*Result {
-	groups := groupByCategory(items)
-	results := make([]*Result, 0, len(items))
-	for _, cat := range sortedCategories(groups) {
-		batchCtx, cancel := withBatchTimeout(ctx, cat)
-		batchResult := UpdateCategory(batchCtx, cat, groups[cat], opts)
-		cancel()
-		results = append(results, batchResult...)
-	}
-	return results
 }
 
 // UpdateCategory updates one category batch (used by CLI for per-step progress).
@@ -231,27 +211,6 @@ func executePreparedAgents(ctx context.Context, items []*model.Item, plans []Com
 	return results
 }
 
-func sortedCategories(groups map[model.Category][]*model.Item) []model.Category {
-	cats := make([]model.Category, 0, len(groups))
-	for cat := range groups {
-		cats = append(cats, cat)
-	}
-	sort.Slice(cats, func(i, j int) bool { return cats[i] < cats[j] })
-	return cats
-}
-
-// groupByCategory organizes items by their category.
-func groupByCategory(items []*model.Item) map[model.Category][]*model.Item {
-	groups := make(map[model.Category][]*model.Item)
-	for _, it := range items {
-		if it == nil {
-			continue
-		}
-		groups[it.Category] = append(groups[it.Category], it)
-	}
-	return groups
-}
-
 // usePrivilegedAskpass wires SUDO_ASKPASS when needed. Interactive CLI runs
 // use the same helper as headless ones: Homebrew executes each privileged
 // cask step on its own PTY, so a terminal sudo ticket does not cover the
@@ -319,17 +278,6 @@ func upgradeOneBrewWithPlan(ctx context.Context, item *model.Item, plan CommandP
 	item.Status = model.StatusError
 	item.Log = output
 	return result
-}
-
-func upgradeMASApp(ctx context.Context, item *model.Item, opts Options) *Result {
-	plans, err := planUpdateCommands(ctx, model.CatMAS, []*model.Item{item})
-	if err != nil || len(plans) != 1 {
-		if err == nil {
-			err = fmt.Errorf("invalid MAS update plan")
-		}
-		return failedBatch([]*model.Item{item}, err)[0]
-	}
-	return upgradeMASAppWithPlan(ctx, item, plans[0], opts)
 }
 
 func upgradeMASAppWithPlan(ctx context.Context, item *model.Item, plan CommandPlan, opts Options) *Result {
@@ -467,226 +415,8 @@ func normalizeMASName(s string) string {
 	return b.String()
 }
 
-// batchAptUpgrade refreshes package metadata then upgrades only the selection.
-func batchAptUpgrade(ctx context.Context, items []*model.Item, opts Options) []*Result {
-	if len(items) == 0 {
-		return nil
-	}
-	for _, it := range items {
-		it.Status = model.StatusUpdating
-	}
-
-	plans, planErr := planUpdateCommands(ctx, model.CatApt, items)
-	if planErr != nil {
-		return failedBatch(items, planErr)
-	}
-
-	var allOutput strings.Builder
-	for _, plan := range plans {
-		result := runCommandPlan(ctx, items[0], plan, opts)
-		allOutput.WriteString(result.Output)
-		if !result.Success {
-			if result.Error != "" {
-				fmt.Fprintf(&allOutput, "error: %s\n", result.Error)
-			}
-			return failedBatchWithOutput(items, result.Error, allOutput.String())
-		}
-	}
-	return batchMarkAll(items, &Result{Success: true, Output: allOutput.String()})
-}
-
-// batchDnfUpgrade runs dnf upgrade (or yum update fallback) for all items.
-func batchDnfUpgrade(ctx context.Context, items []*model.Item, opts Options) []*Result {
-	if len(items) == 0 {
-		return nil
-	}
-	for _, it := range items {
-		it.Status = model.StatusUpdating
-	}
-
-	tool := scanner.RpmToolName()
-	var args []string
-	switch tool {
-	case "yum":
-		args = []string{commandUpdate, flagYes}
-	default:
-		args = []string{commandUpgrade, "--refresh", flagYes}
-	}
-	cmd := elevate.Sudo(ctx, tool, args...)
-	return batchMarkAll(items, runCmdWithBuilder(ctx, items[0], cmd, opts))
-}
-
-// batchZypperUpgrade runs a non-interactive zypper update for all items.
-func batchZypperUpgrade(ctx context.Context, items []*model.Item, opts Options) []*Result {
-	if len(items) == 0 {
-		return nil
-	}
-	for _, it := range items {
-		it.Status = model.StatusUpdating
-	}
-	cmd := elevate.Sudo(ctx, "zypper", "--non-interactive", commandUpdate)
-	return batchMarkAll(items, runCmdWithBuilder(ctx, items[0], cmd, opts))
-}
-
-// batchApkUpgrade runs apk upgrade; sudo only when not already root
-// (Alpine containers often run as root without sudo installed).
-func batchApkUpgrade(ctx context.Context, items []*model.Item, opts Options) []*Result {
-	if len(items) == 0 {
-		return nil
-	}
-	for _, it := range items {
-		it.Status = model.StatusUpdating
-	}
-	var cmd *exec.Cmd
-	if os.Geteuid() == 0 {
-		cmd = exec.CommandContext(ctx, "apk", commandUpgrade)
-	} else {
-		cmd = elevate.Sudo(ctx, "apk", commandUpgrade)
-	}
-	return batchMarkAll(items, runCmdWithBuilder(ctx, items[0], cmd, opts))
-}
-
-// batchPacmanUpgrade runs yay/pacman -Syu.
-func batchPacmanUpgrade(ctx context.Context, items []*model.Item, opts Options) []*Result {
-	if len(items) == 0 {
-		return nil
-	}
-	for _, it := range items {
-		it.Status = model.StatusUpdating
-	}
-
-	var cmd *exec.Cmd
-	if _, err := exec.LookPath("yay"); err == nil {
-		cmd = exec.CommandContext(ctx, "yay", "-Syu", "--noconfirm")
-	} else {
-		cmd = elevate.Sudo(ctx, "pacman", "-Syu", "--noconfirm")
-	}
-
-	var stdout, stderr bytes.Buffer
-	if opts.Verbose || opts.Interactive {
-		opts.ConfigureCmd(cmd)
-	} else {
-		cmd.Stdout = &stdout
-		cmd.Stderr = &stderr
-	}
-	err := cmd.Run()
-
-	output := stdout.String() + stderr.String()
-	success := err == nil
-	results := make([]*Result, len(items))
-	for i, it := range items {
-		results[i] = &Result{
-			Item:    it,
-			Success: success,
-			Output:  output,
-		}
-		if success {
-			it.Status = model.StatusDone
-		} else {
-			it.Status = model.StatusError
-			if err != nil {
-				results[i].Error = err.Error()
-			}
-		}
-	}
-
-	return results
-}
-
-func wingetUpgradeArgs(items []*model.Item) []string {
-	args := make([]string, 0, len(items)*2)
-	for _, it := range items {
-		if it == nil || it.PackageID == "" {
-			continue
-		}
-		args = append(args, "--exact", "--id", it.PackageID)
-	}
-	return args
-}
-
-func batchChocoUpgrade(ctx context.Context, items []*model.Item, opts Options) []*Result {
-	if len(items) == 0 {
-		return nil
-	}
-	for _, it := range items {
-		it.Status = model.StatusUpdating
-	}
-	args := append([]string{commandUpgrade}, chocoPackageNames(items)...)
-	args = append(args, flagYes)
-	cmd := exec.CommandContext(ctx, "choco", args...)
-	return batchMarkAll(items, runCmdWithBuilder(ctx, items[0], cmd, opts))
-}
-
-func chocoPackageNames(items []*model.Item) []string {
-	if len(items) == 0 {
-		return []string{"all"}
-	}
-	names := make([]string, 0, len(items))
-	for _, it := range items {
-		name := it.Name
-		if it.PackageID != "" {
-			name = it.PackageID
-		}
-		names = append(names, name)
-	}
-	return names
-}
-
-func batchScoopUpgrade(ctx context.Context, items []*model.Item, opts Options) []*Result {
-	if len(items) == 0 {
-		return nil
-	}
-	for _, it := range items {
-		it.Status = model.StatusUpdating
-	}
-	args := append([]string{commandUpdate}, scoopPackageNames(items)...)
-	cmd := exec.CommandContext(ctx, "scoop", args...)
-	return batchMarkAll(items, runCmdWithBuilder(ctx, items[0], cmd, opts))
-}
-
-func scoopPackageNames(items []*model.Item) []string {
-	if len(items) == 0 {
-		return []string{"*"}
-	}
-	names := make([]string, 0, len(items))
-	for _, it := range items {
-		names = append(names, it.Name)
-	}
-	return names
-}
-
 // npmManagedElsewhereNote explains why a protected npm item is skipped here.
 const npmManagedElsewhereNote = "managed by its agent updater (single owner)"
-
-func batchNpmUpgrade(ctx context.Context, items []*model.Item, opts Options) []*Result {
-	for _, it := range items {
-		it.Status = model.StatusUpdating
-	}
-	updatable, protected := partitionNpmItems(items)
-	results := make([]*Result, 0, len(items))
-	// Protected packages are owned by another path (opencode upgrade); never
-	// let the generic npm batch touch them.
-	for _, it := range protected {
-		it.Status = model.StatusOK
-		it.Log = npmManagedElsewhereNote
-		results = append(results, &Result{Item: it, Success: true, Output: npmManagedElsewhereNote})
-	}
-	if len(updatable) == 0 {
-		return results
-	}
-	groups := groupNpmByPrefix(updatable)
-	plans, err := planUpdateCommands(ctx, model.CatNpm, updatable)
-	if err != nil {
-		return append(results, failedBatch(updatable, err)...)
-	}
-	if len(plans) != len(groups) {
-		return append(results, failedBatch(updatable, fmt.Errorf("invalid npm update plan"))...)
-	}
-	for i, group := range groups {
-		results = append(results, batchMarkAll(group, runCommandPlan(ctx, group[0], plans[i], opts))...)
-	}
-	return results
-}
 
 // partitionNpmItems splits a batch into packages the generic npm update may
 // touch and protected ones owned by another update path. Pure (no I/O).
@@ -732,11 +462,6 @@ func npmAllowScriptsFlag(items []*model.Item) string {
 	return "--allow-scripts=" + strings.Join(names, ",")
 }
 
-func npmGlobalNeedsSudo(ctx context.Context) bool {
-	elevated, err := npmGlobalElevation(ctx)
-	return err == nil && elevated
-}
-
 // npmGlobalElevation determines the privilege requirement from npm's actual
 // global prefix. It intentionally fails closed: sudo readiness is not evidence
 // of where npm installs packages.
@@ -750,11 +475,6 @@ func npmGlobalElevation(ctx context.Context) (bool, error) {
 		return false, fmt.Errorf("determine npm global prefix: empty prefix")
 	}
 	return strings.HasPrefix(prefix, "/usr"), nil
-}
-
-// batchPnpmUpgrade updates all pnpm global packages.
-func batchPnpmUpgrade(ctx context.Context, items []*model.Item, opts Options) []*Result {
-	return batchPlannedExact(ctx, model.CatPnpm, items, opts)
 }
 
 func batchMarkAll(items []*model.Item, single *Result) []*Result {
@@ -776,20 +496,6 @@ func batchMarkAll(items []*model.Item, single *Result) []*Result {
 		}
 	}
 	return results
-}
-
-func batchPlannedExact(ctx context.Context, cat model.Category, items []*model.Item, opts Options) []*Result {
-	if len(items) == 0 {
-		return nil
-	}
-	for _, item := range items {
-		item.Status = model.StatusUpdating
-	}
-	plans, err := planUpdateCommands(ctx, cat, items)
-	if err != nil {
-		return failedBatch(items, err)
-	}
-	return runExactPlans(ctx, items, plans, opts)
 }
 
 func runExactPlans(ctx context.Context, items []*model.Item, plans []CommandPlan, opts Options) []*Result {
@@ -869,35 +575,6 @@ func runCmd(ctx context.Context, item *model.Item, opts Options, name string, ar
 	return result
 }
 
-func runCmdWithBuilder(ctx context.Context, item *model.Item, cmd *exec.Cmd, opts Options) *Result {
-	var stdout, stderr bytes.Buffer
-	// opts.Output (TUI streaming) takes priority over buffering, same as brew.
-	if opts.Output != nil || opts.Verbose || opts.Interactive {
-		opts.ConfigureCmd(cmd)
-	} else {
-		cmd.Stdout = &stdout
-		cmd.Stderr = &stderr
-	}
-
-	err := runGuarded(cmd, inactivityWindow)
-	result := &Result{Item: item}
-
-	if err != nil {
-		result.Success = false
-		result.Error = err.Error()
-		result.Output = stderr.String() + stdout.String()
-		item.Status = model.StatusError
-		item.Log = result.Output
-	} else {
-		result.Success = true
-		result.Output = stdout.String()
-		item.Status = model.StatusDone
-		item.Log = result.Output
-	}
-
-	return result
-}
-
 // manualAgentResult marks an item as skipped-manual without running anything.
 // wireCapture always buffers child output while preserving whatever live
 // writer ConfigureCmd attached (terminal in verbose/interactive runs, TUI log
@@ -925,18 +602,4 @@ func manualAgentResult(item *model.Item, reason string) *Result {
 		Error:   "⊘ " + reason,
 		Output:  fmt.Sprintf("%s: %s", item.Name, reason),
 	}
-}
-
-// updateAgent updates a single agent through the same planner the prepared
-// batch uses, so a dry-run and an execution can never disagree on the command.
-func updateAgent(ctx context.Context, item *model.Item, opts Options) *Result {
-	plans, err := agentPlans([]*model.Item{item})
-	if err != nil || len(plans) != 1 {
-		if err == nil {
-			err = fmt.Errorf("invalid agent update plan for %q", item.Name)
-		}
-		item.Status = model.StatusError
-		return &Result{Item: item, Error: err.Error()}
-	}
-	return executePreparedAgents(ctx, []*model.Item{item}, plans, opts)[0]
 }

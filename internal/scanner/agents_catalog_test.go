@@ -8,28 +8,6 @@ import (
 	"github.com/lgldsilva/updash/internal/model"
 )
 
-func TestParseNpmLsGlobal(t *testing.T) {
-	out := []byte(`{
-  "dependencies": {
-    "@anthropic-ai/claude-code": {"version": "1.0.34"},
-    "@earendil-works/pi-coding-agent": {"version": "0.9.1"}
-  }
-}`)
-	m := ParseNpmLsGlobal(out)
-	if !m["@anthropic-ai/claude-code"] || !m["@earendil-works/pi-coding-agent"] {
-		t.Fatalf("missing entries: %v", m)
-	}
-	if m["not-installed"] {
-		t.Fatal("unexpected entry")
-	}
-	if got := ParseNpmLsGlobal([]byte("not json")); got != nil {
-		t.Fatalf("want nil on bad json, got %v", got)
-	}
-	if got := ParseNpmLsGlobal([]byte(`{}`)); got != nil {
-		t.Fatalf("want nil on empty deps, got %v", got)
-	}
-}
-
 func TestAgentCatalogConsistency(t *testing.T) {
 	for _, a := range agentCatalog() {
 		if a.name == "" || a.binary == "" {

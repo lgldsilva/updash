@@ -187,20 +187,6 @@ func brewBatchNeedsPassword(items []*model.Item) bool {
 	return false
 }
 
-func runBrewUpdateBatch(
-	ctx context.Context,
-	items []*model.Item,
-	opts updater.Options,
-	cfg Config,
-	sess **elevate.Session,
-) []*updater.Result {
-	prepared, err := prepareUpdateBatch(ctx, model.CatBrew, items)
-	if err != nil {
-		return updatePlanErrorResults(items, err)
-	}
-	return runPreparedBrewUpdateBatch(ctx, prepared, items, opts, cfg, sess)
-}
-
 func partitionUpdatable(items []*model.Item) (updatable, manual []*model.Item) {
 	for _, it := range items {
 		if it.KeepPolicy != "" {

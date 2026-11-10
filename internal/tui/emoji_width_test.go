@@ -11,7 +11,7 @@ import (
 
 func TestEmoji_vs_border(t *testing.T) {
 	term := 80
-	s := New()
+	s := NewWithVersion("", "")
 	s.Width = term
 	// Simulate frame top vs line with emoji
 	top := "╭" + strings.Repeat("─", term-2) + "╮"

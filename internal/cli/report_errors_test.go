@@ -213,7 +213,7 @@ func TestCheckJSONIncludesErrorCause(t *testing.T) {
 			Error:      "fork/exec pnpm: exec format error",
 		}},
 	}}
-	rep, err := FormatCheckJSON(updates, nil)
+	rep, err := formatCheckJSON(updates, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

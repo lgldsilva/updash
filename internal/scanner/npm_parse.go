@@ -53,19 +53,6 @@ type npmLsGlobal struct {
 	} `json:"dependencies"`
 }
 
-// ParseNpmLsGlobal returns the set of globally installed npm package names.
-func ParseNpmLsGlobal(out []byte) map[string]bool {
-	versions := ParseNpmLsGlobalVersions(out)
-	if len(versions) == 0 {
-		return nil
-	}
-	m := make(map[string]bool, len(versions))
-	for name := range versions {
-		m[name] = true
-	}
-	return m
-}
-
 // ParseNpmLsGlobalVersions returns package → installed version from
 // `npm ls -g --json --depth=0` (nil on invalid or dependency-less output).
 func ParseNpmLsGlobalVersions(out []byte) map[string]string {
@@ -76,28 +63,6 @@ func ParseNpmLsGlobalVersions(out []byte) map[string]string {
 	m := make(map[string]string, len(data.Dependencies))
 	for name, dep := range data.Dependencies {
 		m[name] = dep.Version
-	}
-	return m
-}
-
-// ParseNpmOutdatedMap returns package name → latest version from npm outdated JSON.
-// Empty and invalid payloads both return nil; callers that must tell a
-// successful "nothing outdated" apart from a broken probe use
-// parseNpmOutdatedLatest.
-func ParseNpmOutdatedMap(out []byte) map[string]string {
-	var data map[string]npmOutdatedEntry
-	if err := json.Unmarshal(out, &data); err != nil || len(data) == 0 {
-		return nil
-	}
-	m := make(map[string]string, len(data))
-	for name, pkg := range data {
-		avail := pkg.Latest
-		if avail == "" {
-			avail = pkg.Wanted
-		}
-		if avail != "" {
-			m[name] = avail
-		}
 	}
 	return m
 }

@@ -246,13 +246,3 @@ func ModeSkipsStartupUpgrade(mode string) bool {
 		return false
 	}
 }
-
-// ModeShowsStartupBanner reports whether to print the build banner on launch.
-func ModeShowsStartupBanner(mode string) bool {
-	return !ModeSkipsStartupUpgrade(mode) || mode == "version"
-}
-
-// NormalizeVersion strips a leading v for display comparisons.
-func NormalizeVersion(v string) string {
-	return strings.TrimPrefix(strings.TrimSpace(v), "v")
-}

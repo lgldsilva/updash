@@ -101,11 +101,6 @@ type State struct {
 	LatestTag string
 }
 
-// New creates a new TUI state.
-func New() *State {
-	return NewWithVersion("", "")
-}
-
 // NewWithVersion creates TUI state with build/release tags for the title bar.
 func NewWithVersion(version, latest string) *State {
 	ctx, cancel := context.WithCancel(context.Background())
@@ -411,24 +406,6 @@ func (s *State) needsElevationPrompt() bool {
 
 func (s *State) elevationSessionReady() bool {
 	return s.ElevSession != nil && s.ElevSession.Ready()
-}
-
-// canDeferMASElevation returns true when only MAS items need sudo and other
-// update batches can run first without a password prompt. Brew PKG casks
-// (Microsoft) also sudo-prompt mid-run, so they must be primed up-front too.
-func (s *State) canDeferMASElevation(items []*model.Item) bool {
-	needsMAS := false
-	for _, it := range items {
-		if !elevate.ItemNeedsUpdateElevation(it, s.Platform) {
-			continue
-		}
-		if it.Category == model.CatMAS {
-			needsMAS = true
-			continue
-		}
-		return false
-	}
-	return needsMAS
 }
 
 // waitForElevation blocks the worker until sudo is ready or ctx is

@@ -67,3 +67,13 @@ func TestUpdateAgent_crushPrefixAware(t *testing.T) {
 		t.Fatalf("status = %v, want done", it.Status)
 	}
 }
+
+// updateAgent runs one agent through the same planner + prepared executor the
+// CLI/TUI batches use, so these tests cover the production dispatch.
+func updateAgent(ctx context.Context, item *model.Item, opts Options) *Result {
+	batch, err := PrepareUpdateBatch(ctx, model.CatAgent, []*model.Item{item})
+	if err != nil {
+		return &Result{Item: item, Error: err.Error()}
+	}
+	return ExecutePreparedBatch(ctx, batch, opts)[0]
+}

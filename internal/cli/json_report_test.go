@@ -87,7 +87,7 @@ func TestWriteCheckJSON_and_Format(t *testing.T) {
 		t.Fatalf("decoded outdated=%d", decoded.Outdated)
 	}
 
-	s, err := FormatCheckJSON(updates, cleanup)
+	s, err := formatCheckJSON(updates, cleanup)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -107,7 +107,7 @@ func TestCheckReport_NpmPrefixField(t *testing.T) {
 				CurrentVer: "1.0.0", AvailableVer: "2.0.0", Status: model.StatusOutdated},
 		}},
 	}
-	s, err := FormatCheckJSON(updates, nil)
+	s, err := formatCheckJSON(updates, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -159,7 +159,7 @@ func TestCheckReportIncludesNpmPrefix(t *testing.T) {
 	if len(rep.Updates) != 1 || rep.Updates[0].Prefix != "/home/u/.npm-global" {
 		t.Fatalf("updates=%+v", rep.Updates)
 	}
-	got, err := FormatCheckJSON(updates, nil)
+	got, err := formatCheckJSON(updates, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -200,18 +200,10 @@ func TestValidateJSONMode(t *testing.T) {
 	}
 }
 
-func TestPrintCheckJSON(t *testing.T) {
-	updates, cleanup := sampleSummaries()
-	out := captureStdout(t, func() {
-		o, c, err := PrintCheckJSON(updates, cleanup)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if o != 2 || c != 1 {
-			t.Fatalf("o=%d c=%d", o, c)
-		}
-	})
-	if !strings.Contains(out, "outdated") {
-		t.Fatalf("stdout=%s", out)
-	}
+// formatCheckJSON renders the report through the production writer so the
+// JSON assertions exercise the exact bytes --check --json emits.
+func formatCheckJSON(updates, cleanup []*model.SourceSummary) (string, error) {
+	var buf bytes.Buffer
+	err := WriteCheckJSON(&buf, BuildCheckReport(updates, cleanup))
+	return buf.String(), err
 }
