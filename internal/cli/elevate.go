@@ -75,7 +75,7 @@ func primeElevationSession(
 
 func plannedItemsNeedElevation(items []*model.Item) bool {
 	for cat, group := range groupByCategory(items) {
-		plans, err := updater.PlanUpdateCommands(cat, group)
+		plans, err := planUpdateCommands(cat, group)
 		if err == nil && updater.PlansRequireElevation(plans) {
 			return true
 		}

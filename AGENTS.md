@@ -55,7 +55,7 @@ model/types.go       → Item, Category, Status, PlatformInfo
 ## Hermetic tests
 
 No test may run a real package manager, prune, uninstall or `sudo` on the host
-running `go test`. `internal/scanner`, `internal/cleaner` and `internal/updater` enforce this in
+running `go test`. `internal/scanner`, `internal/cleaner`, `internal/updater`, `internal/elevate` and `internal/cli` enforce this in
 `TestMain`: scanner exec seams start on a strict mock (an unmocked command
 fails with `exec.ErrNotFound`; `withRealExec(t)` opts a test into the real
 runner only for fixtures it fully controls), and cleaner routes
@@ -65,7 +65,14 @@ the result). `internal/updater` does the same: `commandContext`/`sudoCommand`
 re-exec the test binary, which records argv and exits 127 like a missing
 binary; `lookPath`, `geteuid`, `rpmToolName` and `brewOutdatedSet` are pinned
 so plans never depend on the host; `withRealExec(t)` is reserved for `sh`/`zsh`
-fixtures. New I/O goes through those seams, never `exec.Command` directly.
+fixtures. `internal/elevate` routes sudo/osascript through `commandContext`;
+its TestMain is a fake sudo (`-n` honours `UPDASH_ELEVATE_FAKE_NOPASSWD`, `-S`
+accepts only `fakeSudoPassword`), so no test authenticates against the host
+(a wrong password there hits auth.log and pam_faillock). `internal/cli`'s
+TestMain makes every side-effecting hook panic unless stubbed; integration
+tests that drive the real updater against PATH fixtures opt in with
+`withRealUpdater(t)`. New I/O goes through those seams, never `exec.Command`
+directly.
 
 ## Shell install/staging
 

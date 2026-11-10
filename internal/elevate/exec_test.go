@@ -15,10 +15,11 @@ func TestSudo_WithSession(t *testing.T) {
 	ctx := WithSession(context.Background(), sess)
 
 	cmd := Sudo(ctx, "mas", "update", "123")
-	if cmd.Args[0] != "sudo" || cmd.Args[1] != "-S" {
-		t.Fatalf("args: %v", cmd.Args)
+	argv := sudoArgv(cmd)
+	if argv[0] != "sudo" || argv[1] != "-S" {
+		t.Fatalf("args: %v", argv)
 	}
-	if !strings.Contains(strings.Join(cmd.Args, " "), "mas") {
+	if !strings.Contains(strings.Join(argv, " "), "mas") {
 		t.Fatalf("expected mas in args: %v", cmd.Args)
 	}
 }
@@ -28,7 +29,7 @@ func TestSudo_Passwordless(t *testing.T) {
 	sess.SetPasswordless()
 	ctx := WithSession(context.Background(), sess)
 	cmd := Sudo(ctx, "apt-get", "update")
-	if len(cmd.Args) < 2 || cmd.Args[1] != "apt-get" {
+	if argv := sudoArgv(cmd); len(argv) < 2 || argv[1] != "apt-get" {
 		t.Fatalf("passwordless sudo args: %v", cmd.Args)
 	}
 }

@@ -99,6 +99,7 @@ func TestRunUpdate_AgyZeroExitIsSuccess(t *testing.T) {
 			restoreHooks(t)
 			dir := writeFakeAgy(t, tc.out, 0)
 			installAgyScan(t)
+			withRealUpdater(t)
 			var code int
 			out := captureStdout(t, func() {
 				ok, fail, err := RunUpdate(context.Background(), Config{})
@@ -122,6 +123,7 @@ func TestRunUpdate_AgyFailureIsClassified(t *testing.T) {
 	restoreHooks(t)
 	dir := writeFakeAgy(t, "download failed", 1)
 	installAgyScan(t)
+	withRealUpdater(t)
 
 	var code int
 	out := captureStdout(t, func() {
