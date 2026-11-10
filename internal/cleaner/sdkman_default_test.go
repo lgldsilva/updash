@@ -80,3 +80,21 @@ func TestCleanSDKMAN_UninstallFailureStopsAndReports(t *testing.T) {
 		t.Fatalf("expected failure naming the version, got %+v", r)
 	}
 }
+
+// Git Bash/MSYS copies `current` instead of linking it: the default is
+// unknowable, so nothing may be uninstalled.
+func TestCleanSDKMAN_RefusesWhenCurrentIsNotASymlink(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	mkSDKCandidate(t, home, "java", "", "21.0.1-tem", "21.0.3-tem", "current")
+	log := recordExec(t)
+
+	item := &model.Item{Name: "java 21", Category: model.CatSDKMAN, CurrentVer: "21.0.3-tem"}
+	r := cleanSDKMAN(context.Background(), item, SilentOptions())
+	if r.Success || !strings.Contains(r.Error, "sdk default") {
+		t.Fatalf("expected refusal, got %+v", r)
+	}
+	if n := len(log.calls()); n != 0 {
+		t.Fatalf("expected no commands, got %v", log.calls())
+	}
+}

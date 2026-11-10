@@ -16,7 +16,7 @@ func TestSDKMANDefaultVersion(t *testing.T) {
 		if err := os.Symlink(target, filepath.Join(dir, "current")); err != nil {
 			t.Fatal(err)
 		}
-		if got := SDKMANDefaultVersion(dir); got != "21.0.3-tem" {
+		if got, known := SDKMANDefaultVersion(dir); got != "21.0.3-tem" || !known {
 			t.Fatalf("got %q, want 21.0.3-tem", got)
 		}
 	})
@@ -25,22 +25,22 @@ func TestSDKMANDefaultVersion(t *testing.T) {
 		if err := os.Symlink("17.0.9-tem/", filepath.Join(dir, "current")); err != nil {
 			t.Fatal(err)
 		}
-		if got := SDKMANDefaultVersion(dir); got != "17.0.9-tem" {
+		if got, known := SDKMANDefaultVersion(dir); got != "17.0.9-tem" || !known {
 			t.Fatalf("got %q, want 17.0.9-tem", got)
 		}
 	})
 	t.Run("no current link", func(t *testing.T) {
-		if got := SDKMANDefaultVersion(t.TempDir()); got != "" {
+		if got, known := SDKMANDefaultVersion(t.TempDir()); got != "" || !known {
 			t.Fatalf("got %q, want empty", got)
 		}
 	})
-	t.Run("current is a plain directory", func(t *testing.T) {
+	t.Run("current is a copied directory (MSYS) is unknown", func(t *testing.T) {
 		dir := t.TempDir()
 		if err := os.Mkdir(filepath.Join(dir, "current"), 0o750); err != nil {
 			t.Fatal(err)
 		}
-		if got := SDKMANDefaultVersion(dir); got != "" {
-			t.Fatalf("got %q, want empty", got)
+		if got, known := SDKMANDefaultVersion(dir); got != "" || known {
+			t.Fatalf("got %q known=%v, want unknown", got, known)
 		}
 	})
 }

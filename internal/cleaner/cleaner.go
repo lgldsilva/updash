@@ -161,7 +161,12 @@ func cleanSDKMAN(ctx context.Context, item *model.Item, opts Options) *Result {
 		item.Status = model.StatusError
 		return &Result{Item: item, Success: false, Error: "refusing SDKMAN cleanup without a version to keep"}
 	}
-	removals := sdkmanRemovals(entries, major, item.CurrentVer, retention.SDKMANDefaultVersion(verDir))
+	defaultVer, known := retention.SDKMANDefaultVersion(verDir)
+	if !known {
+		item.Status = model.StatusError
+		return &Result{Item: item, Success: false, Error: "refusing SDKMAN cleanup: cannot identify the sdk default (current is not a symlink)"}
+	}
+	removals := sdkmanRemovals(entries, major, item.CurrentVer, defaultVer)
 	if len(removals) == 0 {
 		return &Result{Item: item, Success: true, Output: fmt.Sprintf("%s %s: nothing to remove", candidate, major)}
 	}

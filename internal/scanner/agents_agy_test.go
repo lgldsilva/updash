@@ -126,6 +126,7 @@ func TestAgentScan_AgyVersionFailureStaysUnverified(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", dir)
+	withRealExec(t)
 
 	items, err := (&AgentSource{}).Scan(context.Background(), model.PlatformInfo{})
 	if err != nil {

@@ -3,7 +3,6 @@ package cleaner
 import (
 	"context"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -38,7 +37,7 @@ func measurePaths(ctx context.Context, paths []string) int64 {
 		if _, err := os.Stat(p); err != nil {
 			continue
 		}
-		out, err := exec.CommandContext(ctx, "du", "-sk", p).Output()
+		out, err := commandContext(ctx, "du", "-sk", p).Output()
 		if err != nil {
 			continue
 		}
@@ -87,7 +86,7 @@ func firstExistingPath(paths ...string) []string {
 }
 
 func goCachePaths() []string {
-	out, err := exec.Command("go", "env", "GOCACHE").Output()
+	out, err := commandContext(context.Background(), "go", "env", "GOCACHE").Output()
 	if err != nil {
 		return nil
 	}

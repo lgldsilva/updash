@@ -25,11 +25,22 @@ func TestMain(m *testing.M) {
 	if os.Getenv(fakeExecEnv) == "1" {
 		os.Exit(runFakeCommand(os.Args[1:]))
 	}
+	// Cleanup removes paths under HOME (~/.npm/_npx, editor extensions,
+	// SDKMAN). A test that forgets t.Setenv("HOME") must hit a sandbox.
+	home, err := os.MkdirTemp("", "updash-cleaner-home-")
+	if err != nil {
+		panic(err)
+	}
+	if err := os.Setenv("HOME", home); err != nil {
+		panic(err)
+	}
 	commandContext = fakeCommandContext
 	sudoCommand = func(ctx context.Context, name string, args ...string) *exec.Cmd {
 		return fakeCommandContext(ctx, "sudo", append([]string{name}, args...)...)
 	}
-	os.Exit(m.Run())
+	code := m.Run()
+	_ = os.RemoveAll(home)
+	os.Exit(code)
 }
 
 func runFakeCommand(argv []string) int {

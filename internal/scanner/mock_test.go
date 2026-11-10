@@ -880,15 +880,12 @@ func TestAgentScan(t *testing.T) {
 	}
 }
 
-// Test that mockExecCommand falls back to real execution for unregistered commands.
-func TestMockFallback(t *testing.T) {
-	enableMocks()
-	defer disableMocks()
-
-	// "go" should work if Go is installed (it is, since we're running tests)
+// TestMockIsStrict pins the hermetic contract: an unmocked command never
+// reaches the host.
+func TestMockIsStrict(t *testing.T) {
 	_, err := mockExecCommand(context.Background(), "go", "version")
-	if err != nil {
-		t.Logf("note: mock fallback to real exec failed: %v (may be expected in sandbox)", err)
+	if !errors.Is(err, exec.ErrNotFound) {
+		t.Fatalf("unmocked command must fail with ErrNotFound, got %v", err)
 	}
 }
 
@@ -902,11 +899,11 @@ func TestSDKMANSourceScan_TempDir(t *testing.T) {
 	_ = os.Mkdir(filepath.Join(candidatesDir, "java", "11.0.25-tem"), 0755)
 	_ = os.Mkdir(filepath.Join(candidatesDir, "java", "21.0.7-tem"), 0755)
 	_ = os.Mkdir(filepath.Join(candidatesDir, "java", "21.0.5-tem"), 0755)
-	_ = os.Mkdir(filepath.Join(candidatesDir, "java", "current"), 0755)
+	_ = os.Symlink("21.0.7-tem", filepath.Join(candidatesDir, "java", "current"))
 	_ = os.Mkdir(filepath.Join(candidatesDir, "gradle", "8.14.4"), 0755)
 	_ = os.Mkdir(filepath.Join(candidatesDir, "gradle", "8.14.1"), 0755)
 	_ = os.Mkdir(filepath.Join(candidatesDir, "gradle", "9.4.1"), 0755)
-	_ = os.Mkdir(filepath.Join(candidatesDir, "gradle", "current"), 0755)
+	_ = os.Symlink("9.4.1", filepath.Join(candidatesDir, "gradle", "current"))
 
 	origHome := os.Getenv("HOME")
 	_ = os.Setenv("HOME", tmpDir)

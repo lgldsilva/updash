@@ -51,9 +51,16 @@ func scanSDKCandidate(verDir, candidate string) []*model.Item {
 		return nil
 	}
 	var items []*model.Item
-	defaultVer := retention.SDKMANDefaultVersion(verDir)
+	defaultVer, known := retention.SDKMANDefaultVersion(verDir)
 	for majorVer, latest := range groupLatestPerMajor(installed) {
-		items = append(items, sdkMajorItem(candidate, majorVer, latest, defaultVer, installed))
+		it := sdkMajorItem(candidate, majorVer, latest, defaultVer, installed)
+		if !known && it.RemoveCount > 0 {
+			// The cleaner refuses when the default is unidentifiable; do
+			// not offer a cleanup it will not perform.
+			it.Status, it.RemoveCount, it.Reclaimable = model.StatusInfo, 0, ""
+			it.KeepPolicy = "sdk default unknown (current is not a symlink); not cleaned"
+		}
+		items = append(items, it)
 	}
 	return items
 }
