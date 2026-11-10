@@ -2,6 +2,7 @@ package cleaner
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/lgldsilva/updash/internal/model"
@@ -39,10 +40,25 @@ func TestRunMultiElevatedCmd(t *testing.T) {
 }
 
 func TestCleanCache_Apt(t *testing.T) {
+	log := recordExec(t)
 	item := &model.Item{Name: "apt-cache", Category: model.CatCache}
 	r := cleanCache(context.Background(), item, SilentOptions())
-	if r == nil {
-		t.Fatal("nil result")
+	if !r.Success || item.Status != model.StatusCleaned {
+		t.Fatalf("expected success, got %+v", r)
+	}
+	want := "sudo apt-get autoremove -y\nsudo apt-get autoclean\n"
+	if got := log.joined(); got != want {
+		t.Fatalf("apt cleanup must run elevated: got %q, want %q", got, want)
+	}
+}
+
+func TestCleanCache_AptFailureMarksError(t *testing.T) {
+	recordExec(t)
+	t.Setenv(fakeFailEnv, "autoclean")
+	item := &model.Item{Name: "apt-cache", Category: model.CatCache}
+	r := cleanCache(context.Background(), item, SilentOptions())
+	if r.Success || item.Status != model.StatusError {
+		t.Fatalf("expected failure, got %+v", r)
 	}
 }
 
@@ -80,10 +96,15 @@ func TestCleanDocker_Routes(t *testing.T) {
 	opts := SilentOptions()
 	names := []string{"docker images", "docker build cache", "docker containers", "docker volumes", "docker misc"}
 	for _, name := range names {
+		log := recordExec(t)
 		item := &model.Item{Name: name, Category: model.CatDockerClean}
 		r := cleanDocker(ctx, item, opts)
-		if r == nil {
-			t.Fatalf("nil result for %s", name)
+		if !r.Success {
+			t.Fatalf("%s: expected success, got %+v", name, r)
+		}
+		want := "docker " + strings.Join(dockerPruneArgsForItem(name), " ") + "\n"
+		if got := log.joined(); got != want {
+			t.Fatalf("%s: got %q, want %q", name, got, want)
 		}
 	}
 }

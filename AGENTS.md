@@ -52,6 +52,17 @@ model/types.go       → Item, Category, Status, PlatformInfo
 4. Add cleanup in `internal/cleaner` if needed
 5. Unit-test pure parse helpers; mock `execCombined` / `execCommand` for I/O
 
+## Hermetic tests
+
+No test may run a real package manager, prune, uninstall or `sudo` on the host
+running `go test`. `internal/scanner` and `internal/cleaner` enforce this in
+`TestMain`: scanner exec seams start on a strict mock (an unmocked command
+fails with `exec.ErrNotFound`; `withRealExec(t)` opts a test into the real
+runner only for fixtures it fully controls), and cleaner routes
+`commandContext`/`sudoCommand` through a re-exec of the test binary that
+records argv (`recordExec(t)`; `UPDASH_CLEANER_FAKE_FAIL` / `_STDOUT` shape
+the result). New I/O goes through those seams, never `exec.Command` directly.
+
 ## Shell install/staging
 
 `install.sh` and `internal/upgrade` share one staging discipline: stage under an
