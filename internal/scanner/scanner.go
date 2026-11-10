@@ -129,33 +129,39 @@ func sourceMatchesSelection(src Source, want map[model.Category]struct{}, cleanu
 // this host. Labels and package names are deliberately not aliases.
 func CanonicalCategory(plat model.PlatformInfo, includeCleanup bool, raw string) (model.Category, bool) {
 	want := model.Category(strings.ToLower(strings.TrimSpace(raw)))
-	if want == model.CatGHExt {
-		for _, src := range enabledSources(plat, includeCleanup) {
-			if _, ok := src.(*AIInfraSource); ok {
-				return want, true
-			}
-		}
+	srcs := enabledSources(plat, includeCleanup)
+	if aliasSourceEnabled(srcs, want, includeCleanup) {
+		return want, true
 	}
-	if includeCleanup && (want == model.CatBrew || want == model.CatDocker) {
-		for _, src := range enabledSources(plat, includeCleanup) {
-			if want == model.CatBrew {
-				if _, ok := src.(*BrewCleanSource); ok {
-					return want, true
-				}
-			}
-			if want == model.CatDocker {
-				if _, ok := src.(*DockerCleanSource); ok {
-					return want, true
-				}
-			}
-		}
-	}
-	for _, src := range enabledSources(plat, includeCleanup) {
+	for _, src := range srcs {
 		if strings.EqualFold(string(src.Category()), string(want)) {
 			return src.Category(), true
 		}
 	}
 	return "", false
+}
+
+// aliasSourceEnabled reports categories served by a source whose own
+// Category() differs: gh-ext rides on the AI infra source, and in cleanup
+// runs brew/docker resolve to their clean sources.
+func aliasSourceEnabled(srcs []Source, want model.Category, includeCleanup bool) bool {
+	for _, src := range srcs {
+		switch src.(type) {
+		case *AIInfraSource:
+			if want == model.CatGHExt {
+				return true
+			}
+		case *BrewCleanSource:
+			if includeCleanup && want == model.CatBrew {
+				return true
+			}
+		case *DockerCleanSource:
+			if includeCleanup && want == model.CatDocker {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // enabledSources returns scanners for the current platform.
