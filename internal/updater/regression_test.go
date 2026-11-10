@@ -12,6 +12,7 @@ import (
 )
 
 func TestRunUpdateCmd_StreamsToConfiguredOutput(t *testing.T) {
+	withRealExec(t)
 	var output bytes.Buffer
 	stdout, stderr, err := runUpdateCmd(context.Background(), Options{Output: &output}, "sh", "-c", "printf streamed")
 	if err != nil {

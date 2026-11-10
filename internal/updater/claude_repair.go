@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -34,7 +33,7 @@ func containsStubMarker(output string) bool {
 func claudeHealth(ctx context.Context) (healthy bool, stubIssue bool) {
 	hctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
-	out, err := exec.CommandContext(hctx, "claude", "--version").CombinedOutput()
+	out, err := commandContext(hctx, "claude", "--version").CombinedOutput()
 	if err == nil {
 		return true, false
 	}
@@ -45,7 +44,7 @@ func claudeHealth(ctx context.Context) (healthy bool, stubIssue bool) {
 func npmGlobalRoot(ctx context.Context) (string, error) {
 	nctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
-	out, err := exec.CommandContext(nctx, "npm", "root", "-g").Output()
+	out, err := commandContext(nctx, "npm", "root", "-g").Output()
 	if err != nil {
 		return "", fmt.Errorf("npm root -g failed: %w", err)
 	}
@@ -66,7 +65,7 @@ func repairClaudeNativeBinary(ctx context.Context) (bool, string) {
 	}
 	rctx, cancel := context.WithTimeout(ctx, 3*time.Minute)
 	defer cancel()
-	out, err := exec.CommandContext(rctx, "node", install).CombinedOutput()
+	out, err := commandContext(rctx, "node", install).CombinedOutput()
 	trimmed := strings.TrimSpace(string(out))
 	if err != nil {
 		return false, fmt.Sprintf("postinstall repair failed: %v: %s", err, trimmed)

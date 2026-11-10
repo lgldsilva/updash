@@ -55,13 +55,17 @@ model/types.go       → Item, Category, Status, PlatformInfo
 ## Hermetic tests
 
 No test may run a real package manager, prune, uninstall or `sudo` on the host
-running `go test`. `internal/scanner` and `internal/cleaner` enforce this in
+running `go test`. `internal/scanner`, `internal/cleaner` and `internal/updater` enforce this in
 `TestMain`: scanner exec seams start on a strict mock (an unmocked command
 fails with `exec.ErrNotFound`; `withRealExec(t)` opts a test into the real
 runner only for fixtures it fully controls), and cleaner routes
 `commandContext`/`sudoCommand` through a re-exec of the test binary that
 records argv (`recordExec(t)`; `UPDASH_CLEANER_FAKE_FAIL` / `_STDOUT` shape
-the result). New I/O goes through those seams, never `exec.Command` directly.
+the result). `internal/updater` does the same: `commandContext`/`sudoCommand`
+re-exec the test binary, which records argv and exits 127 like a missing
+binary; `lookPath`, `geteuid`, `rpmToolName` and `brewOutdatedSet` are pinned
+so plans never depend on the host; `withRealExec(t)` is reserved for `sh`/`zsh`
+fixtures. New I/O goes through those seams, never `exec.Command` directly.
 
 ## Shell install/staging
 

@@ -157,10 +157,10 @@ func planUpdateCommands(ctx context.Context, cat model.Category, items []*model.
 		}
 		return plans, nil
 	case model.CatDnf:
-		if tool := scanner.RpmToolName(); tool == "yum" {
+		if tool := rpmToolName(); tool == "yum" {
 			return globalPlan(tool, []string{commandUpdate, flagYes}, true)
 		}
-		return globalPlan(scanner.RpmToolName(), []string{commandUpgrade, "--refresh", flagYes}, true)
+		return globalPlan(rpmToolName(), []string{commandUpgrade, "--refresh", flagYes}, true)
 	case model.CatZypper:
 		return globalPlan("zypper", []string{"--non-interactive", commandUpdate}, true)
 	case model.CatApk:

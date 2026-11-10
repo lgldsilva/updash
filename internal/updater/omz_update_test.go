@@ -69,6 +69,7 @@ func TestPlanUpdateCommandsOmz_FallsBackToManualWithoutZsh(t *testing.T) {
 }
 
 func TestExecutePreparedBatchOmz_DoesNotLoadZshrcOrRunInteractive(t *testing.T) {
+	withRealExec(t)
 	if _, err := exec.LookPath("zsh"); err != nil {
 		t.Skip("zsh is not installed")
 	}

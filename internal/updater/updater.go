@@ -231,7 +231,7 @@ func upgradeOneBrewWithPlan(ctx context.Context, item *model.Item, plan CommandP
 	itemCtx, cancel := context.WithTimeout(ctx, BrewItemTimeout(item.Name))
 	defer cancel()
 
-	cmd := exec.CommandContext(itemCtx, plan.Name, plan.Args...)
+	cmd := commandContext(itemCtx, plan.Name, plan.Args...)
 	cleanup, err := usePrivilegedAskpass(itemCtx, cmd, scanner.BrewNeedsSudoPrime(item.Name))
 	if err != nil {
 		item.Status = model.StatusError
@@ -284,7 +284,7 @@ func upgradeMASAppWithPlan(ctx context.Context, item *model.Item, plan CommandPl
 	if plan.Scope == CommandScopeManual {
 		return manualAgentResult(item, plan.Manual)
 	}
-	cmd := exec.CommandContext(ctx, plan.Name, plan.Args...)
+	cmd := commandContext(ctx, plan.Name, plan.Args...)
 	cleanup, err := usePrivilegedAskpass(ctx, cmd, true)
 	if err != nil {
 		item.Status = model.StatusError
@@ -327,7 +327,7 @@ type masOutdatedEntry struct {
 }
 
 func masOutdatedEntries(ctx context.Context) []masOutdatedEntry {
-	out, err := exec.CommandContext(ctx, "mas", "outdated").Output()
+	out, err := commandContext(ctx, "mas", "outdated").Output()
 	if err != nil {
 		return nil
 	}
@@ -360,11 +360,11 @@ func brewVerifyAfterUpgrade(ctx context.Context) (map[string]struct{}, error) {
 				if lastErr != nil {
 					return nil, lastErr
 				}
-				return scanner.BrewOutdatedSet(ctx)
+				return brewOutdatedSet(ctx)
 			case <-time.After(d):
 			}
 		}
-		set, err := scanner.BrewOutdatedSet(ctx)
+		set, err := brewOutdatedSet(ctx)
 		if err == nil {
 			return set, nil
 		}

@@ -43,6 +43,7 @@ func TestUsePrivilegedAskpass_plainBrewDoesNotAttach(t *testing.T) {
 }
 
 func TestInteractivePrivilegedUpdatesInstallAskpass(t *testing.T) {
+	withRealExec(t)
 	// The seam stands in for elevate.AttachSubprocessSudo so the test does not
 	// exec brew/mas. TestInstallAskpass covers the real SUDO_ASKPASS helper.
 	var commands []*exec.Cmd
