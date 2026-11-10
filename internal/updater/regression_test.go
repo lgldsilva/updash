@@ -374,3 +374,56 @@ func TestUpdateCategory_EmptyGlobalCategoriesAreNoops(t *testing.T) {
 		})
 	}
 }
+
+func TestPlanUpdateCommands_DnfAndPacmanBranches(t *testing.T) {
+	items := []*model.Item{{Name: "git"}}
+	global := func(name string, args []string, elevated bool) CommandPlan {
+		return CommandPlan{Name: name, Args: args, Scope: CommandScopeCategoryGlobal, Elevated: elevated}
+	}
+	assertPlan := func(t *testing.T, cat model.Category, want CommandPlan) {
+		t.Helper()
+		plans, err := PlanUpdateCommands(cat, items)
+		if err != nil || len(plans) != 1 {
+			t.Fatalf("plans=%#v err=%v", plans, err)
+		}
+		if !reflect.DeepEqual(plans[0], want) {
+			t.Fatalf("plan=%#v want %#v", plans[0], want)
+		}
+	}
+
+	t.Run("yum updates in place", func(t *testing.T) {
+		prev := rpmToolName
+		t.Cleanup(func() { rpmToolName = prev })
+		rpmToolName = func() string { return "yum" }
+		assertPlan(t, model.CatDnf, global("yum", []string{"update", "-y"}, true))
+	})
+	t.Run("dnf refreshes then upgrades", func(t *testing.T) {
+		assertPlan(t, model.CatDnf, global("dnf", []string{"upgrade", "--refresh", "-y"}, true))
+	})
+	t.Run("dnf5 uses the upgrade form", func(t *testing.T) {
+		prev := rpmToolName
+		t.Cleanup(func() { rpmToolName = prev })
+		rpmToolName = func() string { return "dnf5" }
+		assertPlan(t, model.CatDnf, global("dnf5", []string{"upgrade", "--refresh", "-y"}, true))
+	})
+	t.Run("pacman without yay", func(t *testing.T) {
+		assertPlan(t, model.CatPacman, global("pacman", []string{"-Syu", "--noconfirm"}, true))
+	})
+	t.Run("yay when present", func(t *testing.T) {
+		prev := lookPath
+		t.Cleanup(func() { lookPath = prev })
+		lookPath = func(name string) (string, error) {
+			if name == "yay" {
+				return "/usr/bin/yay", nil
+			}
+			return "", errors.New("not found")
+		}
+		assertPlan(t, model.CatPacman, global("yay", []string{"-Syu", "--noconfirm"}, false))
+	})
+	t.Run("nil lookPath stays on pacman", func(t *testing.T) {
+		prev := lookPath
+		t.Cleanup(func() { lookPath = prev })
+		lookPath = nil
+		assertPlan(t, model.CatPacman, global("pacman", []string{"-Syu", "--noconfirm"}, true))
+	})
+}
