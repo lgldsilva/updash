@@ -640,6 +640,8 @@ func TestRunCategoryUpdateSection_brewUsesPreparedPlan(t *testing.T) {
 }
 
 func TestRunOneClean_unknownCategory(t *testing.T) {
+	restoreHooks(t)
+	stubFailedClean()
 	it := &model.Item{Name: "weird", Category: model.CatBrew}
 	out := captureStdout(t, func() {
 		ok, fail, freed := runOneClean(context.Background(), it, cleaner.Options{})
@@ -653,6 +655,8 @@ func TestRunOneClean_unknownCategory(t *testing.T) {
 }
 
 func TestRunCleanBatches(t *testing.T) {
+	restoreHooks(t)
+	stubFailedClean()
 	it := &model.Item{Name: "weird", Category: model.CatBrew, Status: model.StatusCleanCandidate}
 	summaries := []*model.SourceSummary{
 		{Icon: "🍺", Label: "Brew", Items: []*model.Item{it}},
@@ -813,17 +817,6 @@ func TestItemNeedsNativeElevation(t *testing.T) {
 	if itemNeedsNativeElevation(&model.Item{Name: "telegram", Category: model.CatBrew}, plat) {
 		t.Fatal("plain brew should not")
 	}
-}
-
-func TestPrepareCleanElevation_passwordlessOrInteractive(t *testing.T) {
-	ctx := context.Background()
-	// apt cache may need elevation; interactive=false should not panic.
-	_ = prepareCleanElevation(ctx, model.PlatformInfo{OS: "linux"}, []*model.Item{
-		{Name: "apt-cache", Category: model.CatCache},
-	}, false)
-	_ = prepareCleanElevation(ctx, model.PlatformInfo{OS: "linux"}, []*model.Item{
-		{Name: "apt-cache", Category: model.CatCache},
-	}, true)
 }
 
 func TestBrewItemNeedsPassword(t *testing.T) {

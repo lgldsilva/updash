@@ -17,6 +17,7 @@ var (
 	cleanOneFn                   = cleaner.CleanOne
 	updateCategory               = updater.UpdateCategory
 	prepareUpdateBatch           = updater.PrepareUpdateBatch
+	planUpdateCommands           = updater.PlanUpdateCommands
 	executePreparedBatch         = updater.ExecutePreparedBatch
 	executeNpmSkippingElevated   = updater.ExecuteNpmSkippingElevated
 	canElevateNP                 = elevate.CanElevateWithoutPassword

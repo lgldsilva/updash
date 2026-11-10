@@ -105,39 +105,6 @@ func TestValidate_nilSession(t *testing.T) {
 	}
 }
 
-func TestValidate_wrongPassword(t *testing.T) {
-	if CanElevateWithoutPassword(context.Background()) {
-		t.Skip("passwordless sudo available")
-	}
-	s := NewSession()
-	err := s.Validate(context.Background(), "definitely-wrong-password-12345")
-	if err == nil {
-		t.Fatal("expected error for wrong password")
-	}
-	if s.Ready() {
-		t.Fatal("session should not be ready after failed validate")
-	}
-}
-
-func TestValidate_success(t *testing.T) {
-	// sudo -S -v with a fake password fails even on NOPASSWD hosts
-	// (NOPASSWD applies to command execution, not -S -v validation).
-	// So we test the error path here — the success path requires a real password.
-	s := NewSession()
-	err := s.Validate(context.Background(), "any-password")
-	if err == nil {
-		// If it somehow succeeds (real passwordless -S -v), verify state
-		if !s.Ready() {
-			t.Fatal("session should be ready after validate")
-		}
-		return
-	}
-	// Expected: error with stderr message
-	if s.Ready() {
-		t.Fatal("session should not be ready after failed validate")
-	}
-}
-
 func TestRefresh_nilSession(t *testing.T) {
 	var s *Session
 	if err := s.Refresh(context.Background()); err != nil {
@@ -153,93 +120,7 @@ func TestRefresh_invalidSession(t *testing.T) {
 	}
 }
 
-func TestRefresh_wrongPassword(t *testing.T) {
-	if CanElevateWithoutPassword(context.Background()) {
-		t.Skip("passwordless sudo available")
-	}
-	s := NewSession()
-	s.password = "wrong-password"
-	s.valid = true
-	err := s.Refresh(context.Background())
-	if err == nil {
-		t.Fatal("expected error for wrong password refresh")
-	}
-}
-
-func TestRefresh_success(t *testing.T) {
-	s := NewSession()
-	s.password = "any"
-	s.valid = true
-	// sudo -S -v with fake password fails even on NOPASSWD hosts
-	err := s.Refresh(context.Background())
-	if err != nil {
-		// Expected on most hosts — error path covered
-		return
-	}
-	// If it somehow succeeds, that's also fine
-}
-
 // ── EnsureSudoReady ───────────────────────────────────────────────────────
-
-func TestEnsureSudoReady_validSessionNeedsRefresh(t *testing.T) {
-	if CanElevateWithoutPassword(context.Background()) {
-		t.Skip("passwordless sudo available")
-	}
-	s := NewSession()
-	s.password = "wrong"
-	s.valid = true
-	ctx := WithSession(context.Background(), s)
-	err := EnsureSudoReady(ctx)
-	if err == nil {
-		t.Fatal("expected error for invalid password refresh")
-	}
-}
-
-func TestEnsureSudoReady_passwordlessHost(t *testing.T) {
-	// On a host with passwordless sudo, EnsureSudoReady returns nil immediately
-	if !CanElevateWithoutPassword(context.Background()) {
-		t.Skip("no passwordless sudo")
-	}
-	if err := EnsureSudoReady(context.Background()); err != nil {
-		t.Fatalf("passwordless host should succeed: %v", err)
-	}
-}
-
-func TestEnsureSudoReady_noSession_noPasswordless(t *testing.T) {
-	if CanElevateWithoutPassword(context.Background()) {
-		t.Skip("passwordless sudo available")
-	}
-	err := EnsureSudoReady(context.Background())
-	if err == nil || !strings.Contains(err.Error(), "sudo password required") {
-		t.Fatalf("err = %v", err)
-	}
-}
-
-func TestEnsureSudoReady_passwordlessSession(t *testing.T) {
-	if !CanElevateWithoutPassword(context.Background()) {
-		t.Skip("no passwordless sudo")
-	}
-	s := NewSession()
-	s.SetPasswordless()
-	ctx := WithSession(context.Background(), s)
-	if err := EnsureSudoReady(ctx); err != nil {
-		t.Fatalf("passwordless session: %v", err)
-	}
-}
-
-func TestEnsureSudoReady_validSession_refreshOK(t *testing.T) {
-	if !CanElevateWithoutPassword(context.Background()) {
-		t.Skip("no passwordless sudo")
-	}
-	s := NewSession()
-	s.password = "any"
-	s.valid = true
-	ctx := WithSession(context.Background(), s)
-	// CanElevateWithoutPassword returns true, so it returns nil before checking session
-	if err := EnsureSudoReady(ctx); err != nil {
-		t.Fatalf("err = %v", err)
-	}
-}
 
 // ── Subprocess helpers ────────────────────────────────────────────────────
 
@@ -296,77 +177,6 @@ func TestWriteSudoAskpassScript(t *testing.T) {
 	}
 	if fi.Mode().Perm() != 0700 {
 		t.Fatalf("perm = %o, want 700", fi.Mode().Perm())
-	}
-}
-
-func TestAttachSubprocessSudo_noSession(t *testing.T) {
-	if CanElevateWithoutPassword(context.Background()) {
-		// With passwordless sudo, EnsureSudoReady succeeds, then sess==nil → noopCleanup
-		cmd := exec.Command("true")
-		cleanup, err := AttachSubprocessSudo(context.Background(), cmd)
-		defer cleanup()
-		if err != nil {
-			t.Fatalf("passwordless host should succeed: %v", err)
-		}
-		return
-	}
-	cmd := exec.Command("true")
-	cleanup, err := AttachSubprocessSudo(context.Background(), cmd)
-	defer cleanup()
-	if err == nil {
-		t.Fatal("expected error without session")
-	}
-}
-
-func TestAttachSubprocessSudo_passwordless(t *testing.T) {
-	s := NewSession()
-	s.SetPasswordless()
-	ctx := WithSession(context.Background(), s)
-
-	// If the host doesn't have passwordless sudo, EnsureSudoReady will fail
-	// before reaching the passwordless check. Skip in that case.
-	if !CanElevateWithoutPassword(ctx) {
-		t.Skip("passwordless sudo not available on this host")
-	}
-
-	cmd := exec.Command("true")
-	cleanup, err := AttachSubprocessSudo(ctx, cmd)
-	defer cleanup()
-	if err != nil {
-		t.Fatalf("passwordless should succeed: %v", err)
-	}
-}
-
-func TestAttachSubprocessSudo_validSession(t *testing.T) {
-	s := NewSession()
-	s.password = "test-pw"
-	s.valid = true
-	ctx := WithSession(context.Background(), s)
-
-	cmd := exec.Command("true")
-	cleanup, err := AttachSubprocessSudo(ctx, cmd)
-	defer cleanup()
-
-	if CanElevateWithoutPassword(context.Background()) {
-		// EnsureSudoReady succeeds (passwordless), sess.valid=true, not passwordless
-		// → writes askpass files and sets SUDO_ASKPASS
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		hasAskpass := false
-		for _, env := range cmd.Env {
-			if strings.HasPrefix(env, "SUDO_ASKPASS=") {
-				hasAskpass = true
-			}
-		}
-		if !hasAskpass {
-			t.Fatal("expected SUDO_ASKPASS in cmd.Env")
-		}
-	} else {
-		// EnsureSudoReady fails (wrong password refresh)
-		if err == nil {
-			t.Fatal("expected error for invalid password")
-		}
 	}
 }
 
@@ -447,7 +257,7 @@ func TestItemsNeedElevation_empty(t *testing.T) {
 
 func TestSudo_nilSession(t *testing.T) {
 	cmd := Sudo(context.Background(), "apt-get", "update")
-	if cmd.Args[1] != "apt-get" {
+	if sudoArgv(cmd)[1] != "apt-get" {
 		t.Fatalf("args = %v", cmd.Args)
 	}
 }

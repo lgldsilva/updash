@@ -15,7 +15,9 @@ import (
 func restoreHooks(t *testing.T) {
 	t.Helper()
 	od, os, osf, osfc, oc, ou, opb, epb, enpm, oe, on, opm, of, oi := detectPlatform, runScannerAll, runScannerFiltered, runScannerFilteredForCleanup, cleanOneFn, updateCategory, prepareUpdateBatch, executePreparedBatch, executeNpmSkippingElevated, canElevateNP, nativeMacAvail, promptMacSess, formatBytesFn, stdinIsTTYFn
+	opu := planUpdateCommands
 	t.Cleanup(func() {
+		planUpdateCommands = opu
 		detectPlatform, runScannerAll, runScannerFiltered, runScannerFilteredForCleanup, cleanOneFn, updateCategory, prepareUpdateBatch, executePreparedBatch = od, os, osf, osfc, oc, ou, opb, epb
 		executeNpmSkippingElevated = enpm
 		canElevateNP, nativeMacAvail, promptMacSess = oe, on, opm
