@@ -101,11 +101,6 @@ type State struct {
 	LatestTag string
 }
 
-// New creates a new TUI state.
-func New() *State {
-	return NewWithVersion("", "")
-}
-
 // NewWithVersion creates TUI state with build/release tags for the title bar.
 func NewWithVersion(version, latest string) *State {
 	ctx, cancel := context.WithCancel(context.Background())
@@ -320,33 +315,37 @@ func countStatus(items []*model.Item, want model.Status) int {
 
 // LogScanErrors writes per-source scan failures to the Logs tab.
 func (s *State) LogScanErrors() {
-	logScanErrors := func(summaries []*model.SourceSummary) {
+	for _, summaries := range [][]*model.SourceSummary{s.Summaries, s.CleanItems} {
 		for _, sum := range summaries {
-			source := SourceIdentity{Category: sum.Category, Label: sum.Label}
-			if !sourceIsNonAffirmative(summaries, source) {
+			if !sourceIsNonAffirmative(summaries, SourceIdentity{Category: sum.Category, Label: sum.Label}) {
 				continue
 			}
 			for _, it := range sum.Items {
-				if it.Status != model.StatusError && it.Status != model.StatusUnverified && it.Status != model.StatusInfo {
-					continue
+				if line, ok := scanProblemLine(sum, it); ok {
+					s.AddLog(line, false)
 				}
-				detail := it.CurrentVer
-				if detail == "" {
-					detail = "scan failed"
-				}
-				prefix := "✘"
-				if it.Status == model.StatusUnverified {
-					prefix = "⚠"
-				}
-				if it.Status == model.StatusInfo {
-					prefix = "ⓘ"
-				}
-				s.AddLog(fmt.Sprintf("%s %s %s — %s: %s", prefix, sum.Icon, sum.Label, it.Name, detail), false)
 			}
 		}
 	}
-	logScanErrors(s.Summaries)
-	logScanErrors(s.CleanItems)
+}
+
+// scanProblemPrefix marks the item statuses LogScanErrors reports.
+var scanProblemPrefix = map[model.Status]string{
+	model.StatusError:      "✘",
+	model.StatusUnverified: "⚠",
+	model.StatusInfo:       "ⓘ",
+}
+
+func scanProblemLine(sum *model.SourceSummary, it *model.Item) (string, bool) {
+	prefix, ok := scanProblemPrefix[it.Status]
+	if !ok {
+		return "", false
+	}
+	detail := it.CurrentVer
+	if detail == "" {
+		detail = "scan failed"
+	}
+	return fmt.Sprintf("%s %s %s — %s: %s", prefix, sum.Icon, sum.Label, it.Name, detail), true
 }
 
 // TotalCleanable returns total cleanable items from live item statuses
@@ -411,24 +410,6 @@ func (s *State) needsElevationPrompt() bool {
 
 func (s *State) elevationSessionReady() bool {
 	return s.ElevSession != nil && s.ElevSession.Ready()
-}
-
-// canDeferMASElevation returns true when only MAS items need sudo and other
-// update batches can run first without a password prompt. Brew PKG casks
-// (Microsoft) also sudo-prompt mid-run, so they must be primed up-front too.
-func (s *State) canDeferMASElevation(items []*model.Item) bool {
-	needsMAS := false
-	for _, it := range items {
-		if !elevate.ItemNeedsUpdateElevation(it, s.Platform) {
-			continue
-		}
-		if it.Category == model.CatMAS {
-			needsMAS = true
-			continue
-		}
-		return false
-	}
-	return needsMAS
 }
 
 // waitForElevation blocks the worker until sudo is ready or ctx is

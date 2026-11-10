@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
 	"time"
 
 	"github.com/lgldsilva/updash/internal/model"
@@ -116,119 +115,27 @@ func PlanUpdateCommands(cat model.Category, items []*model.Item) ([]CommandPlan,
 }
 
 func planUpdateCommands(ctx context.Context, cat model.Category, items []*model.Item) ([]CommandPlan, error) {
+	plans, err := planCategory(ctx, cat, items)
+	if err == nil && geteuid() == 0 {
+		// Root needs no sudo, and root containers (Alpine, Debian, Fedora)
+		// often do not ship it: "sudo apt-get" would fail with "not found".
+		for i := range plans {
+			plans[i].Elevated = false
+		}
+	}
+	return plans, err
+}
+
+func planCategory(ctx context.Context, cat model.Category, items []*model.Item) ([]CommandPlan, error) {
 	items = validItems(items)
 	if len(items) == 0 {
 		return nil, nil
 	}
 
-	switch cat {
-	case model.CatBrew:
-		return exactPlans("brew", []string{commandUpgrade, "--greedy"}, items)
-	case model.CatMAS:
-		plans := make([]CommandPlan, 0, len(items))
-		for _, item := range items {
-			if item.PackageID == "" {
-				plans = append(plans, manualPlan("MAS update requires the App Store ID"))
-				continue
-			}
-			plans = append(plans, CommandPlan{Name: "mas", Args: []string{commandUpdate, item.PackageID}, Scope: CommandScopeExact})
-		}
-		return plans, nil
-	case model.CatApt:
-		names, err := planItemNames(items)
-		if err != nil {
-			return nil, err
-		}
-		return []CommandPlan{
-			{Name: "apt-get", Args: []string{commandUpdate}, Scope: CommandScopeCategoryGlobal, Elevated: true},
-			{Name: "apt-get", Args: append([]string{"install", "--only-upgrade", flagYes}, names...), Scope: CommandScopeExact, Elevated: true},
-		}, nil
-	case model.CatWinget:
-		plans := make([]CommandPlan, 0, len(items))
-		for _, item := range items {
-			if item.PackageID == "" {
-				return nil, fmt.Errorf("winget update for %q requires PackageID", item.Name)
-			}
-			plans = append(plans, CommandPlan{
-				Name:  "winget",
-				Args:  []string{commandUpgrade, "--exact", "--id", item.PackageID, "--accept-package-agreements", "--accept-source-agreements"},
-				Scope: CommandScopeExact,
-			})
-		}
-		return plans, nil
-	case model.CatDnf:
-		if tool := scanner.RpmToolName(); tool == "yum" {
-			return globalPlan(tool, []string{commandUpdate, flagYes}, true)
-		}
-		return globalPlan(scanner.RpmToolName(), []string{commandUpgrade, "--refresh", flagYes}, true)
-	case model.CatZypper:
-		return globalPlan("zypper", []string{"--non-interactive", commandUpdate}, true)
-	case model.CatApk:
-		return globalPlan("apk", []string{commandUpgrade}, false)
-	case model.CatPacman:
-		if lookPath != nil {
-			if _, err := lookPath("yay"); err == nil {
-				return globalPlan("yay", []string{"-Syu", "--noconfirm"}, false)
-			}
-		}
-		return globalPlan("pacman", []string{"-Syu", "--noconfirm"}, true)
-	case model.CatFlatpak:
-		return globalPlan("flatpak", []string{commandUpdate, flagYes}, false)
-	case model.CatSnap:
-		return globalPlan("snap", []string{"refresh"}, true)
-	case model.CatChoco:
-		names, err := packageIDsOrNames(items)
-		if err != nil {
-			return nil, err
-		}
-		return []CommandPlan{{Name: "choco", Args: append([]string{commandUpgrade}, append(names, flagYes)...), Scope: CommandScopeExact}}, nil
-	case model.CatScoop:
-		names, err := planItemNames(items)
-		if err != nil {
-			return nil, err
-		}
-		return []CommandPlan{{Name: "scoop", Args: append([]string{commandUpdate}, names...), Scope: CommandScopeExact}}, nil
-	case model.CatNpm:
-		if _, err := planItemNames(items); err != nil {
-			return nil, err
-		}
-		updatable, _ := partitionNpmItems(items)
-		if len(updatable) == 0 {
-			return []CommandPlan{manualPlan(npmManagedElsewhereNote)}, nil
-		}
-		return npmPrefixGroupPlans(ctx, updatable)
-	case model.CatPnpm:
-		return exactPlans("pnpm", []string{commandUpdate, flagGlobal}, items)
-	case model.CatBun:
-		return exactPlans("bun", []string{commandUpdate, flagGlobal}, items)
-	case model.CatPipx:
-		return globalPlan("pipx", []string{"upgrade-all"}, false)
-	case model.CatOpenCodePlugins:
-		return opencodePluginPlans(items)
-	case model.CatGo:
-		return globalPlan("gup", []string{commandUpdate}, false)
-	case model.CatRustup:
-		return rustupPlans(items)
-	case model.CatCargo:
-		return globalPlan("cargo", []string{"install-update", "-a"}, false)
-	case model.CatSDKMAN:
-		return bashGlobalPlan("source $HOME/.sdkman/bin/sdkman-init.sh && echo \"Y\" | sdk upgrade", "install bash or run 'sdk upgrade' manually")
-	case model.CatNvm:
-		if runtime.GOOS == "windows" {
-			return []CommandPlan{manualPlan("update nvm-windows via its installer")}, nil
-		}
-		return bashGlobalPlan("source $HOME/.nvm/nvm.sh && nvm install-latest-npm", "install bash or update nvm manually")
-	case model.CatOmz:
-		return omzGlobalPlan()
-	case model.CatGHExt:
-		return globalPlan("gh", []string{"extension", commandUpgrade, "--all"}, false)
-	case model.CatAgent:
-		return agentPlans(items)
-	case model.CatAI:
-		return infraPlans(items)
-	default:
-		return []CommandPlan{manualPlan(fmt.Sprintf("no automatic updater for category %s", cat))}, nil
+	if plan, ok := categoryPlanners[cat]; ok {
+		return plan(ctx, items)
 	}
+	return []CommandPlan{manualPlan(fmt.Sprintf("no automatic updater for category %s", cat))}, nil
 }
 
 func globalPlan(name string, args []string, elevated bool) ([]CommandPlan, error) {
@@ -350,17 +257,6 @@ func infraPlans(items []*model.Item) ([]CommandPlan, error) {
 		}
 	}
 	return plans, nil
-}
-
-// PlansRequireWholeCategory tells a caller whether a partial selection must be
-// rejected or explicitly expanded before execution.
-func PlansRequireWholeCategory(plans []CommandPlan) bool {
-	for _, plan := range plans {
-		if plan.Scope == CommandScopeCategoryGlobal {
-			return true
-		}
-	}
-	return false
 }
 
 // PlansRequireElevation reports the preflight decision embedded in the plan.

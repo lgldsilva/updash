@@ -11,7 +11,7 @@ import (
 )
 
 func TestCategoryHeader_frameAlignment(t *testing.T) {
-	s := New()
+	s := NewWithVersion("", "")
 	s.Width = 200
 	s.Height = 40
 	s.Platform.OS = "darwin"

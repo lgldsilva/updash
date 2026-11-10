@@ -193,7 +193,7 @@ updash --check --json | jq '.errors, .unverified, .info'
 
 Agent outdated detection merges `npm outdated -g` with a direct npm-registry latest lookup, so agents installed via native installer, Homebrew, pnpm or bun are flagged too.
 
-**Cleanup:** brew/apt/go/npm/snap caches, Docker prune (age-filtered images/containers; builder mode configurable), SDKMAN old majors, Antigravity/VS Code extension dupes, Windows TEMP, **homelab retention** (maven/gradle caches, AI tool outputs, superseded AI CLI releases, host logs, container log truncate, disk-pressure prune).
+**Cleanup:** brew/apt/go/npm/snap caches, Docker prune (age-filtered images/containers; builder mode configurable), SDKMAN superseded versions per major (keeps the newest and your `sdk default`), Antigravity/VS Code extension dupes (keeps the version the editor's `extensions.json` marks active), Windows TEMP, **homelab retention** (maven/gradle caches, AI tool outputs, superseded AI CLI releases, host logs, container log truncate, disk-pressure prune).
 
 ## Retention env vars
 

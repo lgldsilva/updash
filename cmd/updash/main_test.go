@@ -11,7 +11,7 @@ import (
 )
 
 func TestBubbleModel_IgnoresStaleAsyncMessages(t *testing.T) {
-	state := tui.New()
+	state := tui.NewWithVersion("", "")
 	state.Generation = 4
 	state.Updating = true
 	state.LastSummary = "new operation"
@@ -30,6 +30,21 @@ func TestExitOnErr_PreservesCLIExitClass(t *testing.T) {
 	}
 	if got := exitOnUpdateClean(0, 0, err); got != 2 {
 		t.Fatalf("exitOnUpdateClean() = %d, want 2", got)
+	}
+}
+
+func TestParseArgs_UpdateSelf(t *testing.T) {
+	for _, args := range [][]string{{"--update-self"}, {"-u"}} {
+		mode, cfg, err := parseArgs(args)
+		if err != nil {
+			t.Fatalf("parseArgs(%v) error = %v", args, err)
+		}
+		if mode != "update-self" {
+			t.Fatalf("parseArgs(%v) mode = %q, want update-self", args, mode)
+		}
+		if !cfg.Verbose || cfg.DryRun || cfg.Only != "" {
+			t.Fatalf("parseArgs(%v) cfg = %+v", args, cfg)
+		}
 	}
 }
 
@@ -74,7 +89,7 @@ func TestParseArgs_UpdateAndCleanIsAll(t *testing.T) {
 }
 
 func TestBubbleModel_ScanInfoIsNotLoggedAsSuccess(t *testing.T) {
-	state := tui.New()
+	state := tui.NewWithVersion("", "")
 	state.Summaries = []*model.SourceSummary{{Category: model.CatAI, Label: "AI tools", Items: []*model.Item{{Name: "note", Category: model.CatAI, Status: model.StatusInfo}}}}
 	m := &bubbleModel{state: state}
 	_, _ = m.onScanFinished(tui.ScanFinishedMsg{})

@@ -50,7 +50,7 @@ func TestHasUpdateItems(t *testing.T) {
 }
 
 func TestRenderUpdatesTab_UnverifiedIsInconclusive(t *testing.T) {
-	s := New()
+	s := NewWithVersion("", "")
 	s.Summaries = []*model.SourceSummary{{
 		Category: model.CatBrew,
 		Label:    "Homebrew",
@@ -62,7 +62,7 @@ func TestRenderUpdatesTab_UnverifiedIsInconclusive(t *testing.T) {
 }
 
 func TestRenderUpdatesTab_UnverifiedOnlyIsNotAllUpdated(t *testing.T) {
-	s := New()
+	s := NewWithVersion("", "")
 	s.Summaries = []*model.SourceSummary{{Category: model.CatBrew, Label: "Homebrew", Items: []*model.Item{{Name: "registry", Category: model.CatBrew, Status: model.StatusUnverified}}}}
 	out := strings.ToLower(s.renderUpdatesTab())
 	if strings.Contains(out, "all packages are up to date") || !strings.Contains(out, "unverified") {
@@ -71,7 +71,7 @@ func TestRenderUpdatesTab_UnverifiedOnlyIsNotAllUpdated(t *testing.T) {
 }
 
 func TestTotalScanNonAffirmative_ShadowNoteIsConcluded(t *testing.T) {
-	s := New()
+	s := NewWithVersion("", "")
 	s.Summaries = []*model.SourceSummary{{Items: []*model.Item{
 		{Name: "pkg", Status: model.StatusInfo, Log: "shadowed by active npm prefix copy"},
 	}}}
@@ -85,7 +85,7 @@ func TestTotalScanNonAffirmative_ShadowNoteIsConcluded(t *testing.T) {
 }
 
 func TestRenderUpdatesTab_ShadowNoteIsUpToDate(t *testing.T) {
-	s := New()
+	s := NewWithVersion("", "")
 	s.Summaries = []*model.SourceSummary{{
 		Category: model.CatNpm,
 		Label:    "npm (global)",
@@ -100,7 +100,7 @@ func TestRenderUpdatesTab_ShadowNoteIsUpToDate(t *testing.T) {
 }
 
 func TestRenderUpdatesTab_InfoOnlyIsNotAllUpdated(t *testing.T) {
-	s := New()
+	s := NewWithVersion("", "")
 	s.Summaries = []*model.SourceSummary{{Category: model.CatAI, Label: "AI tools", Items: []*model.Item{{Name: "note", Category: model.CatAI, Status: model.StatusInfo, CurrentVer: "version check not supported"}}}}
 	out := strings.ToLower(s.renderUpdatesTab())
 	if strings.Contains(out, "all packages are up to date") || !strings.Contains(out, "ⓘ") {
@@ -109,7 +109,7 @@ func TestRenderUpdatesTab_InfoOnlyIsNotAllUpdated(t *testing.T) {
 }
 
 func TestRenderUpdatesTab_agentsUpToDate(t *testing.T) {
-	s := New()
+	s := NewWithVersion("", "")
 	s.Summaries = []*model.SourceSummary{
 		{
 			Category: model.CatAgent,
@@ -132,7 +132,7 @@ func TestRenderUpdatesTab_agentsUpToDate(t *testing.T) {
 }
 
 func TestRenderUpdatesTab_agentPendingIsNotUpToDate(t *testing.T) {
-	s := New()
+	s := NewWithVersion("", "")
 	s.Summaries = []*model.SourceSummary{{
 		Category: model.CatAgent,
 		Label:    "AI Agents",
@@ -146,7 +146,7 @@ func TestRenderUpdatesTab_agentPendingIsNotUpToDate(t *testing.T) {
 }
 
 func TestRenderUpdatesTab_opencodePluginsUpToDate(t *testing.T) {
-	s := New()
+	s := NewWithVersion("", "")
 	s.Summaries = []*model.SourceSummary{
 		{
 			Category: model.CatOpenCodePlugins,
@@ -165,7 +165,7 @@ func TestRenderUpdatesTab_opencodePluginsUpToDate(t *testing.T) {
 }
 
 func TestRenderCategoryHeader_liveOutdated(t *testing.T) {
-	s := New()
+	s := NewWithVersion("", "")
 	s.Updating = false
 	summary := &model.SourceSummary{
 		Icon:     "🍺",
@@ -237,7 +237,7 @@ func TestHasCleanupItems(t *testing.T) {
 }
 
 func TestRenderTitle(t *testing.T) {
-	s := New()
+	s := NewWithVersion("", "")
 	output := s.renderTitle()
 	if output == "" {
 		t.Error("renderTitle() returned empty")
@@ -248,7 +248,7 @@ func TestRenderTitle(t *testing.T) {
 }
 
 func TestRenderTabs(t *testing.T) {
-	s := New()
+	s := NewWithVersion("", "")
 	s.ActiveTab = model.TabUpdates
 
 	output := s.renderTabs()
@@ -264,7 +264,7 @@ func TestRenderTabs(t *testing.T) {
 }
 
 func TestRenderTabs_WithCounts(t *testing.T) {
-	s := New()
+	s := NewWithVersion("", "")
 	s.ActiveTab = model.TabCleanup
 	s.CleanItems = []*model.SourceSummary{
 		{Category: model.CatCache, Items: []*model.Item{
@@ -279,7 +279,7 @@ func TestRenderTabs_WithCounts(t *testing.T) {
 }
 
 func TestRenderProgressBar(t *testing.T) {
-	s := New()
+	s := NewWithVersion("", "")
 
 	tests := []struct {
 		name  string
@@ -304,7 +304,7 @@ func TestRenderProgressBar(t *testing.T) {
 }
 
 func TestRenderUpdatesTab_WithItems(t *testing.T) {
-	s := New()
+	s := NewWithVersion("", "")
 	s.Summaries = []*model.SourceSummary{
 		{
 			Category: model.CatBrew,
@@ -343,7 +343,7 @@ func TestRenderUpdatesTab_WithItems(t *testing.T) {
 }
 
 func TestRenderUpdatesTab_AllUpToDate(t *testing.T) {
-	s := New()
+	s := NewWithVersion("", "")
 	s.Summaries = nil
 	output := s.renderUpdatesTab()
 	if output == "" {
@@ -355,7 +355,7 @@ func TestRenderUpdatesTab_AllUpToDate(t *testing.T) {
 }
 
 func TestRenderUpdatesTab_WithCursor(t *testing.T) {
-	s := New()
+	s := NewWithVersion("", "")
 	s.Cursor = 0
 	s.Summaries = []*model.SourceSummary{
 		{
@@ -375,7 +375,7 @@ func TestRenderUpdatesTab_WithCursor(t *testing.T) {
 }
 
 func TestRenderCleanupTab_WithItems(t *testing.T) {
-	s := New()
+	s := NewWithVersion("", "")
 	s.CleanItems = []*model.SourceSummary{
 		{
 			Category: model.CatCache,
@@ -408,7 +408,7 @@ func TestRenderCleanupTab_WithItems(t *testing.T) {
 }
 
 func TestRenderCleanupTab_NothingToClean(t *testing.T) {
-	s := New()
+	s := NewWithVersion("", "")
 	s.CleanItems = nil
 	output := s.renderCleanupTab()
 	if output == "" {
@@ -420,7 +420,7 @@ func TestRenderCleanupTab_NothingToClean(t *testing.T) {
 }
 
 func TestRenderCleanupTab_InfoOnlyIsNotNothingToClean(t *testing.T) {
-	s := New()
+	s := NewWithVersion("", "")
 	s.CleanItems = []*model.SourceSummary{{
 		Category: model.CatCache,
 		Label:    "cache inventory",
@@ -442,7 +442,7 @@ func TestRenderCleanupTab_InfoOnlyIsNotNothingToClean(t *testing.T) {
 }
 
 func TestRenderLogsTab_WithEntries(t *testing.T) {
-	s := New()
+	s := NewWithVersion("", "")
 	s.Logs = []model.GlobalLogEntry{
 		{Message: "✓ brew: updated", Success: true},
 		{Message: "✘ npm: failed", Success: false},
@@ -457,7 +457,7 @@ func TestRenderLogsTab_WithEntries(t *testing.T) {
 }
 
 func TestRenderLogsTab_Empty(t *testing.T) {
-	s := New()
+	s := NewWithVersion("", "")
 	output := s.renderLogsTab()
 	if !strings.Contains(output, "No log entries") {
 		t.Errorf("should show empty message: %s", output)
@@ -465,7 +465,7 @@ func TestRenderLogsTab_Empty(t *testing.T) {
 }
 
 func TestRenderItemStyled(t *testing.T) {
-	s := New()
+	s := NewWithVersion("", "")
 
 	tests := []struct {
 		name string
@@ -490,7 +490,7 @@ func TestRenderItemStyled(t *testing.T) {
 }
 
 func TestFormatRow(t *testing.T) {
-	s := New()
+	s := NewWithVersion("", "")
 	s.Cursor = 0
 	row := s.formatRow("btop  1.3.0 → 1.5.0", 0)
 	if row == "" {
@@ -499,7 +499,7 @@ func TestFormatRow(t *testing.T) {
 }
 
 func TestRenderContent(t *testing.T) {
-	s := New()
+	s := NewWithVersion("", "")
 
 	// Updates tab
 	s.ActiveTab = model.TabUpdates
@@ -524,7 +524,7 @@ func TestRenderContent(t *testing.T) {
 }
 
 func TestRenderFooter(t *testing.T) {
-	s := New()
+	s := NewWithVersion("", "")
 
 	// Updates tab
 	s.ActiveTab = model.TabUpdates
@@ -549,7 +549,7 @@ func TestRenderFooter(t *testing.T) {
 }
 
 func TestFullRender(t *testing.T) {
-	s := New()
+	s := NewWithVersion("", "")
 
 	output := s.Render()
 	if output == "" {
@@ -562,7 +562,7 @@ func TestFullRender(t *testing.T) {
 }
 
 func TestRenderPassword(t *testing.T) {
-	s := New()
+	s := NewWithVersion("", "")
 	s.ShowPassword = true
 	s.PasswordInput = "abc"
 	s.PasswordError = "wrong"
@@ -576,7 +576,7 @@ func TestRenderPassword(t *testing.T) {
 }
 
 func TestRenderConfirm(t *testing.T) {
-	s := New()
+	s := NewWithVersion("", "")
 	s.ConfirmMsg = "Update 3 items?"
 	out := s.renderConfirm()
 	if !strings.Contains(out, "Update 3 items?") {
@@ -585,21 +585,21 @@ func TestRenderConfirm(t *testing.T) {
 }
 
 func TestRenderPasswordFooter(t *testing.T) {
-	s := New()
+	s := NewWithVersion("", "")
 	if !strings.Contains(s.renderPasswordFooter(), "submit") {
 		t.Fatal("missing submit hint")
 	}
 }
 
 func TestRenderConfirmFooter(t *testing.T) {
-	s := New()
+	s := NewWithVersion("", "")
 	if !strings.Contains(s.renderConfirmFooter(), "yes") {
 		t.Fatal("missing yes hint")
 	}
 }
 
 func TestRenderHelp(t *testing.T) {
-	s := New()
+	s := NewWithVersion("", "")
 	s.ShowHelp = true
 	out := s.Render()
 	if !strings.Contains(out, "Keyboard shortcuts") {
@@ -614,7 +614,7 @@ func TestRenderHelp(t *testing.T) {
 }
 
 func TestHandleKey_ToggleHelp(t *testing.T) {
-	s := New()
+	s := NewWithVersion("", "")
 	if s.HandleKey("?") != KeyHelp {
 		t.Fatal("? should open help")
 	}
@@ -655,7 +655,7 @@ func TestConfirmMessage(t *testing.T) {
 }
 
 func TestFilterInput(t *testing.T) {
-	s := New()
+	s := NewWithVersion("", "")
 	if s.HandleKey("/") != KeyFilter {
 		t.Fatal("/ should open filter")
 	}
@@ -691,7 +691,7 @@ func TestFilterInput(t *testing.T) {
 }
 
 func TestDetailView(t *testing.T) {
-	s := New()
+	s := NewWithVersion("", "")
 	s.Summaries = []*model.SourceSummary{
 		{
 			Category: model.CatBrew,
@@ -722,7 +722,7 @@ func TestDetailView(t *testing.T) {
 }
 
 func TestRenderUpdatesTab_UpdatingProgress(t *testing.T) {
-	s := New()
+	s := NewWithVersion("", "")
 	s.Updating = true
 	s.UpdateTotal = 5
 	s.UpdateDone = 2
@@ -738,7 +738,7 @@ func TestRenderUpdatesTab_UpdatingProgress(t *testing.T) {
 }
 
 func TestRenderCategoryHeader_Updating(t *testing.T) {
-	s := New()
+	s := NewWithVersion("", "")
 	s.Updating = true
 	summary := &model.SourceSummary{
 		Icon:  "🍺",

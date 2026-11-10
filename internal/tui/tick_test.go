@@ -3,7 +3,7 @@ package tui
 import "testing"
 
 func TestNeedsSpinner(t *testing.T) {
-	s := New()
+	s := NewWithVersion("", "")
 	if s.NeedsSpinner() {
 		t.Fatal("should not spin when idle")
 	}
@@ -14,7 +14,7 @@ func TestNeedsSpinner(t *testing.T) {
 }
 
 func TestAdvanceSpinner(t *testing.T) {
-	s := New()
+	s := NewWithVersion("", "")
 	before := s.SpinnerFrame
 	s.AdvanceSpinner()
 	if s.SpinnerFrame == before {

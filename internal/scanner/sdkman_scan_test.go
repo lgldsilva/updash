@@ -21,7 +21,7 @@ func TestSDKMANSource_Scan_WithTempDirs(t *testing.T) {
 	_ = os.Mkdir(filepath.Join(javaDir, "17.0.13-tem"), 0755)
 	_ = os.Mkdir(filepath.Join(javaDir, "21.0.5-tem"), 0755)
 	_ = os.Mkdir(filepath.Join(javaDir, "21.0.7-tem"), 0755)
-	_ = os.Mkdir(filepath.Join(javaDir, "current"), 0755)
+	_ = os.Symlink("21.0.7-tem", filepath.Join(javaDir, "current"))
 
 	// Create Gradle versions
 	gradleDir := filepath.Join(sdkmanDir, "gradle")
@@ -29,7 +29,7 @@ func TestSDKMANSource_Scan_WithTempDirs(t *testing.T) {
 	_ = os.Mkdir(filepath.Join(gradleDir, "8.14.1"), 0755)
 	_ = os.Mkdir(filepath.Join(gradleDir, "8.14.4"), 0755)
 	_ = os.Mkdir(filepath.Join(gradleDir, "9.4.1"), 0755)
-	_ = os.Mkdir(filepath.Join(gradleDir, "current"), 0755)
+	_ = os.Symlink("9.4.1", filepath.Join(gradleDir, "current"))
 
 	// Verify structure
 	entries, err := os.ReadDir(sdkmanDir)
@@ -119,5 +119,84 @@ func TestVSCodeCleanSource_Scan_WithTempDirs(t *testing.T) {
 	}
 	if !found {
 		t.Error("expected to find a duplicate extension, but none found")
+	}
+}
+
+// Regression: the SDKMAN default (`current`) must not be counted as removable.
+func TestSDKMANScan_DefaultVersionNotCountedAsRemovable(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	javaDir := filepath.Join(home, ".sdkman", "candidates", "java")
+	for _, v := range []string{"21.0.1-tem", "21.0.2-tem", "21.0.3-tem"} {
+		if err := os.MkdirAll(filepath.Join(javaDir, v), 0o750); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.Symlink(filepath.Join(javaDir, "21.0.1-tem"), filepath.Join(javaDir, "current")); err != nil {
+		t.Fatal(err)
+	}
+	items, err := (&SDKMANSource{}).Scan(context.Background(), model.PlatformInfo{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 1 {
+		t.Fatalf("want 1 item, got %d", len(items))
+	}
+	if items[0].RemoveCount != 1 || items[0].Reclaimable != "1 versions" {
+		t.Fatalf("want 1 removable (default kept), got count=%d reclaim=%q", items[0].RemoveCount, items[0].Reclaimable)
+	}
+}
+
+func TestSDKMANScan_CopiedCurrentOffersNoCleanup(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	javaDir := filepath.Join(home, ".sdkman", "candidates", "java")
+	for _, v := range []string{"21.0.1-tem", "21.0.3-tem", "current"} {
+		if err := os.MkdirAll(filepath.Join(javaDir, v), 0o750); err != nil {
+			t.Fatal(err)
+		}
+	}
+	items, err := (&SDKMANSource{}).Scan(context.Background(), model.PlatformInfo{})
+	if err != nil || len(items) != 1 {
+		t.Fatalf("items=%+v err=%v", items, err)
+	}
+	if it := items[0]; it.Status == model.StatusCleanCandidate || it.RemoveCount != 0 {
+		t.Fatalf("unknown default must not be a clean candidate: %+v", it)
+	}
+}
+
+func TestVSCodeCleanSource_Scan_RespectsActiveManifest(t *testing.T) {
+	dir := t.TempDir()
+	for _, n := range []string{"a.b-3.0.0", "a.b-2.0.0", "a.b-1.0.0"} {
+		if err := os.Mkdir(filepath.Join(dir, n), 0o750); err != nil {
+			t.Fatal(err)
+		}
+	}
+	manifest := `[{"identifier":{"id":"a.b"},"version":"2.0.0","relativeLocation":"a.b-2.0.0"}]`
+	if err := os.WriteFile(filepath.Join(dir, "extensions.json"), []byte(manifest), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	items, err := (&VSCodeCleanSource{LabelName: "T", ExtDir: dir}).Scan(context.Background(), model.PlatformInfo{})
+	if err != nil || len(items) != 1 {
+		t.Fatalf("items=%+v err=%v", items, err)
+	}
+	if it := items[0]; it.CurrentVer != "2.0.0" || it.RemoveCount != 2 {
+		t.Fatalf("want active 2.0.0 kept and 2 removable, got current=%q remove=%d", it.CurrentVer, it.RemoveCount)
+	}
+}
+
+func TestVSCodeCleanSource_Scan_CorruptManifestIsInfo(t *testing.T) {
+	dir := t.TempDir()
+	for _, n := range []string{"a.b-2.0.0", "a.b-1.0.0"} {
+		if err := os.Mkdir(filepath.Join(dir, n), 0o750); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(dir, "extensions.json"), []byte("{broken"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	items, _ := (&VSCodeCleanSource{LabelName: "T", ExtDir: dir}).Scan(context.Background(), model.PlatformInfo{})
+	if len(items) != 1 || items[0].Status == model.StatusCleanCandidate {
+		t.Fatalf("unreadable manifest must not offer cleanup: %+v", items)
 	}
 }

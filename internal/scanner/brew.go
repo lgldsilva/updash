@@ -14,26 +14,6 @@ func (s *BrewSource) Category() model.Category { return model.CatBrew }
 func (s *BrewSource) Label() string            { return "Homebrew" }
 func (s *BrewSource) Icon() string             { return "🍺" }
 
-// externalCasks lists casks that are managed by other tools (Toolbox, MAS, etc.)
-// or require sudo TTY — excluded from brew scanner to avoid false failures.
-var externalCasks = map[string]bool{
-	// JetBrains Toolbox
-	"clion": true, "datagrip": true, "goland": true,
-	"intellij-idea-ce": true, "phpstorm": true,
-	"pycharm": true, "pycharm-ce": true,
-	"fleet": true, "rubymine": true, "webstorm": true,
-	// MAS apps that also have brew casks (prefer MAS)
-	"whatsapp": true,
-	// Microsoft apps needing sudo TTY
-	"microsoft-office":      true,
-	"microsoft-auto-update": true,
-}
-
-// isManagedExternally returns true if the cask is managed by another tool.
-func isManagedExternally(name string) bool {
-	return externalCasks[name]
-}
-
 // brewOutdatedJSON maps the --json=v2 output.
 type brewOutdatedJSON struct {
 	Formulae []brewPkg `json:"formulae"`

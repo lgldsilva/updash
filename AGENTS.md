@@ -52,6 +52,28 @@ model/types.go       → Item, Category, Status, PlatformInfo
 4. Add cleanup in `internal/cleaner` if needed
 5. Unit-test pure parse helpers; mock `execCombined` / `execCommand` for I/O
 
+## Hermetic tests
+
+No test may run a real package manager, prune, uninstall or `sudo` on the host
+running `go test`. `internal/scanner`, `internal/cleaner`, `internal/updater`, `internal/elevate` and `internal/cli` enforce this in
+`TestMain`: scanner exec seams start on a strict mock (an unmocked command
+fails with `exec.ErrNotFound`; `withRealExec(t)` opts a test into the real
+runner only for fixtures it fully controls), and cleaner routes
+`commandContext`/`sudoCommand` through a re-exec of the test binary that
+records argv (`recordExec(t)`; `UPDASH_CLEANER_FAKE_FAIL` / `_STDOUT` shape
+the result). `internal/updater` does the same: `commandContext`/`sudoCommand`
+re-exec the test binary, which records argv and exits 127 like a missing
+binary; `lookPath`, `geteuid`, `rpmToolName` and `brewOutdatedSet` are pinned
+so plans never depend on the host; `withRealExec(t)` is reserved for `sh`/`zsh`
+fixtures. `internal/elevate` routes sudo/osascript through `commandContext`;
+its TestMain is a fake sudo (`-n` honours `UPDASH_ELEVATE_FAKE_NOPASSWD`, `-S`
+accepts only `fakeSudoPassword`), so no test authenticates against the host
+(a wrong password there hits auth.log and pam_faillock). `internal/cli`'s
+TestMain makes every side-effecting hook panic unless stubbed; integration
+tests that drive the real updater against PATH fixtures opt in with
+`withRealUpdater(t)`. New I/O goes through those seams, never `exec.Command`
+directly.
+
 ## Shell install/staging
 
 `install.sh` and `internal/upgrade` share one staging discipline: stage under an
@@ -77,7 +99,7 @@ function without running an install (test seam used by `scripts/install_test.sh`
 
 | OS | PMs | Notes |
 |---|---|---|
-| macOS | brew, mas | brew cask exclusion list in `brew.go` |
+| macOS | brew, mas | casks upgrade one at a time; Microsoft/JetBrains get `KeepPolicy` hints (`brew_notes.go`), failures are diagnosed (`brew_diagnose.go`) |
 | Linux | apt, dnf/yum, zypper, pacman/yay, flatpak, snap | `sudo` for apt/dnf/zypper/pacman/snap; apk when root or sudo |
 | Windows | winget, choco, scoop | TEMP cleanup |
 
@@ -88,7 +110,7 @@ function without running an install (test seam used by `scripts/install_test.sh`
 - nvm/omz/SDKMAN updates need `bash`; hosts without it get a manual note instead of a failing command
 - Manual-only agents use `KeepPolicy` containing `manual` → skipped in CLI update
 - OpenCode binary: `opencode upgrade` (single owner), channel picked from the installed major — v1 `opencode-ai`, v2 `@opencode/cli`. v2 uses `-m curl` only when the resolved path is exactly the current user's `~/.opencode/bin/opencode` (a suffix match in another tree does not qualify); a standalone switched in from elsewhere stays manual so curl cannot replace the switch. Plugins: `npm install --prefix ~/.config/opencode <pkg>@<version>…` (explicit versions — `npm update` cannot move exactly-pinned plugins, e.g. `@opencode-ai/plugin`)
-- **OpenCode single-owner / protected npm packages:** the OpenCode binary is updated ONLY by the OpenCode agent item. Its npm dist packages (`opencode-ai`, `@opencode-ai/cli`, `@opencode/cli`) are in `scanner.ProtectedNpmPackages()` (data-driven, not grep) and are (a) dropped from `NpmSource.Scan` and (b) excluded from the generic `npm update -g` batch in `batchNpmUpgrade`, which targets the remaining outdated globals by explicit name. The catalog `npmPackage` stays `opencode-ai` (v1 default); after `opencode --version`, the item's `PackageID` is rewritten to the channel for that major, and registry/`npm outdated` follow `PackageID` so a preserved v1 global does not hide a v2 release. `updateCmd` still wins over a generic npm install. After `opencode upgrade`, `ensureOpenCodeHealthy` runs `opencode --version` + checks the launcher exists/executable; a broken stub fails explicitly with the channel's reinstall hint. `@charmland/crush` is protected for the same reason (single owner = the Crush agent item).
+- **OpenCode single-owner / protected npm packages:** the OpenCode binary is updated ONLY by the OpenCode agent item. Its npm dist packages (`opencode-ai`, `@opencode-ai/cli`, `@opencode/cli`) are in `scanner.ProtectedNpmPackages()` (data-driven, not grep) and are (a) dropped from `NpmSource.Scan` and (b) excluded from the npm update plans (`partitionNpmItems` → `npmPrefixGroupPlans`), which target the remaining outdated globals by explicit name. The catalog `npmPackage` stays `opencode-ai` (v1 default); after `opencode --version`, the item's `PackageID` is rewritten to the channel for that major, and registry/`npm outdated` follow `PackageID` so a preserved v1 global does not hide a v2 release. `updateCmd` still wins over a generic npm install. After `opencode upgrade`, `ensureOpenCodeHealthy` runs `opencode --version` + checks the launcher exists/executable; a broken stub fails explicitly with the channel's reinstall hint. `@charmland/crush` is protected for the same reason (single owner = the Crush agent item).
 - **npm multi-prefix scanning:** npm ≥ 12 no longer enumerates globals without explicit names (bare `npm outdated -g` returns `{}` for a non-default prefix, and `npm outdated <unknown-name>` stalls), so the npm source inventories each prefix with `npm ls -g --json` + explicit-name `npm outdated -g [--prefix P] <pkgs>` batches. Discovered prefixes: the ambient one plus legacy candidates (`~/.npm-global` when it exists and differs from the active prefix). Legacy-only outdated packages update in their own prefix (`npm update -g --prefix P …`, one plan per prefix in the planner); copies shadowed by an active-prefix package are informational only and never updated. A legacy prefix whose probes fail surfaces as `unverified` (rc 2), never as a false-green.
 - **Agent channels (auto mode):** Grok = `grok update`, freshness via `grok update --check --json` (`latestJSONKey: latestVersion`); MimoCode (Xiaomi MiMo) = `mimo upgrade`, registry `@mimo-ai/cli`; Copilot CLI rides the npm channel (`@github/copilot`, Codex-style npm-managed fallback); Crush = `@charmland/crush` installed into the npm prefix that owns the PATH binary (planner: lookPath → EvalSymlinks → `NpmPrefixForPath`; non-npm layouts stay manual). Fresh agents affirmatively show OK: registry/latest probes mark equal versions OK, and npm-managed agents absent from `npm outdated` are marked OK from the same `npm ls -g` data (no extra probes). Agy (Antigravity CLI, not the IDE binary) = `agy update` with no freshness channel: `--update` and TUI update-all run that idempotent command even while the scan stays "freshness not verified"; a working `--version` is not an unverified source, and rc 0 (including already-current) is success.
 

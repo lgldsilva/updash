@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"os"
 
 	"github.com/lgldsilva/updash/internal/model"
 	"github.com/lgldsilva/updash/internal/scanner"
@@ -129,29 +128,36 @@ func appendProblems(dest *[]ReportItem, groups ...[]*model.SourceSummary) (error
 			if s == nil {
 				continue
 			}
-			for _, it := range s.Items {
-				if it == nil {
-					continue
-				}
-				switch it.Status {
-				case model.StatusError:
-					errors++
-					*dest = append(*dest, itemToReport(it))
-				case model.StatusUnverified:
-					unverified++
-					*dest = append(*dest, itemToReport(it))
-				}
-			}
-			// A source error without an error item is still a reportable problem.
-			if s.ErrorCount > 0 && !summaryHasStatus(s, model.StatusError) {
-				errors += s.ErrorCount
-				*dest = append(*dest, ReportItem{Name: s.Label, Category: string(s.Category), Status: model.StatusError.String()})
-			}
-			if s.Unverified > 0 && !summaryHasStatus(s, model.StatusUnverified) {
-				unverified += s.Unverified
-				*dest = append(*dest, ReportItem{Name: s.Label, Category: string(s.Category), Status: model.StatusUnverified.String()})
-			}
+			e, u := appendSummaryProblems(dest, s)
+			errors, unverified = errors+e, unverified+u
 		}
+	}
+	return errors, unverified
+}
+
+// appendSummaryProblems reports one source's error/unverified items, plus a
+// synthetic entry when the source counted a problem no item carries.
+func appendSummaryProblems(dest *[]ReportItem, s *model.SourceSummary) (errors, unverified int) {
+	for _, it := range s.Items {
+		if it == nil {
+			continue
+		}
+		switch it.Status {
+		case model.StatusError:
+			errors++
+			*dest = append(*dest, itemToReport(it))
+		case model.StatusUnverified:
+			unverified++
+			*dest = append(*dest, itemToReport(it))
+		}
+	}
+	if s.ErrorCount > 0 && !summaryHasStatus(s, model.StatusError) {
+		errors += s.ErrorCount
+		*dest = append(*dest, ReportItem{Name: s.Label, Category: string(s.Category), Status: model.StatusError.String()})
+	}
+	if s.Unverified > 0 && !summaryHasStatus(s, model.StatusUnverified) {
+		unverified += s.Unverified
+		*dest = append(*dest, ReportItem{Name: s.Label, Category: string(s.Category), Status: model.StatusUnverified.String()})
 	}
 	return errors, unverified
 }
@@ -230,25 +236,6 @@ func WriteCheckJSON(w io.Writer, rep CheckReport) error {
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
 	return enc.Encode(rep)
-}
-
-// PrintCheckJSON writes the check report to stdout.
-func PrintCheckJSON(updates, cleanup []*model.SourceSummary) (outdated, cleanable int, err error) {
-	rep := BuildCheckReport(updates, cleanup)
-	if err := WriteCheckJSON(os.Stdout, rep); err != nil {
-		return 0, 0, err
-	}
-	return rep.Outdated, rep.Cleanable, nil
-}
-
-// FormatCheckJSON returns the report as a JSON string (tests / embedding).
-func FormatCheckJSON(updates, cleanup []*model.SourceSummary) (string, error) {
-	rep := BuildCheckReport(updates, cleanup)
-	b, err := json.MarshalIndent(rep, "", "  ")
-	if err != nil {
-		return "", err
-	}
-	return string(b) + "\n", nil
 }
 
 // ExitCodeForCheck returns process exit code for --check under --strict.

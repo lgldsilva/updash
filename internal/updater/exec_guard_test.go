@@ -144,6 +144,7 @@ func TestPrepareUpdateCmd_LeavesStdinDetached(t *testing.T) {
 // A stuck agent is reported as an error the user can act on, and does not
 // leave the item stuck in "updating".
 func TestUpdateAgent_StalledCommandIsReported(t *testing.T) {
+	withRealExec(t)
 	skipWithoutShell(t)
 	prevWindow, prevDelay := inactivityWindow, stallWaitDelay
 	inactivityWindow, stallWaitDelay = 100*time.Millisecond, 100*time.Millisecond

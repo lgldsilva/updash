@@ -15,7 +15,6 @@ import (
 	"time"
 
 	"github.com/lgldsilva/updash/internal/config"
-	"github.com/lgldsilva/updash/internal/elevate"
 	"github.com/lgldsilva/updash/internal/model"
 	"github.com/lgldsilva/updash/internal/retention"
 )
@@ -27,11 +26,6 @@ type Result struct {
 	Output     string
 	Error      string
 	BytesFreed int64 // disk space reclaimed when measurable
-}
-
-// CleanAll runs cleanup operations for the given items (silent/buffered — for TUI).
-func CleanAll(ctx context.Context, items []*model.Item) []*Result {
-	return CleanAllWithOptions(ctx, items, SilentOptions())
 }
 
 // CleanAllWithOptions runs cleanup with the given execution options.
@@ -156,29 +150,46 @@ func cleanSDKMAN(ctx context.Context, item *model.Item, opts Options) *Result {
 	if err != nil {
 		return &Result{Item: item, Success: false, Error: err.Error()}
 	}
-	removals := sdkmanRemovals(entries, major, item.CurrentVer)
+	if item.CurrentVer == "" {
+		// A stale or crafted item without a version to keep would remove the
+		// whole major. Fail closed.
+		item.Status = model.StatusError
+		return &Result{Item: item, Success: false, Error: "refusing SDKMAN cleanup without a version to keep"}
+	}
+	defaultVer, known := retention.SDKMANDefaultVersion(verDir)
+	if !known {
+		item.Status = model.StatusError
+		return &Result{Item: item, Success: false, Error: "refusing SDKMAN cleanup: cannot identify the sdk default (current is not a symlink)"}
+	}
+	removals := sdkmanRemovals(entries, major, item.CurrentVer, defaultVer)
 	if len(removals) == 0 {
 		return &Result{Item: item, Success: true, Output: fmt.Sprintf("%s %s: nothing to remove", candidate, major)}
 	}
 	var allOutput strings.Builder
+	var freed int64
 	for _, ver := range removals {
+		size := retention.DirSize(filepath.Join(verDir, ver))
 		if err := sdkUninstallOne(ctx, candidate, ver, opts, &allOutput); err != nil {
 			item.Status = model.StatusError
-			return &Result{Item: item, Success: false, Error: err.Error(), Output: allOutput.String()}
+			return &Result{Item: item, Success: false, Error: err.Error(), Output: allOutput.String(), BytesFreed: freed}
 		}
+		freed += size
 	}
 	item.Status = model.StatusCleaned
-	return &Result{Item: item, Success: true, Output: allOutput.String()}
+	item.Freed = FormatBytes(freed)
+	return &Result{Item: item, Success: true, Output: allOutput.String(), BytesFreed: freed}
 }
 
-func sdkmanRemovals(entries []os.DirEntry, major, keepVer string) []string {
+// sdkmanRemovals lists versions of major to uninstall, keeping keepVer (the
+// newest) and defaultVer (the `current` symlink target, possibly older).
+func sdkmanRemovals(entries []os.DirEntry, major, keepVer, defaultVer string) []string {
 	var removals []string
 	for _, entry := range entries {
 		if !entry.IsDir() || entry.Name() == "current" {
 			continue
 		}
 		ver := entry.Name()
-		if getMajorVersion(ver) == major && ver != keepVer {
+		if getMajorVersion(ver) == major && ver != keepVer && ver != defaultVer {
 			removals = append(removals, ver)
 		}
 	}
@@ -188,7 +199,7 @@ func sdkmanRemovals(entries []os.DirEntry, major, keepVer string) []string {
 func sdkUninstallOne(ctx context.Context, candidate, ver string, opts Options, out *strings.Builder) error {
 	safeCandidate := sanitizeIdent(candidate)
 	safeVer := sanitizeIdent(ver)
-	cmd := exec.CommandContext(ctx, "bash", "-c",
+	cmd := commandContext(ctx, "bash", "-c",
 		fmt.Sprintf("source $HOME/.sdkman/bin/sdkman-init.sh && sdk uninstall %s %s", safeCandidate, safeVer))
 	if opts.Verbose || opts.Interactive {
 		configureCmd(opts, cmd)
@@ -358,7 +369,7 @@ func removeRetentionPaths(item *model.Item, cands []retention.PathCandidate, emp
 func cleanContainerLogs(ctx context.Context, item *model.Item, opts Options) *Result {
 	maxBytes := int64(config.ContainerLogMaxMB()) * 1024 * 1024
 	// List running+stopped container IDs; truncate oversized json-file logs when discoverable.
-	out, err := exec.CommandContext(ctx, cleanerDocker, "ps", "-aq").CombinedOutput()
+	out, err := commandContext(ctx, cleanerDocker, "ps", "-aq").CombinedOutput()
 	if err != nil {
 		// No docker or daemon down — this optional cleanup was not performed.
 		item.Status = model.StatusInfo
@@ -422,7 +433,7 @@ func cleanContainerLogs(ctx context.Context, item *model.Item, opts Options) *Re
 }
 
 func containerLogPath(ctx context.Context, id string) (string, error) {
-	out, err := exec.CommandContext(ctx, cleanerDocker, "inspect",
+	out, err := commandContext(ctx, cleanerDocker, "inspect",
 		"--format", "{{.LogPath}}", id).CombinedOutput()
 	if err != nil {
 		return "", err
@@ -441,15 +452,20 @@ func cleanVSCodeExt(ctx context.Context, item *model.Item, opts Options) *Result
 		return &Result{Item: item, Success: false, Error: "cannot parse extension name"}
 	}
 	var allOutput strings.Builder
+	failed := false
+	var freed int64
 	for _, extDir := range candidates {
-		pruneOldExtVersions(extDir, extName, &allOutput)
+		n, bad := pruneOldExtVersions(extDir, extName, &allOutput)
+		freed += n
+		failed = failed || bad
 	}
-	if strings.Contains(allOutput.String(), "error removing") {
+	item.Freed = FormatBytes(freed)
+	if failed {
 		item.Status = model.StatusError
-		return &Result{Item: item, Success: false, Error: "some extension versions could not be removed", Output: allOutput.String()}
+		return &Result{Item: item, Success: false, Error: "some extension versions could not be removed", Output: allOutput.String(), BytesFreed: freed}
 	}
 	item.Status = model.StatusCleaned
-	return &Result{Item: item, Success: true, Output: allOutput.String()}
+	return &Result{Item: item, Success: true, Output: allOutput.String(), BytesFreed: freed}
 }
 
 func vscodeExtDirs() []string {
@@ -466,10 +482,14 @@ func vscodeExtDirs() []string {
 	return candidates
 }
 
-func pruneOldExtVersions(extDir, extName string, out *strings.Builder) {
+// pruneOldExtVersions removes extName's directories that the editor no
+// longer uses, keeping the active install from extensions.json (or the newest
+// when there is no manifest). It returns the bytes freed and whether anything
+// failed; an unreadable manifest removes nothing.
+func pruneOldExtVersions(extDir, extName string, out *strings.Builder) (freed int64, failed bool) {
 	entries, err := os.ReadDir(extDir)
 	if err != nil {
-		return
+		return 0, false
 	}
 	re := regexp.MustCompile(fmt.Sprintf(`^%s-(\d+\.\d+\.\d+)(?:-.+)?$`, regexp.QuoteMeta(extName)))
 	var versions []string
@@ -478,29 +498,45 @@ func pruneOldExtVersions(extDir, extName string, out *strings.Builder) {
 			versions = append(versions, entry.Name())
 		}
 	}
+	if len(versions) <= 1 {
+		return 0, false
+	}
+	active, _, err := retention.VSCodeActiveExtensionDirs(extDir)
+	if err != nil {
+		fmt.Fprintf(out, "error removing %s: cannot tell the active version: %v\n", extName, err)
+		return 0, true
+	}
 	sort.Slice(versions, func(i, j int) bool {
 		return compareVersions(extractVersion(versions[i]), extractVersion(versions[j])) > 0
 	})
-	if len(versions) <= 1 {
-		return
+	keep := make(map[string]bool)
+	for _, d := range retention.KeepExtensionDirs(versions, active) {
+		keep[d] = true
 	}
-	for _, old := range versions[1:] {
-		if err := os.RemoveAll(filepath.Join(extDir, old)); err != nil {
-			fmt.Fprintf(out, "error removing %s: %s\n", old, err)
+	for _, old := range versions {
+		if keep[old] {
+			continue
+		}
+		n, errs := retention.RemovePaths([]string{filepath.Join(extDir, old)})
+		freed += n
+		if len(errs) > 0 {
+			fmt.Fprintf(out, "error removing %s: %s\n", old, strings.Join(errs, "; "))
+			failed = true
 		} else {
 			fmt.Fprintf(out, "removed %s\n", old)
 		}
 	}
+	return freed, failed
 }
 
 // --- Helpers ---
 
 func runElevatedCmd(ctx context.Context, item *model.Item, opts Options, name string, args ...string) *Result {
-	return runCmdWithBuilder(ctx, item, elevate.Sudo(ctx, name, args...), opts)
+	return runCmdWithBuilder(ctx, item, sudoCommand(ctx, name, args...), opts)
 }
 
 func runCmd(ctx context.Context, item *model.Item, opts Options, name string, args ...string) *Result {
-	return runCmdWithBuilder(ctx, item, exec.CommandContext(ctx, name, args...), opts)
+	return runCmdWithBuilder(ctx, item, commandContext(ctx, name, args...), opts)
 }
 
 func runCmdWithBuilder(ctx context.Context, item *model.Item, cmd *exec.Cmd, opts Options) *Result {
@@ -554,7 +590,7 @@ func cleanNpm(ctx context.Context, item *model.Item, opts Options) *Result {
 	paths := cacheMeasurePaths(item)
 	before := measurePaths(ctx, paths)
 
-	result := executeCmd(ctx, item, exec.CommandContext(ctx, cleanerNpm, "cache", cleanCommand, "--force"), opts)
+	result := executeCmd(ctx, item, commandContext(ctx, cleanerNpm, "cache", cleanCommand, "--force"), opts)
 	if result.Success {
 		var npxOut strings.Builder
 		npxDir := filepath.Join(os.Getenv(cleanerHome), ".npm", "_npx")
@@ -580,7 +616,7 @@ func runMultiElevatedCmd(ctx context.Context, item *model.Item, opts Options, cm
 	var allOutput strings.Builder
 	var lastErr error
 	for _, args := range cmds {
-		cmd := elevate.Sudo(ctx, args[0], args[1:]...)
+		cmd := sudoCommand(ctx, args[0], args[1:]...)
 		if opts.Verbose || opts.Interactive {
 			configureCmd(opts, cmd)
 			if err := cmd.Run(); err != nil {

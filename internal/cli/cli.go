@@ -51,21 +51,6 @@ func ExitCode(err error) int {
 	return 1
 }
 
-// Scan runs a single full scan and splits update vs cleanup summaries.
-func Scan(ctx context.Context) (updates, cleanup []*model.SourceSummary, elapsed time.Duration, err error) {
-	plat := detectPlatform()
-	start := time.Now()
-	all := runScannerAll(ctx, plat, true)
-	for _, s := range all {
-		if scanner.IsCleanupCategory(s.Category) {
-			cleanup = append(cleanup, s)
-		} else {
-			updates = append(updates, s)
-		}
-	}
-	return updates, cleanup, time.Since(start).Round(time.Millisecond), nil
-}
-
 func scanForConfig(ctx context.Context, cfg Config, includeCleanup bool, cleanupOnlyArg ...bool) (updates, cleanup []*model.SourceSummary, elapsed time.Duration, err error) {
 	cleanupOnly := len(cleanupOnlyArg) > 0 && cleanupOnlyArg[0]
 	plat := detectPlatform()
@@ -251,30 +236,6 @@ func RunCheck(ctx context.Context, cfg Config) error {
 		return fmt.Errorf("strict: remaining outdated/cleanable items")
 	}
 	return nil
-}
-
-func countOutdated(summaries []*model.SourceSummary) int {
-	n := 0
-	for _, s := range summaries {
-		for _, it := range s.Items {
-			if it != nil && it.Status == model.StatusOutdated {
-				n++
-			}
-		}
-	}
-	return n
-}
-
-func countCleanable(summaries []*model.SourceSummary) int {
-	n := 0
-	for _, s := range summaries {
-		for _, it := range s.Items {
-			if it != nil && it.Status == model.StatusCleanCandidate {
-				n++
-			}
-		}
-	}
-	return n
 }
 
 // RunUpdate updates outdated packages.

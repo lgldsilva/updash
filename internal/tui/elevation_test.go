@@ -10,44 +10,8 @@ import (
 	"github.com/lgldsilva/updash/internal/updater"
 )
 
-func TestCanDeferMASElevation(t *testing.T) {
-	s := New()
-	s.Platform = model.PlatformInfo{OS: "darwin"}
-	items := []*model.Item{
-		{Name: "foo", Category: model.CatBrew, Status: model.StatusOutdated},
-		{Name: "WhatsApp", Category: model.CatMAS, Status: model.StatusOutdated},
-	}
-	if !s.canDeferMASElevation(items) {
-		t.Fatal("should defer MAS when brew also updates")
-	}
-
-	onlyMAS := []*model.Item{{Name: "WhatsApp", Category: model.CatMAS}}
-	if !s.canDeferMASElevation(onlyMAS) {
-		t.Fatal("should defer for MAS-only batch")
-	}
-
-	mixed := []*model.Item{{Name: "pkg", Category: model.CatApt}}
-	if s.canDeferMASElevation(mixed) {
-		t.Fatal("apt should not defer")
-	}
-}
-
-func TestCanDeferMASElevation_BrewPkgCaskForcesPrompt(t *testing.T) {
-	// Brew PKG casks (Microsoft) sudo-prompt mid-run — they must be primed
-	// up-front like apt, not deferred until the MAS batch.
-	s := New()
-	s.Platform = model.PlatformInfo{OS: "darwin"}
-	items := []*model.Item{
-		{Name: "microsoft-teams", Category: model.CatBrew, Status: model.StatusOutdated},
-		{Name: "WhatsApp", Category: model.CatMAS, Status: model.StatusOutdated},
-	}
-	if s.canDeferMASElevation(items) {
-		t.Fatal("brew PKG cask must force an up-front password prompt")
-	}
-}
-
 func TestNeedsElevationPrompt_DeferredMAS(t *testing.T) {
-	s := New()
+	s := NewWithVersion("", "")
 	s.Platform = model.PlatformInfo{OS: "darwin"}
 	s.PendingUpdateItems = []*model.Item{
 		{Name: "foo", Category: model.CatBrew, Status: model.StatusOutdated},
@@ -82,7 +46,7 @@ func TestGroupOutdatedByCategory(t *testing.T) {
 	if groups[0].category != model.CatBrew || len(groups[0].items) != 1 {
 		t.Fatalf("brew group: %+v", groups[0])
 	}
-	if label := groupOutdatedByCategory(summaries, copyItems(summaries[1].Items))[0].label(); label != "Mac App Store" {
+	if label := groupOutdatedByCategory(summaries, copyItems(summaries[1].Items))[0].source.Label; label != "Mac App Store" {
 		t.Fatalf("label = %q", label)
 	}
 }
@@ -151,7 +115,7 @@ func TestMasElevFailResults(t *testing.T) {
 }
 
 func TestHandlePasswordOK_MidOperation(t *testing.T) {
-	s := New()
+	s := NewWithVersion("", "")
 	wait := make(chan *elevate.Session, 1)
 	s.ElevWait = wait
 	sess := elevate.NewSession()
@@ -177,7 +141,7 @@ func TestHandlePasswordOK_MidOperation(t *testing.T) {
 }
 
 func TestCancelPassword_UnblocksWaitingWorkerWithNil(t *testing.T) {
-	s := New()
+	s := NewWithVersion("", "")
 	wait := make(chan *elevate.Session, 1)
 	s.ElevWait = wait
 	s.ConfirmCmd = func(p *tea.Program) tea.Cmd { return nil }

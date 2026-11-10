@@ -15,7 +15,9 @@ import (
 func restoreHooks(t *testing.T) {
 	t.Helper()
 	od, os, osf, osfc, oc, ou, opb, epb, enpm, oe, on, opm, of, oi := detectPlatform, runScannerAll, runScannerFiltered, runScannerFilteredForCleanup, cleanOneFn, updateCategory, prepareUpdateBatch, executePreparedBatch, executeNpmSkippingElevated, canElevateNP, nativeMacAvail, promptMacSess, formatBytesFn, stdinIsTTYFn
+	opu := planUpdateCommands
 	t.Cleanup(func() {
+		planUpdateCommands = opu
 		detectPlatform, runScannerAll, runScannerFiltered, runScannerFilteredForCleanup, cleanOneFn, updateCategory, prepareUpdateBatch, executePreparedBatch = od, os, osf, osfc, oc, ou, opb, epb
 		executeNpmSkippingElevated = enpm
 		canElevateNP, nativeMacAvail, promptMacSess = oe, on, opm
@@ -42,24 +44,6 @@ func fakeScan(updates, cleanup []*model.SourceSummary) {
 		return updateCategory(ctx, batch.Category(), batch.Items(), opts)
 	}
 	detectPlatform = func() model.PlatformInfo { return model.PlatformInfo{OS: "linux", Distro: "ubuntu"} }
-}
-
-func TestScanSplitsCategories(t *testing.T) {
-	restoreHooks(t)
-	up := &model.SourceSummary{Category: model.CatBrew, Label: "Brew", Items: []*model.Item{{Name: "git", Status: model.StatusOutdated}}}
-	cl := &model.SourceSummary{Category: model.CatCache, Label: "Cache", Items: []*model.Item{{Name: "npm-cache", Status: model.StatusCleanCandidate}}}
-	fakeScan([]*model.SourceSummary{up}, []*model.SourceSummary{cl})
-
-	updates, cleanup, elapsed, err := Scan(context.Background())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(updates) != 1 || len(cleanup) != 1 {
-		t.Fatalf("updates=%d cleanup=%d", len(updates), len(cleanup))
-	}
-	if elapsed < 0 {
-		t.Fatal("elapsed")
-	}
 }
 
 func TestRunCheck(t *testing.T) {
@@ -217,7 +201,8 @@ func TestRunUpdate_withBatches(t *testing.T) {
 
 func TestRunUpdate_strictRemaining(t *testing.T) {
 	restoreHooks(t)
-	item := &model.Item{Name: "git", Status: model.StatusOutdated, Category: model.CatNpm}
+	// A user-owned explicit prefix keeps planning pure (no host npm probe, no sudo).
+	item := &model.Item{Name: "git", Status: model.StatusOutdated, Category: model.CatNpm, Prefix: t.TempDir()}
 	sum := &model.SourceSummary{Category: model.CatNpm, Label: "npm", Items: []*model.Item{item}}
 	fakeScan([]*model.SourceSummary{sum}, nil)
 	updateCategory = func(ctx context.Context, cat model.Category, items []*model.Item, opts updater.Options) []*updater.Result {
@@ -527,19 +512,6 @@ func TestPrimeElevationSession_passwordlessAndPrompt(t *testing.T) {
 	}
 }
 
-func TestRunBrewUpdateBatch_plain(t *testing.T) {
-	restoreHooks(t)
-	executePreparedBatch = func(_ context.Context, batch *updater.PreparedUpdateBatch, _ updater.Options) []*updater.Result {
-		items := batch.Items()
-		return []*updater.Result{{Item: items[0], Success: true}}
-	}
-	var sess *elevate.Session
-	res := runBrewUpdateBatch(context.Background(), []*model.Item{{Name: "wget", Category: model.CatBrew}}, updater.Options{}, Config{}, &sess)
-	if len(res) != 1 || !res[0].Success {
-		t.Fatalf("%+v", res)
-	}
-}
-
 func TestRunCategoryUpdateSection_updatePath(t *testing.T) {
 	restoreHooks(t)
 	updateCategory = func(ctx context.Context, cat model.Category, items []*model.Item, opts updater.Options) []*updater.Result {
@@ -603,9 +575,19 @@ func TestRunUpdateBatches_linux(t *testing.T) {
 		return []*updater.Result{{Item: items[0], Success: true}}
 	}
 	canElevateNP = func(context.Context) bool { return true }
-	batch, err := updater.PrepareUpdateBatch(context.Background(), model.CatNpm, []*model.Item{{Name: "x", Category: model.CatNpm}})
+	// Never execute the prepared batch for real: it used to run
+	// `npm update -g x` on the host (and, elevated, would run it under sudo).
+	executePreparedBatch = func(ctx context.Context, batch *updater.PreparedUpdateBatch, opts updater.Options) []*updater.Result {
+		return updateCategory(ctx, batch.Category(), batch.Items(), opts)
+	}
+	// An explicit system prefix keeps planning pure: no `npm config get prefix`
+	// probe against the host (it took ~20s and depended on the local npm).
+	batch, err := updater.PrepareUpdateBatch(context.Background(), model.CatNpm, []*model.Item{{Name: "x", Category: model.CatNpm, Prefix: "/usr/local"}})
 	if err != nil {
 		t.Fatal(err)
+	}
+	if !updater.PlansRequireElevation(batch.Plans()) {
+		t.Fatalf("a /usr prefix must plan an elevated npm update: %+v", batch.Plans())
 	}
 	out := captureStdout(t, func() {
 		ok, _, _, _ := runUpdateBatches(

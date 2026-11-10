@@ -1,7 +1,6 @@
 package updater
 
 import (
-	"context"
 	"time"
 
 	"github.com/lgldsilva/updash/internal/model"
@@ -22,10 +21,6 @@ func BatchTimeout(cat model.Category) time.Duration {
 	default:
 		return 15 * time.Minute
 	}
-}
-
-func withBatchTimeout(ctx context.Context, cat model.Category) (context.Context, context.CancelFunc) {
-	return context.WithTimeout(ctx, BatchTimeout(cat))
 }
 
 // BrewItemTimeout caps a single brew upgrade so PKG installers fail fast with a diagnosis.

@@ -3,7 +3,9 @@ package scanner
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -50,13 +52,7 @@ func mockExecCommand(ctx context.Context, name string, args ...string) ([]byte, 
 	if ok {
 		return res.stdout, res.err
 	}
-	// Fall back to real execution for LookPath etc.
-	return realExecCommand(ctx, name, args...)
-}
-
-// realExecCommand is the original implementation.
-var realExecCommand = func(ctx context.Context, name string, args ...string) ([]byte, error) {
-	return defaultExecCommand(ctx, name, args...)
+	return nil, fmt.Errorf("unmocked command: %s %v: %w", name, args, exec.ErrNotFound)
 }
 
 // defaultExecCommand is the real os/exec implementation, saved at init.
@@ -66,10 +62,26 @@ var (
 	defaultExecCommandEnv func(ctx context.Context, env []string, name string, args ...string) ([]byte, error)
 )
 
+// realExec* keep the production runner; only withRealExec hands it out.
+var (
+	realExecCommand    func(ctx context.Context, name string, args ...string) ([]byte, error)
+	realExecCombined   func(ctx context.Context, name string, args ...string) ([]byte, error)
+	realExecCommandEnv func(ctx context.Context, env []string, name string, args ...string) ([]byte, error)
+)
+
 func init() {
+	realExecCommand, realExecCombined, realExecCommandEnv = execCommand, execCombined, execCommandEnv
 	defaultExecCommand = execCommand
 	defaultExecCombined = execCombined
 	defaultExecCommandEnv = execCommandEnv
+}
+
+// withRealExec opts one test into the production runner. Use it only with a
+// PATH/fixture the test fully controls (runner semantics, fake binaries).
+func withRealExec(t *testing.T) {
+	t.Helper()
+	execCommand, execCombined, execCommandEnv = realExecCommand, realExecCombined, realExecCommandEnv
+	t.Cleanup(enableMocks)
 }
 
 // enableMocks replaces execCommand with the mock.
@@ -88,7 +100,20 @@ func disableMocks() {
 	execCommandEnv = defaultExecCommandEnv
 }
 
-// TestMain is not used — we call enable/disable in each test.
+// TestMain makes the package hermetic: scanners only read, but a test that
+// reached the real host would depend on whatever is installed there and on
+// the npm registry (slow, flaky, host-specific). Every exec seam starts on the
+// strict mock; disableMocks restores the strict mock too, never real exec.
+// Tests that exercise the real runner call spawn/run helpers directly.
+func TestMain(m *testing.M) {
+	defaultExecCommand = mockExecCommand
+	defaultExecCombined = mockExecCommand
+	defaultExecCommandEnv = func(ctx context.Context, _ []string, name string, args ...string) ([]byte, error) {
+		return mockExecCommand(ctx, name, args...)
+	}
+	enableMocks()
+	os.Exit(m.Run())
+}
 
 // --- Brew Scanner ---
 
@@ -855,15 +880,12 @@ func TestAgentScan(t *testing.T) {
 	}
 }
 
-// Test that mockExecCommand falls back to real execution for unregistered commands.
-func TestMockFallback(t *testing.T) {
-	enableMocks()
-	defer disableMocks()
-
-	// "go" should work if Go is installed (it is, since we're running tests)
+// TestMockIsStrict pins the hermetic contract: an unmocked command never
+// reaches the host.
+func TestMockIsStrict(t *testing.T) {
 	_, err := mockExecCommand(context.Background(), "go", "version")
-	if err != nil {
-		t.Logf("note: mock fallback to real exec failed: %v (may be expected in sandbox)", err)
+	if !errors.Is(err, exec.ErrNotFound) {
+		t.Fatalf("unmocked command must fail with ErrNotFound, got %v", err)
 	}
 }
 
@@ -877,11 +899,11 @@ func TestSDKMANSourceScan_TempDir(t *testing.T) {
 	_ = os.Mkdir(filepath.Join(candidatesDir, "java", "11.0.25-tem"), 0755)
 	_ = os.Mkdir(filepath.Join(candidatesDir, "java", "21.0.7-tem"), 0755)
 	_ = os.Mkdir(filepath.Join(candidatesDir, "java", "21.0.5-tem"), 0755)
-	_ = os.Mkdir(filepath.Join(candidatesDir, "java", "current"), 0755)
+	_ = os.Symlink("21.0.7-tem", filepath.Join(candidatesDir, "java", "current"))
 	_ = os.Mkdir(filepath.Join(candidatesDir, "gradle", "8.14.4"), 0755)
 	_ = os.Mkdir(filepath.Join(candidatesDir, "gradle", "8.14.1"), 0755)
 	_ = os.Mkdir(filepath.Join(candidatesDir, "gradle", "9.4.1"), 0755)
-	_ = os.Mkdir(filepath.Join(candidatesDir, "gradle", "current"), 0755)
+	_ = os.Symlink("9.4.1", filepath.Join(candidatesDir, "gradle", "current"))
 
 	origHome := os.Getenv("HOME")
 	_ = os.Setenv("HOME", tmpDir)

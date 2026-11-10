@@ -9,7 +9,7 @@ import (
 )
 
 func TestCollectOutdatedItems_IncludesAgyOnUpdateAll(t *testing.T) {
-	s := New()
+	s := NewWithVersion("", "")
 	agy := &model.Item{
 		Name: "Agy", Category: model.CatAgent, Status: model.StatusInfo,
 		CurrentVer: "1.2.16", KeepPolicy: scanner.AgentUpdateCheckNote("Agy"),
@@ -47,7 +47,7 @@ func namesOf(items []*model.Item) []string {
 }
 
 func TestRenderItem_AgyInfoShowsUpdateNote(t *testing.T) {
-	s := New()
+	s := NewWithVersion("", "")
 	s.Width = 160
 	s.Height = 40
 	item := &model.Item{

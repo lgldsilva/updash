@@ -10,7 +10,7 @@ import (
 )
 
 func sampleBrewState(term int) *State {
-	s := New()
+	s := NewWithVersion("", "")
 	s.Width = term
 	s.Height = 40
 	s.Version = "test"
@@ -104,7 +104,7 @@ func TestRightBorder_alignsWithCorners(t *testing.T) {
 }
 
 func TestNoDoubleRightBorder(t *testing.T) {
-	s := New()
+	s := NewWithVersion("", "")
 	s.Width = 80
 	s.Height = 24
 	s.Platform.OS = "darwin"
@@ -147,7 +147,7 @@ func TestIconCell_width2(t *testing.T) {
 }
 
 func TestGearEmoji_noWidthDisagreement(t *testing.T) {
-	s := New()
+	s := NewWithVersion("", "")
 	s.Width = 200
 	s.Height = 40
 	s.Platform.OS = "darwin"

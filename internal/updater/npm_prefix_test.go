@@ -202,7 +202,7 @@ func TestExecutePreparedNpm_MultiPrefixGroups(t *testing.T) {
 	}
 }
 
-func TestBatchNpmUpgrade_MultiPrefixGroups(t *testing.T) {
+func TestUpdateCategoryNpm_MultiPrefixGroups(t *testing.T) {
 	prevRun, prevElev, prevPrefix := runUpdateCmd, runElevatedUpdateCmd, npmPrefixRunner
 	t.Cleanup(func() {
 		runUpdateCmd, runElevatedUpdateCmd, npmPrefixRunner = prevRun, prevElev, prevPrefix
@@ -226,7 +226,7 @@ func TestBatchNpmUpgrade_MultiPrefixGroups(t *testing.T) {
 		{Name: "legacy-pkg", Prefix: "/legacy", Category: model.CatNpm, Status: model.StatusOutdated},
 		{Name: "ok-pkg", Category: model.CatNpm, Status: model.StatusOutdated},
 	}
-	results := batchNpmUpgrade(context.Background(), items, SilentOptions())
+	results := UpdateCategory(context.Background(), model.CatNpm, items, SilentOptions())
 	if len(results) != 2 || len(ran) != 2 {
 		t.Fatalf("results=%d ran=%v, want 2/2", len(results), len(ran))
 	}

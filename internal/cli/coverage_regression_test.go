@@ -38,23 +38,6 @@ func TestExitErrorContractAndPrecedence(t *testing.T) {
 	}
 }
 
-func TestCountsIgnoreOtherStatuses(t *testing.T) {
-	summaries := []*model.SourceSummary{
-		{Items: []*model.Item{
-			{Name: "outdated", Status: model.StatusOutdated},
-			{Name: "clean", Status: model.StatusCleanCandidate},
-			{Name: "info", Status: model.StatusInfo},
-			nil,
-		}},
-	}
-	if got := countOutdated(summaries); got != 1 {
-		t.Fatalf("countOutdated=%d, want 1", got)
-	}
-	if got := countCleanable(summaries); got != 1 {
-		t.Fatalf("countCleanable=%d, want 1", got)
-	}
-}
-
 func TestAppendProblemsDoesNotDoubleCountItemStatuses(t *testing.T) {
 	withItems := &model.SourceSummary{
 		Category:   model.CatNpm,

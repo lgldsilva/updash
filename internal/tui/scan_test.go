@@ -28,13 +28,13 @@ func TestMergeSummary_InsertAndReplace(t *testing.T) {
 }
 
 func TestRescanCategory_nilProgram(t *testing.T) {
-	s := New()
+	s := NewWithVersion("", "")
 	// must not panic when program is nil
 	rescanCategory(context.Background(), s.Platform, nil, 0, model.CatBrew, false)
 }
 
 func TestStartScan_Idempotent(t *testing.T) {
-	s := New()
+	s := NewWithVersion("", "")
 	if s.startScan() != nil {
 		t.Fatal("startScan without program should return nil")
 	}

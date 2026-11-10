@@ -157,18 +157,6 @@ func (s *State) debugFrame(stage string, term, cw, boxW int, out string) {
 	}
 }
 
-func hasOverflow(out string, term int) bool {
-	if term <= 0 {
-		return false
-	}
-	for _, line := range strings.Split(out, "\n") {
-		if lipgloss.Width(line) > term {
-			return true
-		}
-	}
-	return false
-}
-
 func stripANSIForLog(s string) string {
 	var b strings.Builder
 	inEsc := false
