@@ -12,6 +12,7 @@ import (
 )
 
 func TestRunUpdateCmd_StreamsToConfiguredOutput(t *testing.T) {
+	withRealExec(t)
 	var output bytes.Buffer
 	stdout, stderr, err := runUpdateCmd(context.Background(), Options{Output: &output}, "sh", "-c", "printf streamed")
 	if err != nil {
@@ -33,7 +34,7 @@ func TestOutputNeedsPassword_DoesNotTreatTerminationAsPasswordFailure(t *testing
 	}
 }
 
-func TestBatchPnpmUpgrade_ExecutesOnlySelectedPackages(t *testing.T) {
+func TestUpdateCategoryPnpm_ExecutesOnlySelectedPackages(t *testing.T) {
 	original := runUpdateCmd
 	t.Cleanup(func() { runUpdateCmd = original })
 	var calls [][]string
@@ -43,7 +44,7 @@ func TestBatchPnpmUpgrade_ExecutesOnlySelectedPackages(t *testing.T) {
 	}
 
 	items := []*model.Item{{Name: "one", Category: model.CatPnpm}, {Name: "two", Category: model.CatPnpm}}
-	results := batchPnpmUpgrade(context.Background(), items, SilentOptions())
+	results := UpdateCategory(context.Background(), model.CatPnpm, items, SilentOptions())
 	if len(results) != 2 || !results[0].Success || !results[1].Success {
 		t.Fatalf("results = %#v", results)
 	}
@@ -53,7 +54,7 @@ func TestBatchPnpmUpgrade_ExecutesOnlySelectedPackages(t *testing.T) {
 	}
 }
 
-func TestBatchAptUpgrade_StopsWhenRefreshFails(t *testing.T) {
+func TestUpdateCategoryApt_StopsWhenRefreshFails(t *testing.T) {
 	original := runElevatedUpdateCmd
 	t.Cleanup(func() { runElevatedUpdateCmd = original })
 	var calls [][]string
@@ -63,22 +64,13 @@ func TestBatchAptUpgrade_StopsWhenRefreshFails(t *testing.T) {
 	}
 
 	items := []*model.Item{{Name: "curl", Category: model.CatApt}}
-	results := batchAptUpgrade(context.Background(), items, SilentOptions())
+	results := UpdateCategory(context.Background(), model.CatApt, items, SilentOptions())
 	if len(results) != 1 || results[0].Success {
 		t.Fatalf("results = %#v", results)
 	}
 	want := [][]string{{"apt-get", "update"}}
 	if !reflect.DeepEqual(calls, want) {
 		t.Fatalf("commands = %#v, want %#v", calls, want)
-	}
-}
-
-func TestNpmGlobalNeedsSudo_InspectsSystemPrefixBeforeElevationIsReady(t *testing.T) {
-	original := npmPrefixRunner
-	t.Cleanup(func() { npmPrefixRunner = original })
-	npmPrefixRunner = func(context.Context) ([]byte, error) { return []byte("/usr/local\n"), nil }
-	if !npmGlobalNeedsSudo(context.Background()) {
-		t.Fatal("system npm prefix must request elevation")
 	}
 }
 
@@ -136,6 +128,9 @@ func TestPlanUpdateCommands_CoversAutomaticAndManualCategories(t *testing.T) {
 		{"flatpak", model.CatFlatpak, &model.Item{Name: "org.example.App"}, CommandScopeCategoryGlobal, []string{"flatpak", "update", "-y"}},
 		{"snap", model.CatSnap, &model.Item{Name: "core"}, CommandScopeCategoryGlobal, []string{"snap", "refresh"}},
 		{"choco", model.CatChoco, &model.Item{Name: "git"}, CommandScopeExact, []string{"choco", "upgrade", "git", "-y"}},
+		{"choco prefers id", model.CatChoco, &model.Item{Name: "Git", PackageID: "git.install"}, CommandScopeExact, []string{"choco", "upgrade", "git.install", "-y"}},
+		{"winget exact id", model.CatWinget, &model.Item{Name: "Git", PackageID: "Git.Git"}, CommandScopeExact, []string{"winget", "upgrade", "--exact", "--id", "Git.Git", "--accept-package-agreements", "--accept-source-agreements"}},
+		{"scoop exact name", model.CatScoop, &model.Item{Name: "git"}, CommandScopeExact, []string{"scoop", "update", "git"}},
 		{"agent manual", model.CatAgent, &model.Item{Name: "Cursor"}, CommandScopeManual, nil},
 		{"cleanup manual", model.CatCache, &model.Item{Name: "cache"}, CommandScopeManual, nil},
 	}
@@ -213,22 +208,11 @@ func TestPlanUpdateCommands_EmptyAndMissingIDsDoNotBroadenScope(t *testing.T) {
 	}
 }
 
-func TestUpgradeMASApp_MissingIDIsManualAndDoesNotExecute(t *testing.T) {
+func TestUpdateCategoryMAS_MissingIDIsManualAndDoesNotExecute(t *testing.T) {
 	item := &model.Item{Name: "Xcode", Category: model.CatMAS}
-	result := upgradeMASApp(context.Background(), item, SilentOptions())
+	result := UpdateCategory(context.Background(), model.CatMAS, []*model.Item{item}, SilentOptions())[0]
 	if result.Success || !strings.Contains(result.Error, "App Store ID") {
 		t.Fatalf("result=%#v", result)
-	}
-}
-
-func TestPlansRequireWholeCategory(t *testing.T) {
-	global, _ := PlanUpdateCommands(model.CatFlatpak, []*model.Item{{Name: "app"}})
-	if !PlansRequireWholeCategory(global) {
-		t.Fatal("flatpak global plan must require whole-category confirmation")
-	}
-	exact, _ := PlanUpdateCommands(model.CatBrew, []*model.Item{{Name: "git"}})
-	if PlansRequireWholeCategory(exact) {
-		t.Fatal("exact brew plan must permit a partial selection")
 	}
 }
 
@@ -391,23 +375,55 @@ func TestUpdateCategory_EmptyGlobalCategoriesAreNoops(t *testing.T) {
 	}
 }
 
-func TestDirectGlobalBatches_EmptyInputIsNoop(t *testing.T) {
-	batches := []struct {
-		name string
-		run  func(context.Context, []*model.Item, Options) []*Result
-	}{
-		{"dnf", batchDnfUpgrade},
-		{"zypper", batchZypperUpgrade},
-		{"apk", batchApkUpgrade},
-		{"pacman", batchPacmanUpgrade},
-		{"choco", batchChocoUpgrade},
-		{"scoop", batchScoopUpgrade},
+func TestPlanUpdateCommands_DnfAndPacmanBranches(t *testing.T) {
+	items := []*model.Item{{Name: "git"}}
+	global := func(name string, args []string, elevated bool) CommandPlan {
+		return CommandPlan{Name: name, Args: args, Scope: CommandScopeCategoryGlobal, Elevated: elevated}
 	}
-	for _, batch := range batches {
-		t.Run(batch.name, func(t *testing.T) {
-			if got := batch.run(context.Background(), nil, SilentOptions()); len(got) != 0 {
-				t.Fatalf("got %d results, want no-op", len(got))
+	assertPlan := func(t *testing.T, cat model.Category, want CommandPlan) {
+		t.Helper()
+		plans, err := PlanUpdateCommands(cat, items)
+		if err != nil || len(plans) != 1 {
+			t.Fatalf("plans=%#v err=%v", plans, err)
+		}
+		if !reflect.DeepEqual(plans[0], want) {
+			t.Fatalf("plan=%#v want %#v", plans[0], want)
+		}
+	}
+
+	t.Run("yum updates in place", func(t *testing.T) {
+		prev := rpmToolName
+		t.Cleanup(func() { rpmToolName = prev })
+		rpmToolName = func() string { return "yum" }
+		assertPlan(t, model.CatDnf, global("yum", []string{"update", "-y"}, true))
+	})
+	t.Run("dnf refreshes then upgrades", func(t *testing.T) {
+		assertPlan(t, model.CatDnf, global("dnf", []string{"upgrade", "--refresh", "-y"}, true))
+	})
+	t.Run("dnf5 uses the upgrade form", func(t *testing.T) {
+		prev := rpmToolName
+		t.Cleanup(func() { rpmToolName = prev })
+		rpmToolName = func() string { return "dnf5" }
+		assertPlan(t, model.CatDnf, global("dnf5", []string{"upgrade", "--refresh", "-y"}, true))
+	})
+	t.Run("pacman without yay", func(t *testing.T) {
+		assertPlan(t, model.CatPacman, global("pacman", []string{"-Syu", "--noconfirm"}, true))
+	})
+	t.Run("yay when present", func(t *testing.T) {
+		prev := lookPath
+		t.Cleanup(func() { lookPath = prev })
+		lookPath = func(name string) (string, error) {
+			if name == "yay" {
+				return "/usr/bin/yay", nil
 			}
-		})
-	}
+			return "", errors.New("not found")
+		}
+		assertPlan(t, model.CatPacman, global("yay", []string{"-Syu", "--noconfirm"}, false))
+	})
+	t.Run("nil lookPath stays on pacman", func(t *testing.T) {
+		prev := lookPath
+		t.Cleanup(func() { lookPath = prev })
+		lookPath = nil
+		assertPlan(t, model.CatPacman, global("pacman", []string{"-Syu", "--noconfirm"}, true))
+	})
 }

@@ -298,14 +298,6 @@ func TestPrintCheckAndVerifyReport(t *testing.T) {
 		t.Fatalf("check out: %q", out)
 	}
 
-	// Empty footer path
-	out = captureStdout(t, func() {
-		printCheckFooter(0, 0, 0, 0)
-	})
-	if !strings.Contains(out, "up to date") {
-		t.Fatalf("footer empty: %q", out)
-	}
-
 	results := []*updater.Result{
 		{Item: outdated, Success: false, Error: "failed"},
 	}
@@ -820,15 +812,6 @@ func TestItemNeedsNativeElevation(t *testing.T) {
 	}
 	if itemNeedsNativeElevation(&model.Item{Name: "telegram", Category: model.CatBrew}, plat) {
 		t.Fatal("plain brew should not")
-	}
-}
-
-func TestPrintCheckFooterHints(t *testing.T) {
-	out := captureStdout(t, func() {
-		printCheckFooter(3, 2, 1, 1)
-	})
-	if !strings.Contains(out, "outdated") || !strings.Contains(out, "sudo") || !strings.Contains(out, "manual-only") || !strings.Contains(out, "cleanable") {
-		t.Fatalf("%q", out)
 	}
 }
 

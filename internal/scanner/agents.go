@@ -453,15 +453,7 @@ func applyLatestToAgents(items []*model.Item, catalog []agentDef, latestByPkg ma
 	}
 }
 
-// resolveRegistryLatest flags agents whose npm package is NOT installed via
-// global npm (native installer, brew, pnpm/bun store) by asking the registry
-// for the latest version. Agents already handled by `npm outdated -g` or
-// without a freshness channel are skipped.
-func resolveRegistryLatest(ctx context.Context, items []*model.Item, catalog []agentDef) {
-	resolveRegistryLatestFrom(ctx, items, catalog, nameSet(npmInstalledVersions(ctx)))
-}
-
-// resolveRegistryLatestFrom is resolveRegistryLatest with a pre-fetched
+// resolveRegistryLatestFrom resolves registry latest versions with a pre-fetched
 // global-npm package set (allows callers to overlap it with other npm work).
 // Registry probes fan out bounded-parallel: they are network-bound with a
 // per-probe budget, and a serial loop over many non-npm agents sums several

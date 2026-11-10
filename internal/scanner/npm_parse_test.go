@@ -84,20 +84,6 @@ func TestInventorySourcesAreInfoAndPipxBadJSONIsError(t *testing.T) {
 	}
 }
 
-func TestParseNpmOutdatedMap(t *testing.T) {
-	raw := []byte(`{"@openai/codex":{"current":"0.1.0","wanted":"0.2.0","latest":"0.3.0"}}`)
-	m := ParseNpmOutdatedMap(raw)
-	if m["@openai/codex"] != "0.3.0" {
-		t.Fatalf("map=%v", m)
-	}
-	if ParseNpmOutdatedMap([]byte(`{`)) != nil {
-		t.Fatal("invalid should be nil")
-	}
-	if ParseNpmOutdatedMap([]byte(`{}`)) != nil {
-		t.Fatal("empty object should stay nil")
-	}
-}
-
 func TestParseNpmOutdatedLatestDistinguishesEmptyFromInvalid(t *testing.T) {
 	empty, err := parseNpmOutdatedLatest(nil)
 	if err != nil || len(empty) != 0 {

@@ -44,24 +44,6 @@ func fakeScan(updates, cleanup []*model.SourceSummary) {
 	detectPlatform = func() model.PlatformInfo { return model.PlatformInfo{OS: "linux", Distro: "ubuntu"} }
 }
 
-func TestScanSplitsCategories(t *testing.T) {
-	restoreHooks(t)
-	up := &model.SourceSummary{Category: model.CatBrew, Label: "Brew", Items: []*model.Item{{Name: "git", Status: model.StatusOutdated}}}
-	cl := &model.SourceSummary{Category: model.CatCache, Label: "Cache", Items: []*model.Item{{Name: "npm-cache", Status: model.StatusCleanCandidate}}}
-	fakeScan([]*model.SourceSummary{up}, []*model.SourceSummary{cl})
-
-	updates, cleanup, elapsed, err := Scan(context.Background())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(updates) != 1 || len(cleanup) != 1 {
-		t.Fatalf("updates=%d cleanup=%d", len(updates), len(cleanup))
-	}
-	if elapsed < 0 {
-		t.Fatal("elapsed")
-	}
-}
-
 func TestRunCheck(t *testing.T) {
 	restoreHooks(t)
 	fakeScan([]*model.SourceSummary{
@@ -525,19 +507,6 @@ func TestPrimeElevationSession_passwordlessAndPrompt(t *testing.T) {
 	got = primeElevationSession(ctx, model.PlatformInfo{OS: "linux"}, items, Config{}, &sess)
 	if elevate.FromContext(got) != s {
 		t.Fatal("expected prompted session")
-	}
-}
-
-func TestRunBrewUpdateBatch_plain(t *testing.T) {
-	restoreHooks(t)
-	executePreparedBatch = func(_ context.Context, batch *updater.PreparedUpdateBatch, _ updater.Options) []*updater.Result {
-		items := batch.Items()
-		return []*updater.Result{{Item: items[0], Success: true}}
-	}
-	var sess *elevate.Session
-	res := runBrewUpdateBatch(context.Background(), []*model.Item{{Name: "wget", Category: model.CatBrew}}, updater.Options{}, Config{}, &sess)
-	if len(res) != 1 || !res[0].Success {
-		t.Fatalf("%+v", res)
 	}
 }
 

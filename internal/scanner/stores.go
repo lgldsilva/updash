@@ -38,13 +38,6 @@ type pnpmOutdatedEntry struct {
 	Latest  string `json:"latest"`
 }
 
-// ParsePnpmOutdatedGlobal converts `pnpm outdated -g --json` into items.
-// The global-dir row (path key, empty metadata) and up-to-date entries are skipped.
-func ParsePnpmOutdatedGlobal(out []byte) []*model.Item {
-	items, _ := parsePnpmOutdatedGlobal(out)
-	return items
-}
-
 func parsePnpmOutdatedGlobal(out []byte) ([]*model.Item, error) {
 	var data map[string]pnpmOutdatedEntry
 	if err := json.Unmarshal(out, &data); err != nil {

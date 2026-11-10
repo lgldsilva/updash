@@ -10,7 +10,7 @@ import (
 )
 
 func seedSummaries(n int) (*State, []*model.Item) {
-	s := New()
+	s := NewWithVersion("", "")
 	items := make([]*model.Item, 0, n)
 	summary := &model.SourceSummary{Category: model.CatNpm, Label: "npm"}
 	for i := 0; i < n; i++ {
@@ -79,7 +79,7 @@ func TestApplyUpdateResults_SurvivesRescan(t *testing.T) {
 }
 
 func TestApplyUpdateResultsForSource_UsesStableIdentityAndBlocksCollisions(t *testing.T) {
-	s := New()
+	s := NewWithVersion("", "")
 	first := &model.Item{Name: "first name", PackageID: "pkg-id", Category: model.CatNpm, Status: model.StatusOutdated}
 	second := &model.Item{Name: "second name", PackageID: "pkg-id", Category: model.CatNpm, Status: model.StatusOutdated}
 	s.Summaries = []*model.SourceSummary{
@@ -106,7 +106,7 @@ func TestApplyUpdateResultsForSource_UsesStableIdentityAndBlocksCollisions(t *te
 }
 
 func TestApplyCleanResults(t *testing.T) {
-	s := New()
+	s := NewWithVersion("", "")
 	it := &model.Item{Name: "brew-cache", Category: model.CatCache, Status: model.StatusCleanCandidate}
 	s.CleanItems = []*model.SourceSummary{{
 		Category: model.CatCache, Label: "Homebrew Cache", Items: []*model.Item{it},

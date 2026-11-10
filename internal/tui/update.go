@@ -824,13 +824,6 @@ type cleanTarget struct {
 	source SourceIdentity
 }
 
-func (g categoryGroup) label() string {
-	if g.source.Label != "" {
-		return g.source.Label
-	}
-	return string(g.category)
-}
-
 func (g *preparedUpdateGroup) label() string {
 	if g.source.Label != "" {
 		return g.source.Label

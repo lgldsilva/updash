@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"os"
 
 	"github.com/lgldsilva/updash/internal/model"
 	"github.com/lgldsilva/updash/internal/scanner"
@@ -230,25 +229,6 @@ func WriteCheckJSON(w io.Writer, rep CheckReport) error {
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
 	return enc.Encode(rep)
-}
-
-// PrintCheckJSON writes the check report to stdout.
-func PrintCheckJSON(updates, cleanup []*model.SourceSummary) (outdated, cleanable int, err error) {
-	rep := BuildCheckReport(updates, cleanup)
-	if err := WriteCheckJSON(os.Stdout, rep); err != nil {
-		return 0, 0, err
-	}
-	return rep.Outdated, rep.Cleanable, nil
-}
-
-// FormatCheckJSON returns the report as a JSON string (tests / embedding).
-func FormatCheckJSON(updates, cleanup []*model.SourceSummary) (string, error) {
-	rep := BuildCheckReport(updates, cleanup)
-	b, err := json.MarshalIndent(rep, "", "  ")
-	if err != nil {
-		return "", err
-	}
-	return string(b) + "\n", nil
 }
 
 // ExitCodeForCheck returns process exit code for --check under --strict.

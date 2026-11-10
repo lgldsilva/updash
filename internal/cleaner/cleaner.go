@@ -28,11 +28,6 @@ type Result struct {
 	BytesFreed int64 // disk space reclaimed when measurable
 }
 
-// CleanAll runs cleanup operations for the given items (silent/buffered — for TUI).
-func CleanAll(ctx context.Context, items []*model.Item) []*Result {
-	return CleanAllWithOptions(ctx, items, SilentOptions())
-}
-
 // CleanAllWithOptions runs cleanup with the given execution options.
 func CleanAllWithOptions(ctx context.Context, items []*model.Item, opts Options) []*Result {
 	var results []*Result

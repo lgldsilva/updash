@@ -189,10 +189,6 @@ func printCleanupSummary(s *model.SourceSummary) int {
 	return count
 }
 
-func printCheckFooter(outdated, cleanable, needsSudo, manualOnly int) {
-	printCheckFooterWithTruth(outdated, cleanable, needsSudo, manualOnly, false)
-}
-
 func printCheckFooterWithTruth(outdated, cleanable, needsSudo, manualOnly int, nonAffirmative bool) {
 	if outdated == 0 && cleanable == 0 {
 		if nonAffirmative {

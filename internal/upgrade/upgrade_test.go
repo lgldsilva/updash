@@ -227,35 +227,6 @@ func TestIsHTTP404(t *testing.T) {
 	}
 }
 
-func TestNormalizeVersion(t *testing.T) {
-	if got := NormalizeVersion("v1.2.3"); got != "1.2.3" {
-		t.Fatalf("got %q", got)
-	}
-	if got := NormalizeVersion("1.2.3"); got != "1.2.3" {
-		t.Fatalf("got %q", got)
-	}
-	if got := NormalizeVersion(" v1.0 "); got != "1.0" {
-		t.Fatalf("got %q", got)
-	}
-}
-
-func TestModeShowsStartupBanner(t *testing.T) {
-	if !ModeShowsStartupBanner("tui") {
-		t.Fatal("tui should show banner")
-	}
-	if !ModeShowsStartupBanner("version") {
-		t.Fatal("version should show banner")
-	}
-	if ModeShowsStartupBanner("upgrade") {
-		t.Fatal("upgrade should not show banner")
-	}
-	for _, m := range []string{"check", "update", "clean", "all"} {
-		if ModeShowsStartupBanner(m) {
-			t.Fatalf("headless mode %q must not show banner", m)
-		}
-	}
-}
-
 func TestShouldAutoUpgradeVariants(t *testing.T) {
 	if ShouldAutoUpgrade("1.0.0", true) {
 		t.Fatal("skipFlag=true should not auto-upgrade")

@@ -39,7 +39,7 @@ func TestWrapFooter(t *testing.T) {
 }
 
 func TestFrameUsesWidth(t *testing.T) {
-	s := New()
+	s := NewWithVersion("", "")
 	s.Width = 60
 	out := s.frame("hello")
 	if out == "" {
@@ -50,7 +50,7 @@ func TestFrameUsesWidth(t *testing.T) {
 func TestFrame_neverExceedsTerminalWidth(t *testing.T) {
 	// Wide content + emoji: every painted line must be EXACTLY boxW cells.
 	for _, term := range []int{60, 80, 100, 120, 317} {
-		s := New()
+		s := NewWithVersion("", "")
 		s.Width = term
 		s.Height = 30
 		s.Version = "0.3.0"
@@ -151,7 +151,7 @@ func TestPadRightLeft(t *testing.T) {
 }
 
 func TestCategoryHeader_fixedColumns(t *testing.T) {
-	s := New()
+	s := NewWithVersion("", "")
 	s.Width = 100
 	h1 := s.renderCategoryHeader(&model.SourceSummary{
 		Icon: "🍺", Label: "Homebrew", Total: 11,
@@ -176,7 +176,7 @@ func TestCategoryHeader_fixedColumns(t *testing.T) {
 }
 
 func TestRenderItemStyled_versionColumns(t *testing.T) {
-	s := New()
+	s := NewWithVersion("", "")
 	s.Width = 120
 	a := s.renderItemStyled(&model.Item{
 		Name: "clion", CurrentVer: "1.0", AvailableVer: "2.0",
@@ -197,9 +197,9 @@ func TestRenderItemStyled_versionColumns(t *testing.T) {
 }
 
 func TestMetrics_scalesWithWidth(t *testing.T) {
-	narrow := New()
+	narrow := NewWithVersion("", "")
 	narrow.Width = 48
-	wide := New()
+	wide := NewWithVersion("", "")
 	wide.Width = 160
 
 	n := narrow.metrics()
@@ -226,7 +226,7 @@ func TestMetrics_scalesWithWidth(t *testing.T) {
 }
 
 func TestFormatRow_padsToContentWidth(t *testing.T) {
-	s := New()
+	s := NewWithVersion("", "")
 	s.Width = 80
 	s.Cursor = 0
 	row := s.formatRow("short", 0)

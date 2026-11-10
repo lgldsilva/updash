@@ -83,16 +83,16 @@ func TestNpmPipeline_ExcludesProtectedFromArgs(t *testing.T) {
 	}
 }
 
-// When every item is protected, batchNpmUpgrade must NOT invoke npm at all —
+// When every item is protected, the npm update must NOT invoke npm at all —
 // the items are owned by opencode upgrade. (No real subprocess runs here: the
 // empty-updatable branch returns before building any command.)
-func TestBatchNpmUpgrade_SkipsWhenOnlyProtected(t *testing.T) {
+func TestUpdateCategoryNpm_SkipsWhenOnlyProtected(t *testing.T) {
 	items := []*model.Item{
 		{Name: "opencode-ai", Category: model.CatNpm, Status: model.StatusOutdated},
 		{Name: "@opencode-ai/cli", Category: model.CatNpm, Status: model.StatusOutdated},
 		{Name: "@opencode/cli", Category: model.CatNpm, Status: model.StatusOutdated},
 	}
-	results := batchNpmUpgrade(context.Background(), items, SilentOptions())
+	results := UpdateCategory(context.Background(), model.CatNpm, items, SilentOptions())
 	if len(results) != 3 {
 		t.Fatalf("expected 3 results, got %d", len(results))
 	}

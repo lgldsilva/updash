@@ -172,30 +172,3 @@ func parseVersionParts(ver string) []int {
 	}
 	return nums
 }
-
-// SDKMANCleanSource provides cleanup scanning for SDKMAN.
-type SDKMANCleanSource struct{}
-
-func (s *SDKMANCleanSource) Category() model.Category { return model.CatSDKClean }
-func (s *SDKMANCleanSource) Label() string            { return "SDKMAN Cleanup" }
-func (s *SDKMANCleanSource) Icon() string             { return "🧹" }
-
-func (s *SDKMANCleanSource) Scan(ctx context.Context, plat model.PlatformInfo) ([]*model.Item, error) {
-	src := &SDKMANSource{}
-	items, err := src.Scan(ctx, plat)
-	if err != nil {
-		return items, err
-	}
-	var cleanItems []*model.Item
-	for _, it := range items {
-		if it.Status == model.StatusCleanCandidate {
-			cleanItems = append(cleanItems, it)
-		}
-	}
-	if len(cleanItems) == 0 {
-		cleanItems = append(cleanItems, &model.Item{
-			Name: binSDKMAN, Category: model.CatSDKClean, Status: model.StatusOK, CurrentVer: "nothing to clean",
-		})
-	}
-	return cleanItems, nil
-}

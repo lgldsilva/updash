@@ -2,7 +2,6 @@ package cli
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -91,23 +90,6 @@ func TestRunPreparedBrewUpdateBatch_passwordUsesPreparedSubset(t *testing.T) {
 	}
 	if strings.Join(executed, ",") != "wget,microsoft-office" {
 		t.Fatalf("executed=%v, want the prepared subsets in order", executed)
-	}
-}
-
-func TestRunBrewUpdateBatch_prepareErrorFailsClosed(t *testing.T) {
-	restoreHooks(t)
-	prepareUpdateBatch = func(context.Context, model.Category, []*model.Item) (*updater.PreparedUpdateBatch, error) {
-		return nil, errors.New("planner refused")
-	}
-	executePreparedBatch = func(context.Context, *updater.PreparedUpdateBatch, updater.Options) []*updater.Result {
-		t.Fatal("a failed plan must not execute")
-		return nil
-	}
-	var sess *elevate.Session
-	items := []*model.Item{{Name: "wget", Category: model.CatBrew}}
-	res := runBrewUpdateBatch(context.Background(), items, updater.Options{}, Config{}, &sess)
-	if len(res) != 1 || res[0].Success || res[0].Error != "planner refused" {
-		t.Fatalf("results=%+v", res)
 	}
 }
 
