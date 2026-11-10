@@ -62,7 +62,7 @@ func TestCleanSDKMAN_RefusesWithoutKeepVersion(t *testing.T) {
 	if r.Success || !strings.Contains(r.Error, "version to keep") {
 		t.Fatalf("expected refusal, got %+v", r)
 	}
-	if n := len(log.calls()); n != 0 {
+	if len(log.calls()) != 0 {
 		t.Fatalf("expected no commands, got %v", log.calls())
 	}
 }
@@ -94,7 +94,7 @@ func TestCleanSDKMAN_RefusesWhenCurrentIsNotASymlink(t *testing.T) {
 	if r.Success || !strings.Contains(r.Error, "sdk default") {
 		t.Fatalf("expected refusal, got %+v", r)
 	}
-	if n := len(log.calls()); n != 0 {
+	if len(log.calls()) != 0 {
 		t.Fatalf("expected no commands, got %v", log.calls())
 	}
 }
