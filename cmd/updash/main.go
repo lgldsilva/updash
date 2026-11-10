@@ -119,63 +119,59 @@ func runStartup(ctx context.Context, mode string, cfg cli.Config) upgrade.Startu
 	return res
 }
 
+// modeFlags select the run mode; the last one given wins.
+var modeFlags = map[string]string{
+	"--check": "check", "-c": "check",
+	"--update": "update",
+	"--clean":  "clean",
+	"--all":    "all", "-a": "all",
+	"--help": "help", "-h": "help",
+	"--version": "version", "-v": "version",
+	"--env-defaults": "env-defaults",
+	"--update-self":  "update-self", "-u": "update-self",
+	"--upgrade":       "upgrade",
+	"--check-upgrade": "check-upgrade",
+}
+
+// configFlags are boolean options that adjust cli.Config.
+var configFlags = map[string]func(*cli.Config){
+	"--dry-run":           func(c *cli.Config) { c.DryRun = true },
+	"--quiet":             func(c *cli.Config) { c.Verbose = false },
+	"-q":                  func(c *cli.Config) { c.Verbose = false },
+	"--verbose":           func(c *cli.Config) { c.Verbose = true },
+	"--skip-password":     func(c *cli.Config) { c.SkipPassword = true },
+	"--skip-auto-upgrade": func(c *cli.Config) { c.SkipAutoUpgrade = true },
+	"--strict":            func(c *cli.Config) { c.Strict = true },
+	"--json":              func(c *cli.Config) { c.JSON = true },
+}
+
 func parseArgs(args []string) (mode string, cfg cli.Config, err error) {
 	cfg.Verbose = true
 	mode = "tui"
-	wantUpdate, wantClean := false, false
+	seen := make(map[string]bool)
 
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
-		switch arg {
-		case "--check", "-c":
-			mode = "check"
-		case "--update":
-			wantUpdate = true
-			mode = "update"
-		case "--clean":
-			wantClean = true
-			mode = "clean"
-		case "--all", "-a":
-			mode = "all"
-		case "--help", "-h":
-			mode = "help"
-		case "--version", "-v":
-			mode = "version"
-		case "--env-defaults":
-			mode = "env-defaults"
-		case "--update-self", "-u":
-			mode = "update-self"
-		case "--upgrade":
-			mode = "upgrade"
-		case "--check-upgrade":
-			mode = "check-upgrade"
-		case "--dry-run":
-			cfg.DryRun = true
-		case "--only":
-			if i+1 >= len(args) {
-				return "", cfg, fmt.Errorf("--only requires a category name")
-			}
-			i++
-			cfg.Only = args[i]
-		case "--quiet", "-q":
-			cfg.Verbose = false
-		case "--verbose":
-			cfg.Verbose = true
-		case "--skip-password":
-			cfg.SkipPassword = true
-		case "--skip-auto-upgrade":
-			cfg.SkipAutoUpgrade = true
-		case "--strict":
-			cfg.Strict = true
-		case "--json":
-			cfg.JSON = true
-		default:
+		if m, ok := modeFlags[arg]; ok {
+			mode, seen[m] = m, true
+			continue
+		}
+		if set, ok := configFlags[arg]; ok {
+			set(&cfg)
+			continue
+		}
+		if arg != "--only" {
 			return "", cfg, fmt.Errorf("unknown argument: %s (try --help)", arg)
 		}
+		if i+1 >= len(args) {
+			return "", cfg, fmt.Errorf("--only requires a category name")
+		}
+		i++
+		cfg.Only = args[i]
 	}
 	// --update --clean (either order) is --all: update everything, then clean.
 	// A later exclusive mode (--check, --help, …) still wins.
-	if wantUpdate && wantClean && (mode == "update" || mode == "clean") {
+	if seen["update"] && seen["clean"] && (mode == "update" || mode == "clean") {
 		mode = "all"
 	}
 	if err := cli.ValidateJSONMode(mode, cfg.JSON); err != nil {
