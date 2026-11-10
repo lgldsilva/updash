@@ -199,34 +199,8 @@ func CollectProjectBuildPaths(ctx context.Context, projectsDir string, maxDays i
 	if err := ctx.Err(); err != nil {
 		return nil, 0, nil, err
 	}
-	// Syntactic safety runs before any filesystem access so an unsafe root is
-	// rejected even when it does not exist.
-	abs, err := filepath.Abs(projectsDir)
-	if err != nil {
-		return nil, 0, nil, err
-	}
-	if err := checkProjectsRootSyntax(abs); err != nil {
-		return nil, 0, nil, err
-	}
-	info, err := os.Stat(projectsDir)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, 0, nil, nil
-		}
-		return nil, 0, nil, err
-	}
-	if !info.IsDir() {
-		return nil, 0, nil, nil
-	}
-	root, err := canonicalRoot(projectsDir)
-	if err != nil {
-		return nil, 0, nil, err
-	}
-	if err := validateProjectsRoot(root); err != nil {
-		return nil, 0, nil, err
-	}
-	entries, err := os.ReadDir(root)
-	if err != nil {
+	entries, root, err := readProjectsRoot(projectsDir)
+	if err != nil || entries == nil {
 		return nil, 0, nil, err
 	}
 
@@ -237,8 +211,7 @@ func CollectProjectBuildPaths(ctx context.Context, projectsDir string, maxDays i
 		if err := ctx.Err(); err != nil {
 			return out, total, partial, err
 		}
-		// Skip symlinks (never follow out of the tree), non-dirs, dotfiles.
-		if entry.Type()&fs.ModeSymlink != 0 || !entry.IsDir() || entry.Name()[0] == '.' {
+		if !isProjectEntry(entry) {
 			continue
 		}
 		cands, sz, errs, err := collectOneProject(ctx, root, entry.Name(), maxDays, now)
@@ -250,6 +223,42 @@ func CollectProjectBuildPaths(ctx context.Context, projectsDir string, maxDays i
 		total += sz
 	}
 	return out, total, partial, nil
+}
+
+// readProjectsRoot validates projectsDir and lists its entries from the
+// canonicalized root. A missing or non-directory root yields nil entries and
+// no error. Syntactic safety runs before any filesystem access so an unsafe
+// root is rejected even when it does not exist.
+func readProjectsRoot(projectsDir string) ([]fs.DirEntry, string, error) {
+	abs, err := filepath.Abs(projectsDir)
+	if err != nil {
+		return nil, "", err
+	}
+	if err := checkProjectsRootSyntax(abs); err != nil {
+		return nil, "", err
+	}
+	info, err := os.Stat(projectsDir)
+	if os.IsNotExist(err) {
+		return nil, "", nil
+	}
+	if err != nil || !info.IsDir() {
+		return nil, "", err
+	}
+	root, err := canonicalRoot(projectsDir)
+	if err != nil {
+		return nil, "", err
+	}
+	if err := validateProjectsRoot(root); err != nil {
+		return nil, "", err
+	}
+	entries, err := os.ReadDir(root)
+	return entries, root, err
+}
+
+// isProjectEntry skips symlinks (never follow out of the tree), non-dirs and
+// dotfiles.
+func isProjectEntry(entry fs.DirEntry) bool {
+	return entry.Type()&fs.ModeSymlink == 0 && entry.IsDir() && entry.Name()[0] != '.'
 }
 
 // collectOneProject walks a single project directory. A non-nil error is
@@ -274,13 +283,10 @@ func collectOneProject(ctx context.Context, root, name string, maxDays int, now 
 		if !d.IsDir() || path == projPath {
 			return nil
 		}
-		switch dName := d.Name(); {
-		case dName == ".git" || dName == ".svn":
+		switch projectDirAction(d.Name(), projIsStale) {
+		case dirSkip:
 			return filepath.SkipDir
-		case dName == "node_modules" && !projIsStale:
-			// Active project: keep node_modules and do not descend into it.
-			return filepath.SkipDir
-		case dName == "node_modules" || isProjectBuildDir(dName):
+		case dirCollect:
 			return collectBuildDir(ctx, root, path, &out, &total, &partial)
 		default:
 			return nil
@@ -290,6 +296,29 @@ func collectOneProject(ctx context.Context, root, name string, maxDays int, now 
 		return out, total, partial, walkErr
 	}
 	return out, total, partial, nil
+}
+
+type dirAction int
+
+const (
+	dirDescend dirAction = iota
+	dirSkip
+	dirCollect
+)
+
+// projectDirAction decides what the project walk does with a directory:
+// VCS metadata and an active project's node_modules are skipped, build dirs
+// (and a stale project's node_modules) are collected, anything else descends.
+func projectDirAction(name string, projIsStale bool) dirAction {
+	switch {
+	case name == ".git" || name == ".svn":
+		return dirSkip
+	case name == "node_modules" && !projIsStale:
+		return dirSkip
+	case name == "node_modules" || isProjectBuildDir(name):
+		return dirCollect
+	}
+	return dirDescend
 }
 
 // collectBuildDir sizes and records one build directory, then stops the
