@@ -3,6 +3,7 @@ package updater
 import (
 	"bytes"
 	"context"
+	"os"
 	"os/exec"
 	"path/filepath"
 
@@ -21,6 +22,10 @@ var outputRunner = func(ctx context.Context, name string, args ...string) ([]byt
 var npmPrefixRunner = func(ctx context.Context) ([]byte, error) {
 	return exec.CommandContext(ctx, npmCommand, "config", "get", "prefix").Output()
 }
+
+// geteuid reports the effective user id. Variable so tests can plan for root
+// and non-root hosts without changing identity.
+var geteuid = os.Geteuid
 
 // lookPath resolves a binary on PATH. Variable so tests can stub it.
 var lookPath = exec.LookPath

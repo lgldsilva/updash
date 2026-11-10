@@ -164,7 +164,9 @@ func planUpdateCommands(ctx context.Context, cat model.Category, items []*model.
 	case model.CatZypper:
 		return globalPlan("zypper", []string{"--non-interactive", commandUpdate}, true)
 	case model.CatApk:
-		return globalPlan("apk", []string{commandUpgrade}, false)
+		// apk locks a root-owned database; Alpine containers often run as root
+		// without sudo installed, so elevate only when not already root.
+		return globalPlan("apk", []string{commandUpgrade}, geteuid() != 0)
 	case model.CatPacman:
 		if lookPath != nil {
 			if _, err := lookPath("yay"); err == nil {
