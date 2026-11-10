@@ -137,15 +137,7 @@ func planCategory(ctx context.Context, cat model.Category, items []*model.Item) 
 	case model.CatBrew:
 		return exactPlans("brew", []string{commandUpgrade, "--greedy"}, items)
 	case model.CatMAS:
-		plans := make([]CommandPlan, 0, len(items))
-		for _, item := range items {
-			if item.PackageID == "" {
-				plans = append(plans, manualPlan("MAS update requires the App Store ID"))
-				continue
-			}
-			plans = append(plans, CommandPlan{Name: "mas", Args: []string{commandUpdate, item.PackageID}, Scope: CommandScopeExact})
-		}
-		return plans, nil
+		return masPlans(items)
 	case model.CatApt:
 		names, err := planItemNames(items)
 		if err != nil {
@@ -156,35 +148,16 @@ func planCategory(ctx context.Context, cat model.Category, items []*model.Item) 
 			{Name: "apt-get", Args: append([]string{"install", "--only-upgrade", flagYes}, names...), Scope: CommandScopeExact, Elevated: true},
 		}, nil
 	case model.CatWinget:
-		plans := make([]CommandPlan, 0, len(items))
-		for _, item := range items {
-			if item.PackageID == "" {
-				return nil, fmt.Errorf("winget update for %q requires PackageID", item.Name)
-			}
-			plans = append(plans, CommandPlan{
-				Name:  "winget",
-				Args:  []string{commandUpgrade, "--exact", "--id", item.PackageID, "--accept-package-agreements", "--accept-source-agreements"},
-				Scope: CommandScopeExact,
-			})
-		}
-		return plans, nil
+		return wingetPlans(items)
 	case model.CatDnf:
-		if tool := rpmToolName(); tool == "yum" {
-			return globalPlan(tool, []string{commandUpdate, flagYes}, true)
-		}
-		return globalPlan(rpmToolName(), []string{commandUpgrade, "--refresh", flagYes}, true)
+		return dnfPlan()
 	case model.CatZypper:
 		return globalPlan("zypper", []string{"--non-interactive", commandUpdate}, true)
 	case model.CatApk:
 		// apk locks a root-owned database; planUpdateCommands drops sudo for root.
 		return globalPlan("apk", []string{commandUpgrade}, true)
 	case model.CatPacman:
-		if lookPath != nil {
-			if _, err := lookPath("yay"); err == nil {
-				return globalPlan("yay", []string{"-Syu", "--noconfirm"}, false)
-			}
-		}
-		return globalPlan("pacman", []string{"-Syu", "--noconfirm"}, true)
+		return pacmanPlan()
 	case model.CatFlatpak:
 		return globalPlan("flatpak", []string{commandUpdate, flagYes}, false)
 	case model.CatSnap:
@@ -202,14 +175,7 @@ func planCategory(ctx context.Context, cat model.Category, items []*model.Item) 
 		}
 		return []CommandPlan{{Name: "scoop", Args: append([]string{commandUpdate}, names...), Scope: CommandScopeExact}}, nil
 	case model.CatNpm:
-		if _, err := planItemNames(items); err != nil {
-			return nil, err
-		}
-		updatable, _ := partitionNpmItems(items)
-		if len(updatable) == 0 {
-			return []CommandPlan{manualPlan(npmManagedElsewhereNote)}, nil
-		}
-		return npmPrefixGroupPlans(ctx, updatable)
+		return npmPlans(ctx, items)
 	case model.CatPnpm:
 		return exactPlans("pnpm", []string{commandUpdate, flagGlobal}, items)
 	case model.CatBun:
@@ -227,10 +193,7 @@ func planCategory(ctx context.Context, cat model.Category, items []*model.Item) 
 	case model.CatSDKMAN:
 		return bashGlobalPlan("source $HOME/.sdkman/bin/sdkman-init.sh && echo \"Y\" | sdk upgrade", "install bash or run 'sdk upgrade' manually")
 	case model.CatNvm:
-		if runtime.GOOS == "windows" {
-			return []CommandPlan{manualPlan("update nvm-windows via its installer")}, nil
-		}
-		return bashGlobalPlan("source $HOME/.nvm/nvm.sh && nvm install-latest-npm", "install bash or update nvm manually")
+		return nvmPlan()
 	case model.CatOmz:
 		return omzGlobalPlan()
 	case model.CatGHExt:
@@ -242,6 +205,71 @@ func planCategory(ctx context.Context, cat model.Category, items []*model.Item) 
 	default:
 		return []CommandPlan{manualPlan(fmt.Sprintf("no automatic updater for category %s", cat))}, nil
 	}
+}
+
+func masPlans(items []*model.Item) ([]CommandPlan, error) {
+	plans := make([]CommandPlan, 0, len(items))
+	for _, item := range items {
+		if item.PackageID == "" {
+			plans = append(plans, manualPlan("MAS update requires the App Store ID"))
+			continue
+		}
+		plans = append(plans, CommandPlan{Name: "mas", Args: []string{commandUpdate, item.PackageID}, Scope: CommandScopeExact})
+	}
+	return plans, nil
+}
+
+func wingetPlans(items []*model.Item) ([]CommandPlan, error) {
+	plans := make([]CommandPlan, 0, len(items))
+	for _, item := range items {
+		if item.PackageID == "" {
+			return nil, fmt.Errorf("winget update for %q requires PackageID", item.Name)
+		}
+		plans = append(plans, CommandPlan{
+			Name:  "winget",
+			Args:  []string{commandUpgrade, "--exact", "--id", item.PackageID, "--accept-package-agreements", "--accept-source-agreements"},
+			Scope: CommandScopeExact,
+		})
+	}
+	return plans, nil
+}
+
+// dnfPlan keeps the historical rpm tool probe: yum updates in place, and any
+// other tool (dnf, dnf5) refreshes metadata before upgrading.
+func dnfPlan() ([]CommandPlan, error) {
+	if tool := rpmToolName(); tool == "yum" {
+		return globalPlan(tool, []string{commandUpdate, flagYes}, true)
+	}
+	return globalPlan(rpmToolName(), []string{commandUpgrade, "--refresh", flagYes}, true)
+}
+
+// pacmanPlan prefers yay when it is on PATH. yay is not elevated; pacman is,
+// unless planUpdateCommands is already running as root.
+func pacmanPlan() ([]CommandPlan, error) {
+	if lookPath != nil {
+		if _, err := lookPath("yay"); err == nil {
+			return globalPlan("yay", []string{"-Syu", "--noconfirm"}, false)
+		}
+	}
+	return globalPlan("pacman", []string{"-Syu", "--noconfirm"}, true)
+}
+
+func npmPlans(ctx context.Context, items []*model.Item) ([]CommandPlan, error) {
+	if _, err := planItemNames(items); err != nil {
+		return nil, err
+	}
+	updatable, _ := partitionNpmItems(items)
+	if len(updatable) == 0 {
+		return []CommandPlan{manualPlan(npmManagedElsewhereNote)}, nil
+	}
+	return npmPrefixGroupPlans(ctx, updatable)
+}
+
+func nvmPlan() ([]CommandPlan, error) {
+	if runtime.GOOS == "windows" {
+		return []CommandPlan{manualPlan("update nvm-windows via its installer")}, nil
+	}
+	return bashGlobalPlan("source $HOME/.nvm/nvm.sh && nvm install-latest-npm", "install bash or update nvm manually")
 }
 
 func globalPlan(name string, args []string, elevated bool) ([]CommandPlan, error) {
