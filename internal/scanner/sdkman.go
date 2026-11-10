@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/lgldsilva/updash/internal/model"
+	"github.com/lgldsilva/updash/internal/retention"
 )
 
 // SDKMANSource scans SDKMAN candidates.
@@ -50,8 +51,9 @@ func scanSDKCandidate(verDir, candidate string) []*model.Item {
 		return nil
 	}
 	var items []*model.Item
+	defaultVer := retention.SDKMANDefaultVersion(verDir)
 	for majorVer, latest := range groupLatestPerMajor(installed) {
-		items = append(items, sdkMajorItem(candidate, majorVer, latest, installed))
+		items = append(items, sdkMajorItem(candidate, majorVer, latest, defaultVer, installed))
 	}
 	return items
 }
@@ -70,14 +72,15 @@ func listSDKInstalled(verDir string) []string {
 	return installed
 }
 
-func sdkMajorItem(candidate, majorVer, latest string, installed []string) *model.Item {
-	totalForMajor := 0
+// sdkMajorItem counts what cleanup would remove for one major: everything but
+// the newest and the `current` default (the cleaner keeps both).
+func sdkMajorItem(candidate, majorVer, latest, defaultVer string, installed []string) *model.Item {
+	removeCount := 0
 	for _, ver := range installed {
-		if getMajorVersion(ver) == majorVer {
-			totalForMajor++
+		if getMajorVersion(ver) == majorVer && ver != latest && ver != defaultVer {
+			removeCount++
 		}
 	}
-	removeCount := totalForMajor - 1
 	status := model.StatusOK
 	if removeCount > 0 {
 		status = model.StatusCleanCandidate
@@ -88,7 +91,7 @@ func sdkMajorItem(candidate, majorVer, latest string, installed []string) *model
 		CurrentVer:  latest,
 		Status:      status,
 		Reclaimable: fmt.Sprintf("%d versions", removeCount),
-		KeepPolicy:  "keep latest per major",
+		KeepPolicy:  "keep latest per major + sdk default",
 		RemoveCount: removeCount,
 	}
 }

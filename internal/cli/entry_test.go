@@ -603,7 +603,9 @@ func TestRunUpdateBatches_linux(t *testing.T) {
 		return []*updater.Result{{Item: items[0], Success: true}}
 	}
 	canElevateNP = func(context.Context) bool { return true }
-	batch, err := updater.PrepareUpdateBatch(context.Background(), model.CatNpm, []*model.Item{{Name: "x", Category: model.CatNpm}})
+	// An explicit system prefix keeps planning pure: no `npm config get prefix`
+	// probe against the host (it took ~20s and depended on the local npm).
+	batch, err := updater.PrepareUpdateBatch(context.Background(), model.CatNpm, []*model.Item{{Name: "x", Category: model.CatNpm, Prefix: "/usr/local"}})
 	if err != nil {
 		t.Fatal(err)
 	}

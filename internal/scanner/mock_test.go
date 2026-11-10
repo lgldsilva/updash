@@ -3,7 +3,9 @@ package scanner
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -50,13 +52,7 @@ func mockExecCommand(ctx context.Context, name string, args ...string) ([]byte, 
 	if ok {
 		return res.stdout, res.err
 	}
-	// Fall back to real execution for LookPath etc.
-	return realExecCommand(ctx, name, args...)
-}
-
-// realExecCommand is the original implementation.
-var realExecCommand = func(ctx context.Context, name string, args ...string) ([]byte, error) {
-	return defaultExecCommand(ctx, name, args...)
+	return nil, fmt.Errorf("unmocked command: %s %v: %w", name, args, exec.ErrNotFound)
 }
 
 // defaultExecCommand is the real os/exec implementation, saved at init.
@@ -66,10 +62,26 @@ var (
 	defaultExecCommandEnv func(ctx context.Context, env []string, name string, args ...string) ([]byte, error)
 )
 
+// realExec* keep the production runner; only withRealExec hands it out.
+var (
+	realExecCommand    func(ctx context.Context, name string, args ...string) ([]byte, error)
+	realExecCombined   func(ctx context.Context, name string, args ...string) ([]byte, error)
+	realExecCommandEnv func(ctx context.Context, env []string, name string, args ...string) ([]byte, error)
+)
+
 func init() {
+	realExecCommand, realExecCombined, realExecCommandEnv = execCommand, execCombined, execCommandEnv
 	defaultExecCommand = execCommand
 	defaultExecCombined = execCombined
 	defaultExecCommandEnv = execCommandEnv
+}
+
+// withRealExec opts one test into the production runner. Use it only with a
+// PATH/fixture the test fully controls (runner semantics, fake binaries).
+func withRealExec(t *testing.T) {
+	t.Helper()
+	execCommand, execCombined, execCommandEnv = realExecCommand, realExecCombined, realExecCommandEnv
+	t.Cleanup(enableMocks)
 }
 
 // enableMocks replaces execCommand with the mock.
@@ -88,7 +100,20 @@ func disableMocks() {
 	execCommandEnv = defaultExecCommandEnv
 }
 
-// TestMain is not used — we call enable/disable in each test.
+// TestMain makes the package hermetic: scanners only read, but a test that
+// reached the real host would depend on whatever is installed there and on
+// the npm registry (slow, flaky, host-specific). Every exec seam starts on the
+// strict mock; disableMocks restores the strict mock too, never real exec.
+// Tests that exercise the real runner call spawn/run helpers directly.
+func TestMain(m *testing.M) {
+	defaultExecCommand = mockExecCommand
+	defaultExecCombined = mockExecCommand
+	defaultExecCommandEnv = func(ctx context.Context, _ []string, name string, args ...string) ([]byte, error) {
+		return mockExecCommand(ctx, name, args...)
+	}
+	enableMocks()
+	os.Exit(m.Run())
+}
 
 // --- Brew Scanner ---
 

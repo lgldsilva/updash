@@ -108,14 +108,14 @@ func TestCleanSDKMAN_RemovesOlderVersion(t *testing.T) {
 		Category:   model.CatSDKMAN,
 		CurrentVer: "21.0.2-tem",
 	}
+	log := recordExec(t)
 	r := cleanSDKMAN(context.Background(), item, SilentOptions())
-	if r == nil {
-		t.Fatal("nil result")
-	} else {
-		// sdk uninstall may fail without SDKMAN installed; still exercises removal path
-		if r.Output == "" && r.Error == "" {
-			t.Fatal("expected some output or error")
-		}
+	if !r.Success || item.Status != model.StatusCleaned {
+		t.Fatalf("expected success, got %+v", r)
+	}
+	got := log.joined()
+	if !strings.Contains(got, "sdk uninstall java 21.0.1-tem") || strings.Contains(got, "21.0.2-tem") {
+		t.Fatalf("expected only 21.0.1-tem uninstalled, got %q", got)
 	}
 }
 

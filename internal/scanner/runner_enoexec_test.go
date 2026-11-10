@@ -20,6 +20,7 @@ func writeShebangLessTool(t *testing.T, dir, name string) string {
 }
 
 func TestSpawnRetriesShebangLessScriptUnderSh(t *testing.T) {
+	withRealExec(t)
 	if runtime.GOOS == "windows" {
 		t.Skip("sh fallback is unix-only")
 	}
@@ -42,6 +43,7 @@ func TestSpawnRetriesShebangLessScriptUnderSh(t *testing.T) {
 }
 
 func TestSpawnRetriesBareNameViaPath(t *testing.T) {
+	withRealExec(t)
 	if runtime.GOOS == "windows" {
 		t.Skip("sh fallback is unix-only")
 	}
@@ -64,6 +66,7 @@ func TestSpawnRetriesBareNameViaPath(t *testing.T) {
 }
 
 func TestSpawnDoesNotRetryOtherErrors(t *testing.T) {
+	withRealExec(t)
 	if runtime.GOOS == "windows" {
 		t.Skip("sh fallback is unix-only")
 	}
@@ -113,6 +116,7 @@ func requireUnixSh(t *testing.T) {
 }
 
 func TestProbeOutputSemantics(t *testing.T) {
+	withRealExec(t)
 	requireUnixSh(t)
 	dir := t.TempDir()
 
@@ -163,6 +167,7 @@ func TestProbeOutputSemantics(t *testing.T) {
 }
 
 func TestExecCommandEnvForwardsEnvOnENOEXECRetry(t *testing.T) {
+	withRealExec(t)
 	requireUnixSh(t)
 	dir := t.TempDir()
 	path := writeProbeScript(t, dir, "envtool", false, "printf '%s\\n' \"$"+probeEnvKey+"\"\n")

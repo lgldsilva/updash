@@ -121,3 +121,28 @@ func TestVSCodeCleanSource_Scan_WithTempDirs(t *testing.T) {
 		t.Error("expected to find a duplicate extension, but none found")
 	}
 }
+
+// Regression: the SDKMAN default (`current`) must not be counted as removable.
+func TestSDKMANScan_DefaultVersionNotCountedAsRemovable(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	javaDir := filepath.Join(home, ".sdkman", "candidates", "java")
+	for _, v := range []string{"21.0.1-tem", "21.0.2-tem", "21.0.3-tem"} {
+		if err := os.MkdirAll(filepath.Join(javaDir, v), 0o750); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.Symlink(filepath.Join(javaDir, "21.0.1-tem"), filepath.Join(javaDir, "current")); err != nil {
+		t.Fatal(err)
+	}
+	items, err := (&SDKMANSource{}).Scan(context.Background(), model.PlatformInfo{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 1 {
+		t.Fatalf("want 1 item, got %d", len(items))
+	}
+	if items[0].RemoveCount != 1 || items[0].Reclaimable != "1 versions" {
+		t.Fatalf("want 1 removable (default kept), got count=%d reclaim=%q", items[0].RemoveCount, items[0].Reclaimable)
+	}
+}
