@@ -185,3 +185,54 @@ func TestCleanVSCodeExt_ParseError(t *testing.T) {
 		t.Fatal("expected parse failure")
 	}
 }
+
+// Regression: after "Install Specific Version…" (a downgrade) the editor's
+// extensions.json points at the older dir and the newer one is obsolete.
+// Cleanup must keep the active install, not the highest version.
+func TestCleanVSCodeExt_KeepsActiveDowngradedVersion(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	extRoot := filepath.Join(tmp, ".antigravity", "extensions")
+	for _, name := range []string{"ms-python.python-2026.4.0-universal", "ms-python.python-2026.3.0-universal"} {
+		if err := os.MkdirAll(filepath.Join(extRoot, name), 0o750); err != nil {
+			t.Fatal(err)
+		}
+	}
+	manifest := `[{"identifier":{"id":"ms-python.python"},"version":"2026.3.0","relativeLocation":"ms-python.python-2026.3.0-universal"}]`
+	if err := os.WriteFile(filepath.Join(extRoot, "extensions.json"), []byte(manifest), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	item := &model.Item{Name: "ext: ms-python.python", Category: model.CatVSCodeClean}
+	if r := cleanVSCodeExt(context.Background(), item, SilentOptions()); !r.Success {
+		t.Fatalf("expected success, got %+v", r)
+	}
+	if _, err := os.Stat(filepath.Join(extRoot, "ms-python.python-2026.3.0-universal")); err != nil {
+		t.Fatalf("active (downgraded) version was removed: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(extRoot, "ms-python.python-2026.4.0-universal")); !os.IsNotExist(err) {
+		t.Fatal("inactive newer version should be removed")
+	}
+}
+
+func TestCleanVSCodeExt_CorruptManifestRemovesNothing(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	extRoot := filepath.Join(tmp, ".antigravity", "extensions")
+	for _, name := range []string{"a.b-2.0.0", "a.b-1.0.0"} {
+		if err := os.MkdirAll(filepath.Join(extRoot, name), 0o750); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(extRoot, "extensions.json"), []byte("{broken"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	item := &model.Item{Name: "ext: a.b", Category: model.CatVSCodeClean}
+	if r := cleanVSCodeExt(context.Background(), item, SilentOptions()); r.Success {
+		t.Fatalf("expected failure on unreadable manifest, got %+v", r)
+	}
+	for _, name := range []string{"a.b-2.0.0", "a.b-1.0.0"} {
+		if _, err := os.Stat(filepath.Join(extRoot, name)); err != nil {
+			t.Fatalf("%s removed despite unreadable manifest", name)
+		}
+	}
+}

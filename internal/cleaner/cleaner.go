@@ -453,10 +453,13 @@ func cleanVSCodeExt(ctx context.Context, item *model.Item, opts Options) *Result
 		return &Result{Item: item, Success: false, Error: "cannot parse extension name"}
 	}
 	var allOutput strings.Builder
+	failed := false
 	for _, extDir := range candidates {
-		pruneOldExtVersions(extDir, extName, &allOutput)
+		if pruneOldExtVersions(extDir, extName, &allOutput) {
+			failed = true
+		}
 	}
-	if strings.Contains(allOutput.String(), "error removing") {
+	if failed {
 		item.Status = model.StatusError
 		return &Result{Item: item, Success: false, Error: "some extension versions could not be removed", Output: allOutput.String()}
 	}
@@ -478,10 +481,14 @@ func vscodeExtDirs() []string {
 	return candidates
 }
 
-func pruneOldExtVersions(extDir, extName string, out *strings.Builder) {
+// pruneOldExtVersions removes extName's directories that the editor no
+// longer uses, keeping the active install from extensions.json (or the newest
+// when there is no manifest). It reports whether anything failed; an
+// unreadable manifest removes nothing.
+func pruneOldExtVersions(extDir, extName string, out *strings.Builder) bool {
 	entries, err := os.ReadDir(extDir)
 	if err != nil {
-		return
+		return false
 	}
 	re := regexp.MustCompile(fmt.Sprintf(`^%s-(\d+\.\d+\.\d+)(?:-.+)?$`, regexp.QuoteMeta(extName)))
 	var versions []string
@@ -490,19 +497,34 @@ func pruneOldExtVersions(extDir, extName string, out *strings.Builder) {
 			versions = append(versions, entry.Name())
 		}
 	}
+	if len(versions) <= 1 {
+		return false
+	}
+	active, _, err := retention.VSCodeActiveExtensionDirs(extDir)
+	if err != nil {
+		fmt.Fprintf(out, "error removing %s: cannot tell the active version: %v\n", extName, err)
+		return true
+	}
 	sort.Slice(versions, func(i, j int) bool {
 		return compareVersions(extractVersion(versions[i]), extractVersion(versions[j])) > 0
 	})
-	if len(versions) <= 1 {
-		return
+	keep := make(map[string]bool)
+	for _, d := range retention.KeepExtensionDirs(versions, active) {
+		keep[d] = true
 	}
-	for _, old := range versions[1:] {
+	failed := false
+	for _, old := range versions {
+		if keep[old] {
+			continue
+		}
 		if err := os.RemoveAll(filepath.Join(extDir, old)); err != nil {
 			fmt.Fprintf(out, "error removing %s: %s\n", old, err)
+			failed = true
 		} else {
 			fmt.Fprintf(out, "removed %s\n", old)
 		}
 	}
+	return failed
 }
 
 // --- Helpers ---
