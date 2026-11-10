@@ -98,3 +98,19 @@ func TestCleanSDKMAN_RefusesWhenCurrentIsNotASymlink(t *testing.T) {
 		t.Fatalf("expected no commands, got %v", log.calls())
 	}
 }
+
+func TestCleanSDKMAN_ReportsBytesFreed(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	mkSDKCandidate(t, home, "java", "", "21.0.1-tem", "21.0.2-tem")
+	blob := filepath.Join(home, ".sdkman", "candidates", "java", "21.0.1-tem", "lib")
+	if err := os.WriteFile(blob, make([]byte, 2048), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	recordExec(t)
+	item := &model.Item{Name: "java 21", Category: model.CatSDKMAN, CurrentVer: "21.0.2-tem"}
+	r := cleanSDKMAN(context.Background(), item, SilentOptions())
+	if !r.Success || r.BytesFreed != 2048 {
+		t.Fatalf("want 2048 bytes freed, got %+v", r)
+	}
+}

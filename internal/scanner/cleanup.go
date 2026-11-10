@@ -13,6 +13,7 @@ import (
 
 	"github.com/lgldsilva/updash/internal/config"
 	"github.com/lgldsilva/updash/internal/model"
+	"github.com/lgldsilva/updash/internal/retention"
 	"github.com/lgldsilva/updash/internal/sizefmt"
 )
 
@@ -431,8 +432,7 @@ func (s *VSCodeCleanSource) Label() string            { return s.LabelName }
 func (s *VSCodeCleanSource) Icon() string             { return cleanupIcon }
 
 func (s *VSCodeCleanSource) Scan(ctx context.Context, plat model.PlatformInfo) ([]*model.Item, error) {
-	_, err := os.Stat(s.ExtDir)
-	if err != nil {
+	if _, err := os.Stat(s.ExtDir); err != nil {
 		if !os.IsNotExist(err) {
 			return []*model.Item{infoItem(s.LabelName, model.CatVSCodeClean, "unable to inspect extensions")}, nil
 		}
@@ -440,65 +440,88 @@ func (s *VSCodeCleanSource) Scan(ctx context.Context, plat model.PlatformInfo) (
 			{Name: s.LabelName, Category: model.CatVSCodeClean, Status: model.StatusOK, CurrentVer: "no extensions"},
 		}, nil
 	}
-
 	entries, err := os.ReadDir(s.ExtDir)
 	if err != nil {
 		return []*model.Item{infoItem(s.LabelName, model.CatVSCodeClean, "unable to inspect extensions")}, nil
 	}
-
-	// Group by publisher.name and find duplicates
-	type extInfo struct {
-		name    string
-		version string
+	active, hasManifest, err := retention.VSCodeActiveExtensionDirs(s.ExtDir)
+	if err != nil {
+		// Without a readable manifest we cannot tell the live install from an
+		// obsolete one; offer nothing rather than risk the active version.
+		return []*model.Item{infoItem(s.LabelName, model.CatVSCodeClean, "unable to read extensions.json")}, nil
 	}
-	extMap := make(map[string][]extInfo)
-
-	// Regex: publisher.name-version-arch
-	re := regexp.MustCompile(`^([a-zA-Z0-9_.-]+)-(\d+\.\d+\.\d+)(?:-.+)?$`)
-
-	for _, entry := range entries {
-		if !entry.IsDir() {
-			continue
-		}
-		m := re.FindStringSubmatch(entry.Name())
-		if m == nil {
-			continue
-		}
-		fullName := m[1]
-		version := m[2]
-		extMap[fullName] = append(extMap[fullName], extInfo{name: entry.Name(), version: version})
-	}
-
-	var items []*model.Item
-	for extName, versions := range extMap {
-		if len(versions) <= 1 {
-			continue // no duplicates
-		}
-
-		// Sort by version descending
-		sort.Slice(versions, func(i, j int) bool {
-			return compareVersions(versions[i].version, versions[j].version) > 0
-		})
-
-		removeCount := len(versions) - 1
-		items = append(items, &model.Item{
-			Name:        fmt.Sprintf("ext: %s", extName),
-			Category:    model.CatVSCodeClean,
-			CurrentVer:  versions[0].version, // latest kept
-			Reclaimable: fmt.Sprintf("%d old version(s)", removeCount),
-			RemoveCount: removeCount,
-			KeepPolicy:  "keep latest",
-			Status:      model.StatusCleanCandidate,
-		})
-	}
-
+	items := vscodeDuplicateItems(groupExtensionDirs(entries), active, hasManifest)
 	if len(items) == 0 {
 		items = append(items, &model.Item{
 			Name: s.LabelName, Category: model.CatVSCodeClean, Status: model.StatusOK, CurrentVer: "no duplicates",
 		})
 	}
-
 	return items, nil
+}
+
+// extDirVersion is one installed directory of an extension.
+type extDirVersion struct {
+	dir     string
+	version string
+}
+
+// extDirPattern matches publisher.name-version[-platform] directory names.
+var extDirPattern = regexp.MustCompile(`^([a-zA-Z0-9_.-]+)-(\d+\.\d+\.\d+)(?:-.+)?$`)
+
+// groupExtensionDirs groups extension directories by publisher.name, each
+// group sorted newest first.
+func groupExtensionDirs(entries []os.DirEntry) map[string][]extDirVersion {
+	groups := make(map[string][]extDirVersion)
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		if m := extDirPattern.FindStringSubmatch(entry.Name()); m != nil {
+			groups[m[1]] = append(groups[m[1]], extDirVersion{dir: entry.Name(), version: m[2]})
+		}
+	}
+	for _, versions := range groups {
+		sort.Slice(versions, func(i, j int) bool {
+			return compareVersions(versions[i].version, versions[j].version) > 0
+		})
+	}
+	return groups
+}
+
+// vscodeDuplicateItems reports one cleanup candidate per extension with more
+// than one directory, keeping exactly what the cleaner keeps.
+func vscodeDuplicateItems(groups map[string][]extDirVersion, active map[string]bool, hasManifest bool) []*model.Item {
+	policy := "keep latest"
+	if hasManifest {
+		policy = "keep active (extensions.json)"
+	}
+	var items []*model.Item
+	for extName, versions := range groups {
+		if len(versions) <= 1 {
+			continue
+		}
+		dirs := make([]string, len(versions))
+		byDir := make(map[string]string, len(versions))
+		for i, v := range versions {
+			dirs[i] = v.dir
+			byDir[v.dir] = v.version
+		}
+		keep := retention.KeepExtensionDirs(dirs, active)
+		removeCount := len(versions) - len(keep)
+		if removeCount == 0 {
+			continue
+		}
+		items = append(items, &model.Item{
+			Name:        fmt.Sprintf("ext: %s", extName),
+			Category:    model.CatVSCodeClean,
+			CurrentVer:  byDir[keep[0]],
+			Reclaimable: fmt.Sprintf("%d old version(s)", removeCount),
+			RemoveCount: removeCount,
+			KeepPolicy:  policy,
+			Status:      model.StatusCleanCandidate,
+		})
+	}
+	return items
 }
 
 // WindowsTempSource scans Windows temporary files for cleanup.

@@ -126,6 +126,10 @@ func latestPathMtime(root string) (time.Time, error) {
 	return latest, nil
 }
 
+// DirSize returns the apparent size of the regular files under p, without
+// following symlinks. Errors count as zero (best-effort measurement).
+func DirSize(p string) int64 { return dirSize(p) }
+
 func dirSize(root string) int64 {
 	var total int64
 	// WalkDir is best effort: unreadable descendants are skipped while sizing.

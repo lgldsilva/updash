@@ -164,3 +164,39 @@ func TestSDKMANScan_CopiedCurrentOffersNoCleanup(t *testing.T) {
 		t.Fatalf("unknown default must not be a clean candidate: %+v", it)
 	}
 }
+
+func TestVSCodeCleanSource_Scan_RespectsActiveManifest(t *testing.T) {
+	dir := t.TempDir()
+	for _, n := range []string{"a.b-3.0.0", "a.b-2.0.0", "a.b-1.0.0"} {
+		if err := os.Mkdir(filepath.Join(dir, n), 0o750); err != nil {
+			t.Fatal(err)
+		}
+	}
+	manifest := `[{"identifier":{"id":"a.b"},"version":"2.0.0","relativeLocation":"a.b-2.0.0"}]`
+	if err := os.WriteFile(filepath.Join(dir, "extensions.json"), []byte(manifest), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	items, err := (&VSCodeCleanSource{LabelName: "T", ExtDir: dir}).Scan(context.Background(), model.PlatformInfo{})
+	if err != nil || len(items) != 1 {
+		t.Fatalf("items=%+v err=%v", items, err)
+	}
+	if it := items[0]; it.CurrentVer != "2.0.0" || it.RemoveCount != 2 {
+		t.Fatalf("want active 2.0.0 kept and 2 removable, got current=%q remove=%d", it.CurrentVer, it.RemoveCount)
+	}
+}
+
+func TestVSCodeCleanSource_Scan_CorruptManifestIsInfo(t *testing.T) {
+	dir := t.TempDir()
+	for _, n := range []string{"a.b-2.0.0", "a.b-1.0.0"} {
+		if err := os.Mkdir(filepath.Join(dir, n), 0o750); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(dir, "extensions.json"), []byte("{broken"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	items, _ := (&VSCodeCleanSource{LabelName: "T", ExtDir: dir}).Scan(context.Background(), model.PlatformInfo{})
+	if len(items) != 1 || items[0].Status == model.StatusCleanCandidate {
+		t.Fatalf("unreadable manifest must not offer cleanup: %+v", items)
+	}
+}
