@@ -16,7 +16,7 @@ import (
 // the commandContext/sudoCommand seams to this test binary acting as a fake:
 // it records argv and exits 127 like a binary that is not installed. Tests
 // that need a successful command stub runUpdateCmd/outputRunner instead.
-// lookPath, geteuid, rpmToolName and brewOutdatedSet are pinned so planning
+// lookPath, geteuid, rpmToolName, attachSubprocessSudo and brewOutdatedSet are pinned so planning
 // never depends on what the host has installed or who runs the suite.
 const fakeExecEnv = "UPDASH_UPDATER_FAKE_EXEC"
 
@@ -34,6 +34,11 @@ func TestMain(m *testing.M) {
 	}
 	geteuid = func() int { return 1000 }
 	rpmToolName = func() string { return "dnf" }
+	// The real helper probes `sudo -n true` on the host; elevate's own tests
+	// cover it (TestAttachSubprocessSudo_*).
+	attachSubprocessSudo = func(context.Context, *exec.Cmd) (func(), error) {
+		return func() {}, errors.New("sudo attach is not mocked in this test")
+	}
 	brewOutdatedSet = func(context.Context) (map[string]struct{}, error) {
 		return nil, errors.New("brew outdated is not mocked in this test")
 	}

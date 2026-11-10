@@ -8,24 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/lgldsilva/updash/internal/elevate"
 	"github.com/lgldsilva/updash/internal/model"
 )
-
-func TestUsePrivilegedAskpass_passwordlessSkipsAskpass(t *testing.T) {
-	sess := elevate.NewSession()
-	sess.SetPasswordless()
-	ctx := elevate.WithSession(context.Background(), sess)
-	cmd := exec.Command("brew", "upgrade", "--greedy", "microsoft-office")
-	cleanup, err := usePrivilegedAskpass(ctx, cmd, true)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer cleanup()
-	if path := sudoAskpassFrom(cmd.Env); path != "" {
-		t.Fatalf("NOPASSWD session created SUDO_ASKPASS=%s", path)
-	}
-}
 
 func TestUsePrivilegedAskpass_plainBrewDoesNotAttach(t *testing.T) {
 	prev := attachSubprocessSudo
@@ -43,7 +27,6 @@ func TestUsePrivilegedAskpass_plainBrewDoesNotAttach(t *testing.T) {
 }
 
 func TestInteractivePrivilegedUpdatesInstallAskpass(t *testing.T) {
-	withRealExec(t)
 	// The seam stands in for elevate.AttachSubprocessSudo so the test does not
 	// exec brew/mas. TestInstallAskpass covers the real SUDO_ASKPASS helper.
 	var commands []*exec.Cmd
@@ -85,7 +68,8 @@ func TestInteractivePrivilegedUpdatesInstallAskpass(t *testing.T) {
 
 func assertAskpassCommand(t *testing.T, cmd *exec.Cmd, want string) {
 	t.Helper()
-	got := strings.Join(cmd.Args, " ")
+	// cmd.Args[0] is the fake-exec test binary; the real argv follows it.
+	got := strings.Join(cmd.Args[1:], " ")
 	if got != want {
 		t.Fatalf("command = %q, want %q", got, want)
 	}

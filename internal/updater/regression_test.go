@@ -128,6 +128,9 @@ func TestPlanUpdateCommands_CoversAutomaticAndManualCategories(t *testing.T) {
 		{"flatpak", model.CatFlatpak, &model.Item{Name: "org.example.App"}, CommandScopeCategoryGlobal, []string{"flatpak", "update", "-y"}},
 		{"snap", model.CatSnap, &model.Item{Name: "core"}, CommandScopeCategoryGlobal, []string{"snap", "refresh"}},
 		{"choco", model.CatChoco, &model.Item{Name: "git"}, CommandScopeExact, []string{"choco", "upgrade", "git", "-y"}},
+		{"choco prefers id", model.CatChoco, &model.Item{Name: "Git", PackageID: "git.install"}, CommandScopeExact, []string{"choco", "upgrade", "git.install", "-y"}},
+		{"winget exact id", model.CatWinget, &model.Item{Name: "Git", PackageID: "Git.Git"}, CommandScopeExact, []string{"winget", "upgrade", "--exact", "--id", "Git.Git", "--accept-package-agreements", "--accept-source-agreements"}},
+		{"scoop exact name", model.CatScoop, &model.Item{Name: "git"}, CommandScopeExact, []string{"scoop", "update", "git"}},
 		{"agent manual", model.CatAgent, &model.Item{Name: "Cursor"}, CommandScopeManual, nil},
 		{"cleanup manual", model.CatCache, &model.Item{Name: "cache"}, CommandScopeManual, nil},
 	}

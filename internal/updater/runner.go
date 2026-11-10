@@ -53,7 +53,7 @@ var evalSymlinks = filepath.EvalSymlinks
 // can exercise the update flow (command dispatch + post-update validation)
 // without executing real processes — mirroring the scanner/runner.go seam.
 //
-// The buffer/stream behaviour matches runCmdWithBuilder exactly: verbose or
+// Buffering mirrors the cleaner runCmdWithBuilder: verbose or
 // interactive runs attach to the terminal, everything else is captured.
 var runUpdateCmd = func(ctx context.Context, opts Options, name string, args ...string) (stdout, stderr string, err error) {
 	cmd := commandContext(ctx, name, args...)

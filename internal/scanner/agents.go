@@ -453,7 +453,7 @@ func applyLatestToAgents(items []*model.Item, catalog []agentDef, latestByPkg ma
 	}
 }
 
-// resolveRegistryLatestFrom is resolveRegistryLatest with a pre-fetched
+// resolveRegistryLatestFrom resolves registry latest versions with a pre-fetched
 // global-npm package set (allows callers to overlap it with other npm work).
 // Registry probes fan out bounded-parallel: they are network-bound with a
 // per-probe budget, and a serial loop over many non-npm agents sums several

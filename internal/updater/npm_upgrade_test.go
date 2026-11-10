@@ -83,7 +83,7 @@ func TestNpmPipeline_ExcludesProtectedFromArgs(t *testing.T) {
 	}
 }
 
-// When every item is protected, batchNpmUpgrade must NOT invoke npm at all —
+// When every item is protected, the npm update must NOT invoke npm at all —
 // the items are owned by opencode upgrade. (No real subprocess runs here: the
 // empty-updatable branch returns before building any command.)
 func TestUpdateCategoryNpm_SkipsWhenOnlyProtected(t *testing.T) {
