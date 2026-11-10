@@ -236,3 +236,24 @@ func TestCleanVSCodeExt_CorruptManifestRemovesNothing(t *testing.T) {
 		}
 	}
 }
+
+// The CLI prints "nothing to remove" when BytesFreed is 0; extension and
+// SDKMAN cleanup must report what they actually reclaimed.
+func TestCleanVSCodeExt_ReportsBytesFreed(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	extRoot := filepath.Join(tmp, ".antigravity", "extensions")
+	for _, name := range []string{"a.b-2.0.0", "a.b-1.0.0"} {
+		if err := os.MkdirAll(filepath.Join(extRoot, name), 0o750); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(extRoot, "a.b-1.0.0", "blob"), make([]byte, 4096), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	item := &model.Item{Name: "ext: a.b", Category: model.CatVSCodeClean}
+	r := cleanVSCodeExt(context.Background(), item, SilentOptions())
+	if !r.Success || r.BytesFreed != 4096 {
+		t.Fatalf("want 4096 bytes freed, got %+v", r)
+	}
+}

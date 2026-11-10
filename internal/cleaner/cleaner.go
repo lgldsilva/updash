@@ -171,14 +171,18 @@ func cleanSDKMAN(ctx context.Context, item *model.Item, opts Options) *Result {
 		return &Result{Item: item, Success: true, Output: fmt.Sprintf("%s %s: nothing to remove", candidate, major)}
 	}
 	var allOutput strings.Builder
+	var freed int64
 	for _, ver := range removals {
+		size := retention.DirSize(filepath.Join(verDir, ver))
 		if err := sdkUninstallOne(ctx, candidate, ver, opts, &allOutput); err != nil {
 			item.Status = model.StatusError
-			return &Result{Item: item, Success: false, Error: err.Error(), Output: allOutput.String()}
+			return &Result{Item: item, Success: false, Error: err.Error(), Output: allOutput.String(), BytesFreed: freed}
 		}
+		freed += size
 	}
 	item.Status = model.StatusCleaned
-	return &Result{Item: item, Success: true, Output: allOutput.String()}
+	item.Freed = FormatBytes(freed)
+	return &Result{Item: item, Success: true, Output: allOutput.String(), BytesFreed: freed}
 }
 
 // sdkmanRemovals lists versions of major to uninstall, keeping keepVer (the
@@ -454,17 +458,19 @@ func cleanVSCodeExt(ctx context.Context, item *model.Item, opts Options) *Result
 	}
 	var allOutput strings.Builder
 	failed := false
+	var freed int64
 	for _, extDir := range candidates {
-		if pruneOldExtVersions(extDir, extName, &allOutput) {
-			failed = true
-		}
+		n, bad := pruneOldExtVersions(extDir, extName, &allOutput)
+		freed += n
+		failed = failed || bad
 	}
+	item.Freed = FormatBytes(freed)
 	if failed {
 		item.Status = model.StatusError
-		return &Result{Item: item, Success: false, Error: "some extension versions could not be removed", Output: allOutput.String()}
+		return &Result{Item: item, Success: false, Error: "some extension versions could not be removed", Output: allOutput.String(), BytesFreed: freed}
 	}
 	item.Status = model.StatusCleaned
-	return &Result{Item: item, Success: true, Output: allOutput.String()}
+	return &Result{Item: item, Success: true, Output: allOutput.String(), BytesFreed: freed}
 }
 
 func vscodeExtDirs() []string {
@@ -483,12 +489,12 @@ func vscodeExtDirs() []string {
 
 // pruneOldExtVersions removes extName's directories that the editor no
 // longer uses, keeping the active install from extensions.json (or the newest
-// when there is no manifest). It reports whether anything failed; an
-// unreadable manifest removes nothing.
-func pruneOldExtVersions(extDir, extName string, out *strings.Builder) bool {
+// when there is no manifest). It returns the bytes freed and whether anything
+// failed; an unreadable manifest removes nothing.
+func pruneOldExtVersions(extDir, extName string, out *strings.Builder) (freed int64, failed bool) {
 	entries, err := os.ReadDir(extDir)
 	if err != nil {
-		return false
+		return 0, false
 	}
 	re := regexp.MustCompile(fmt.Sprintf(`^%s-(\d+\.\d+\.\d+)(?:-.+)?$`, regexp.QuoteMeta(extName)))
 	var versions []string
@@ -498,12 +504,12 @@ func pruneOldExtVersions(extDir, extName string, out *strings.Builder) bool {
 		}
 	}
 	if len(versions) <= 1 {
-		return false
+		return 0, false
 	}
 	active, _, err := retention.VSCodeActiveExtensionDirs(extDir)
 	if err != nil {
 		fmt.Fprintf(out, "error removing %s: cannot tell the active version: %v\n", extName, err)
-		return true
+		return 0, true
 	}
 	sort.Slice(versions, func(i, j int) bool {
 		return compareVersions(extractVersion(versions[i]), extractVersion(versions[j])) > 0
@@ -512,19 +518,20 @@ func pruneOldExtVersions(extDir, extName string, out *strings.Builder) bool {
 	for _, d := range retention.KeepExtensionDirs(versions, active) {
 		keep[d] = true
 	}
-	failed := false
 	for _, old := range versions {
 		if keep[old] {
 			continue
 		}
-		if err := os.RemoveAll(filepath.Join(extDir, old)); err != nil {
-			fmt.Fprintf(out, "error removing %s: %s\n", old, err)
+		n, errs := retention.RemovePaths([]string{filepath.Join(extDir, old)})
+		freed += n
+		if len(errs) > 0 {
+			fmt.Fprintf(out, "error removing %s: %s\n", old, strings.Join(errs, "; "))
 			failed = true
 		} else {
 			fmt.Fprintf(out, "removed %s\n", old)
 		}
 	}
-	return failed
+	return freed, failed
 }
 
 // --- Helpers ---
