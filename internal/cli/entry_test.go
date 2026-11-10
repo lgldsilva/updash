@@ -217,7 +217,8 @@ func TestRunUpdate_withBatches(t *testing.T) {
 
 func TestRunUpdate_strictRemaining(t *testing.T) {
 	restoreHooks(t)
-	item := &model.Item{Name: "git", Status: model.StatusOutdated, Category: model.CatNpm}
+	// A user-owned explicit prefix keeps planning pure (no host npm probe, no sudo).
+	item := &model.Item{Name: "git", Status: model.StatusOutdated, Category: model.CatNpm, Prefix: t.TempDir()}
 	sum := &model.SourceSummary{Category: model.CatNpm, Label: "npm", Items: []*model.Item{item}}
 	fakeScan([]*model.SourceSummary{sum}, nil)
 	updateCategory = func(ctx context.Context, cat model.Category, items []*model.Item, opts updater.Options) []*updater.Result {
@@ -603,11 +604,19 @@ func TestRunUpdateBatches_linux(t *testing.T) {
 		return []*updater.Result{{Item: items[0], Success: true}}
 	}
 	canElevateNP = func(context.Context) bool { return true }
+	// Never execute the prepared batch for real: it used to run
+	// `npm update -g x` on the host (and, elevated, would run it under sudo).
+	executePreparedBatch = func(ctx context.Context, batch *updater.PreparedUpdateBatch, opts updater.Options) []*updater.Result {
+		return updateCategory(ctx, batch.Category(), batch.Items(), opts)
+	}
 	// An explicit system prefix keeps planning pure: no `npm config get prefix`
 	// probe against the host (it took ~20s and depended on the local npm).
 	batch, err := updater.PrepareUpdateBatch(context.Background(), model.CatNpm, []*model.Item{{Name: "x", Category: model.CatNpm, Prefix: "/usr/local"}})
 	if err != nil {
 		t.Fatal(err)
+	}
+	if !updater.PlansRequireElevation(batch.Plans()) {
+		t.Fatalf("a /usr prefix must plan an elevated npm update: %+v", batch.Plans())
 	}
 	out := captureStdout(t, func() {
 		ok, _, _, _ := runUpdateBatches(

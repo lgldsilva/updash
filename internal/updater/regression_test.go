@@ -343,6 +343,9 @@ func TestUpdateCategory_GlobalPlanExecutesOnce(t *testing.T) {
 }
 
 func TestPlanUpdateCommands_EveryKnownCategoryHasAnExplicitScope(t *testing.T) {
+	prevPrefix := npmPrefixRunner
+	npmPrefixRunner = func(context.Context) ([]byte, error) { return []byte("/home/u/.npm-global\n"), nil }
+	t.Cleanup(func() { npmPrefixRunner = prevPrefix })
 	categories := []model.Category{
 		model.CatBrew, model.CatMAS, model.CatApt, model.CatDnf, model.CatZypper, model.CatApk, model.CatPacman, model.CatFlatpak, model.CatSnap,
 		model.CatWinget, model.CatChoco, model.CatScoop, model.CatNpm, model.CatPnpm, model.CatBun, model.CatPipx, model.CatGo, model.CatRustup,
