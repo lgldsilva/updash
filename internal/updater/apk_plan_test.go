@@ -34,3 +34,20 @@ func TestPlanUpdateCommands_ApkElevatesOnlyWhenNotRoot(t *testing.T) {
 		})
 	}
 }
+
+// Root needs no sudo for any category, and Debian/Fedora/Arch containers that
+// run as root often lack sudo entirely ("sudo: not found").
+func TestPlanUpdateCommands_RootNeverPlansSudo(t *testing.T) {
+	prev := geteuid
+	t.Cleanup(func() { geteuid = prev })
+	geteuid = func() int { return 0 }
+	for _, cat := range []model.Category{model.CatApt, model.CatDnf, model.CatZypper, model.CatPacman, model.CatSnap, model.CatApk} {
+		plans, err := planUpdateCommands(context.Background(), cat, []*model.Item{{Name: "pkg"}})
+		if err != nil || len(plans) == 0 {
+			t.Fatalf("%s: plans=%v err=%v", cat, plans, err)
+		}
+		if PlansRequireElevation(plans) {
+			t.Errorf("%s as root plans sudo: %+v", cat, plans)
+		}
+	}
+}

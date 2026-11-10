@@ -116,6 +116,18 @@ func PlanUpdateCommands(cat model.Category, items []*model.Item) ([]CommandPlan,
 }
 
 func planUpdateCommands(ctx context.Context, cat model.Category, items []*model.Item) ([]CommandPlan, error) {
+	plans, err := planCategory(ctx, cat, items)
+	if err == nil && geteuid() == 0 {
+		// Root needs no sudo, and root containers (Alpine, Debian, Fedora)
+		// often do not ship it: "sudo apt-get" would fail with "not found".
+		for i := range plans {
+			plans[i].Elevated = false
+		}
+	}
+	return plans, err
+}
+
+func planCategory(ctx context.Context, cat model.Category, items []*model.Item) ([]CommandPlan, error) {
 	items = validItems(items)
 	if len(items) == 0 {
 		return nil, nil
@@ -164,9 +176,8 @@ func planUpdateCommands(ctx context.Context, cat model.Category, items []*model.
 	case model.CatZypper:
 		return globalPlan("zypper", []string{"--non-interactive", commandUpdate}, true)
 	case model.CatApk:
-		// apk locks a root-owned database; Alpine containers often run as root
-		// without sudo installed, so elevate only when not already root.
-		return globalPlan("apk", []string{commandUpgrade}, geteuid() != 0)
+		// apk locks a root-owned database; planUpdateCommands drops sudo for root.
+		return globalPlan("apk", []string{commandUpgrade}, true)
 	case model.CatPacman:
 		if lookPath != nil {
 			if _, err := lookPath("yay"); err == nil {
