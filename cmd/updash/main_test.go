@@ -33,6 +33,21 @@ func TestExitOnErr_PreservesCLIExitClass(t *testing.T) {
 	}
 }
 
+func TestParseArgs_UpdateSelf(t *testing.T) {
+	for _, args := range [][]string{{"--update-self"}, {"-u"}} {
+		mode, cfg, err := parseArgs(args)
+		if err != nil {
+			t.Fatalf("parseArgs(%v) error = %v", args, err)
+		}
+		if mode != "update-self" {
+			t.Fatalf("parseArgs(%v) mode = %q, want update-self", args, mode)
+		}
+		if !cfg.Verbose || cfg.DryRun || cfg.Only != "" {
+			t.Fatalf("parseArgs(%v) cfg = %+v", args, cfg)
+		}
+	}
+}
+
 func TestParseArgs_UpdateAndCleanIsAll(t *testing.T) {
 	tests := []struct {
 		name    string

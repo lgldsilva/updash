@@ -59,7 +59,7 @@ func runMode(ctx context.Context, mode string, cfg cli.Config, startupRes upgrad
 		return exitUpgrade(ctx, false)
 	case "check-upgrade":
 		return exitUpgrade(ctx, true)
-	case "update-self":
+	case modeUpdateSelf:
 		updateSelf()
 	default: // tui
 		runTUI(startupRes)
@@ -119,6 +119,9 @@ func runStartup(ctx context.Context, mode string, cfg cli.Config) upgrade.Startu
 	return res
 }
 
+// modeUpdateSelf is the dev self-update mode (--update-self, -u).
+const modeUpdateSelf = "update-self"
+
 // modeFlags select the run mode; the last one given wins.
 var modeFlags = map[string]string{
 	"--check": "check", "-c": "check",
@@ -128,7 +131,7 @@ var modeFlags = map[string]string{
 	"--help": "help", "-h": "help",
 	"--version": "version", "-v": "version",
 	"--env-defaults": "env-defaults",
-	"--update-self":  "update-self", "-u": "update-self",
+	"--update-self":  modeUpdateSelf, "-u": modeUpdateSelf,
 	"--upgrade":       "upgrade",
 	"--check-upgrade": "check-upgrade",
 }
