@@ -139,3 +139,30 @@ func TestSuggestCommand_CrushManualLayout(t *testing.T) {
 		t.Fatalf("non-npm crush must stay manual, got %q", got)
 	}
 }
+
+// A rescan allocates a fresh Item, so the manual-only note has to travel on
+// the result. "verifique manualmente" in a normal brew failure must not match.
+func TestClassifyItem_caskNpmCollisionSurvivesRescan(t *testing.T) {
+	fresh := &model.Item{Name: "Codex", Category: model.CatAgent, Status: model.StatusOutdated, PackageID: "@openai/codex"}
+	keep := `resolução manual: binário /opt/homebrew/bin/codex pertence ao cask brew "codex" — escolha a origem: brew uninstall --cask codex (npm/updash gerem) ou npm rm -g @openai/codex (brew gere)`
+	kind, reason := ClassifyItem(fresh, &Result{Success: false, Error: "⊘ " + keep})
+	if kind != KindManualOnly {
+		t.Fatalf("kind = %v, want KindManualOnly", kind)
+	}
+	if !strings.Contains(reason, "brew uninstall --cask codex") || !strings.Contains(reason, "npm rm -g @openai/codex") {
+		t.Fatalf("reason = %q", reason)
+	}
+}
+
+func TestClassifyItem_brewHintIsNotManualOnly(t *testing.T) {
+	it := &model.Item{Name: "wget", Category: model.CatBrew, Status: model.StatusOutdated}
+	errMsg := "wget ainda desatualizado após brew upgrade (verifique manualmente: brew upgrade --greedy wget)"
+	kind, _ := ClassifyItem(it, &Result{Success: false, Error: errMsg})
+	if kind != KindFailed {
+		t.Fatalf("kind = %v, want KindFailed", kind)
+	}
+	kind, _ = ClassifyItem(it, &Result{Success: false, Error: "⊘ cancelled"})
+	if kind == KindManualOnly {
+		t.Fatal("a cancelled skip is not a manual-only resolution")
+	}
+}

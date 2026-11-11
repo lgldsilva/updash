@@ -92,6 +92,61 @@ func TestNpmBrewCollisionDowngrade(t *testing.T) {
 	}
 }
 
+func TestBrewCaskPathFromNpmCollisionRelative(t *testing.T) {
+	root := t.TempDir()
+	versionDir := filepath.Join(root, "Caskroom", "codex", "0.153.4")
+	if err := os.MkdirAll(versionDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	real := filepath.Join(versionDir, "codex")
+	if err := os.WriteFile(real, []byte("x"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	binDir := filepath.Join(root, "bin")
+	if err := os.MkdirAll(binDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(binDir, "codex")
+	rel, err := filepath.Rel(binDir, real)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(rel, link); err != nil {
+		t.Fatal(err)
+	}
+	path, ok := brewCaskPathFromNpmCollision("npm error File exists: " + link)
+	if !ok || path != link {
+		t.Fatalf("ok=%v path=%q target=%q", ok, path, rel)
+	}
+}
+
+func TestNpmBrewCollisionUsesCaskroomToken(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "Caskroom", "codex-cli", "0.153.4")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	real := filepath.Join(dir, "codex")
+	if err := os.WriteFile(real, []byte("x"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(root, "codex")
+	if err := os.Symlink(real, link); err != nil {
+		t.Fatal(err)
+	}
+	item := &model.Item{Name: "Codex", Category: model.CatAgent, PackageID: "@openai/codex"}
+	got := npmBrewCollisionDowngrade(item, &Result{
+		Item: item, Success: false, Error: "exit status 1",
+		Output: "npm error File exists: " + link + "\n",
+	})
+	if !strings.Contains(got.Error, "brew uninstall --cask codex-cli") {
+		t.Fatalf("error = %q, want the Caskroom token", got.Error)
+	}
+	if !strings.Contains(got.Error, "npm rm -g @openai/codex") {
+		t.Fatalf("error = %q, want the npm removal", got.Error)
+	}
+}
+
 func TestNpmBrewCollisionDowngradePassThrough(t *testing.T) {
 	item := &model.Item{Name: "Qwen Code", Category: model.CatAgent, PackageID: "@qwen-code/qwen-code"}
 

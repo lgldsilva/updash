@@ -19,16 +19,18 @@ func npmBrewCollisionDowngrade(item *model.Item, result *Result) *Result {
 	if result == nil || result.Success {
 		return result
 	}
-	caskPath, ok := brewCaskPathFromNpmCollision(result.Output)
+	bin, cask, ok := npmCaskCollision(result.Output)
 	if !ok {
 		return result
 	}
-	cask := filepath.Base(caskPath)
+	if cask == "" {
+		cask = filepath.Base(bin)
+	}
 	pkg := item.PackageID
 	if pkg == "" {
 		pkg = "<pacote>"
 	}
-	keep := "resolução manual: binário " + caskPath + " pertence ao cask brew \"" + cask +
+	keep := "resolução manual: binário " + bin + " pertence ao cask brew \"" + cask +
 		"\" — escolha a origem: brew uninstall --cask " + cask + " (npm/updash gerem) ou npm rm -g " + pkg + " (brew gere)"
 	item.KeepPolicy = keep
 	item.Status = model.StatusOutdated
@@ -44,20 +46,52 @@ func npmBrewCollisionDowngrade(item *model.Item, result *Result) *Result {
 // "File exists:" error and reports it when it is a symlink into Homebrew's
 // Caskroom (covers the /opt/homebrew and /usr/local prefixes).
 func brewCaskPathFromNpmCollision(output string) (string, bool) {
+	bin, _, ok := npmCaskCollision(output)
+	return bin, ok
+}
+
+// npmCaskCollision returns the bin path npm could not replace and the cask
+// token parsed from the symlink target (.../Caskroom/<token>/...).
+func npmCaskCollision(output string) (bin, cask string, ok bool) {
 	const marker = "File exists:"
 	for _, line := range strings.Split(output, "\n") {
-		idx := strings.Index(line, marker)
-		if idx < 0 {
-			continue
-		}
-		path := strings.TrimSpace(line[idx+len(marker):])
-		if path == "" {
-			continue
-		}
-		target, err := os.Readlink(path)
-		if err == nil && strings.Contains(target, "/Caskroom/") {
-			return path, true
+		bin, cask, ok = collisionOnLine(line, marker)
+		if ok {
+			return bin, cask, true
 		}
 	}
-	return "", false
+	return "", "", false
+}
+
+func collisionOnLine(line, marker string) (bin, cask string, ok bool) {
+	idx := strings.Index(line, marker)
+	if idx < 0 {
+		return "", "", false
+	}
+	path := strings.TrimSpace(line[idx+len(marker):])
+	if path == "" {
+		return "", "", false
+	}
+	target, err := os.Readlink(path)
+	if err != nil || !strings.Contains(target, "/Caskroom/") {
+		return "", "", false
+	}
+	return path, caskToken(target), true
+}
+
+// caskToken is the directory immediately under Caskroom. Homebrew recreates
+// the bin link from that cask, so the uninstall command has to name it and
+// not the binary (the two differ for some casks).
+func caskToken(target string) string {
+	const marker = "/Caskroom/"
+	slash := filepath.ToSlash(target)
+	i := strings.Index(slash, marker)
+	if i < 0 {
+		return ""
+	}
+	name, _, _ := strings.Cut(slash[i+len(marker):], "/")
+	if name == "" || name == "." || name == ".." {
+		return ""
+	}
+	return name
 }

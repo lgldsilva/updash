@@ -12,14 +12,16 @@ import (
 )
 
 func TestRunUpdateCmd_StreamsToConfiguredOutput(t *testing.T) {
+	skipWithoutShell(t)
 	withRealExec(t)
 	var output bytes.Buffer
 	stdout, stderr, err := runUpdateCmd(context.Background(), Options{Output: &output}, "sh", "-c", "printf streamed")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if stdout != "" || stderr != "" {
-		t.Fatalf("streamed command returned buffered output stdout=%q stderr=%q", stdout, stderr)
+	// The TUI writer and the diagnosis buffer both receive the child output.
+	if stdout != "streamed" || stderr != "" {
+		t.Fatalf("buffered stdout=%q stderr=%q", stdout, stderr)
 	}
 	if output.String() != "streamed" {
 		t.Fatalf("streamed output = %q, want %q", output.String(), "streamed")
