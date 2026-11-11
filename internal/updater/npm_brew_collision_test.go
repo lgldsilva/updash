@@ -98,8 +98,8 @@ func TestBrewCaskPathFromNpmCollisionRelative(t *testing.T) {
 	if err := os.MkdirAll(versionDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	real := filepath.Join(versionDir, "codex")
-	if err := os.WriteFile(real, []byte("x"), 0o755); err != nil {
+	targetBin := filepath.Join(versionDir, "codex")
+	if err := os.WriteFile(targetBin, []byte("x"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	binDir := filepath.Join(root, "bin")
@@ -107,7 +107,7 @@ func TestBrewCaskPathFromNpmCollisionRelative(t *testing.T) {
 		t.Fatal(err)
 	}
 	link := filepath.Join(binDir, "codex")
-	rel, err := filepath.Rel(binDir, real)
+	rel, err := filepath.Rel(binDir, targetBin)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -126,12 +126,12 @@ func TestNpmBrewCollisionUsesCaskroomToken(t *testing.T) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	real := filepath.Join(dir, "codex")
-	if err := os.WriteFile(real, []byte("x"), 0o755); err != nil {
+	targetBin := filepath.Join(dir, "codex")
+	if err := os.WriteFile(targetBin, []byte("x"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	link := filepath.Join(root, "codex")
-	if err := os.Symlink(real, link); err != nil {
+	if err := os.Symlink(targetBin, link); err != nil {
 		t.Fatal(err)
 	}
 	item := &model.Item{Name: "Codex", Category: model.CatAgent, PackageID: "@openai/codex"}

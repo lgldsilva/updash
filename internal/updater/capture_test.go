@@ -33,16 +33,16 @@ func stubMASProbes(t *testing.T) {
 	attachSubprocessSudo = func(context.Context, *exec.Cmd) (func(), error) {
 		return func() {}, nil
 	}
-	real := commandContext
+	directCmd := commandContext
 	commandContext = func(ctx context.Context, name string, args ...string) *exec.Cmd {
 		if name == "mas" {
-			return real(ctx, "sh", "-c", "exit 1")
+			return directCmd(ctx, "sh", "-c", "exit 1")
 		}
-		return real(ctx, name, args...)
+		return directCmd(ctx, name, args...)
 	}
 	t.Cleanup(func() {
 		attachSubprocessSudo = prevAttach
-		commandContext = real
+		commandContext = directCmd
 	})
 }
 
