@@ -465,28 +465,47 @@ func RunAll(ctx context.Context, cfg Config) error {
 	plat := detectPlatform()
 	fmt.Printf(msgScanning, platformLabel(plat))
 	uok, ufail, uerr := runUpdateFromScan(ctx, cfg, plat, updates)
-	if uerr != nil && !isPartialErr(uerr) {
+	if isFatalErr(uerr) {
 		return uerr
 	}
 	cok, cfail, cerr := RunClean(ctx, cfg)
-	if cerr != nil && !isPartialErr(cerr) && cfail == 0 {
+	if isFatalErr(cerr) && cfail == 0 {
 		return cerr
 	}
-	if ufail > 0 || cfail > 0 {
-		if isPartialErr(uerr) || isPartialErr(cerr) {
-			return &ExitError{Code: 2, Err: fmt.Errorf("finished with %d update fail(s), %d clean fail(s), plus skipped problems (errors or unverified)", ufail, cfail)}
-		}
-		return fmt.Errorf("finished with %d update fail(s), %d clean fail(s)", ufail, cfail)
+	if err := runAllOutcome(ufail, cfail, isPartialErr(uerr) || isPartialErr(cerr)); err != nil {
+		return err
 	}
-	if isPartialErr(uerr) || isPartialErr(cerr) {
-		return &ExitError{Code: 2, Err: fmt.Errorf("completed with skipped problems: scan contains errors or unverified sources")}
-	}
-	if uok == 0 && cok == 0 && !hasInformational(updates, cleanup) {
-		fmt.Println("✓ Everything is up to date and clean!")
-	} else if uok == 0 && cok == 0 {
-		fmt.Println("ℹ No action selected; installed inventory was not affirmatively verified")
+	if uok == 0 && cok == 0 {
+		printNothingDone(hasInformational(updates, cleanup))
 	}
 	return nil
+}
+
+// isFatalErr is an error that aborts RunAll (anything but a partial result).
+func isFatalErr(err error) bool {
+	return err != nil && !isPartialErr(err)
+}
+
+// runAllOutcome maps the update+clean tallies to RunAll's exit contract:
+// failures are a plain error, skipped problems alone are exit 2.
+func runAllOutcome(ufail, cfail int, partial bool) error {
+	switch {
+	case (ufail > 0 || cfail > 0) && partial:
+		return &ExitError{Code: 2, Err: fmt.Errorf("finished with %d update fail(s), %d clean fail(s), plus skipped problems (errors or unverified)", ufail, cfail)}
+	case ufail > 0 || cfail > 0:
+		return fmt.Errorf("finished with %d update fail(s), %d clean fail(s)", ufail, cfail)
+	case partial:
+		return &ExitError{Code: 2, Err: fmt.Errorf("completed with skipped problems: scan contains errors or unverified sources")}
+	}
+	return nil
+}
+
+func printNothingDone(informational bool) {
+	if informational {
+		fmt.Println("ℹ No action selected; installed inventory was not affirmatively verified")
+		return
+	}
+	fmt.Println("✓ Everything is up to date and clean!")
 }
 
 type cleanGroup struct {
