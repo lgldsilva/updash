@@ -31,10 +31,7 @@ func explainBrewUpgradeFailure(name, output string, err error, timedOut bool) st
 	if err != nil {
 		return brewGenericFailMsg(output, err)
 	}
-	return fmt.Sprintf(
-		"%s ainda desatualizado após brew upgrade (verifique manualmente: brew upgrade --greedy %s)",
-		name, name,
-	)
+	return brewStillOutdatedMsg(name, output)
 }
 
 func brewTimeoutMsg(name, combined string) string {
@@ -69,13 +66,28 @@ func brewNoteMsg(name, note string, err error) string {
 	return fmt.Sprintf("%s ainda desatualizado — %s", name, note)
 }
 
-func brewGenericFailMsg(output string, err error) string {
-	trimmed := strings.TrimSpace(output)
-	if len(trimmed) > 200 {
-		trimmed = trimmed[:200] + "…"
+func brewStillOutdatedMsg(name, output string) string {
+	msg := fmt.Sprintf(
+		"%s ainda desatualizado após brew upgrade (verifique manualmente: brew upgrade --greedy %s)",
+		name, name,
+	)
+	if excerpt := clipOutput(output, 200); excerpt != "" {
+		return msg + " — " + excerpt
 	}
-	if trimmed != "" {
-		return fmt.Sprintf("brew upgrade falhou: %v — %s", err, trimmed)
+	return msg
+}
+
+func brewGenericFailMsg(output string, err error) string {
+	if excerpt := clipOutput(output, 200); excerpt != "" {
+		return fmt.Sprintf("brew upgrade falhou: %v — %s", err, excerpt)
 	}
 	return fmt.Sprintf("brew upgrade falhou: %v", err)
+}
+
+func clipOutput(output string, limit int) string {
+	trimmed := strings.TrimSpace(output)
+	if len(trimmed) > limit {
+		return trimmed[:limit] + "…"
+	}
+	return trimmed
 }

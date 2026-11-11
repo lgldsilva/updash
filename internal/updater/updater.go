@@ -9,6 +9,7 @@ import (
 	"io"
 	"os/exec"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/lgldsilva/updash/internal/elevate"
@@ -243,9 +244,7 @@ func upgradeOneBrewWithPlan(ctx context.Context, item *model.Item, plan CommandP
 	}
 	defer cleanup()
 
-	var stdout, stderr bytes.Buffer
-	opts.ConfigureCmd(cmd)
-	wireCapture(cmd, &stdout, &stderr)
+	stdout, stderr := bufferCommandOutput(opts, cmd)
 
 	// No inactivity watchdog here: brew already has a per-item timeout, and a
 	// long silent step (a .pkg installer) is expected. The zero window still
@@ -295,9 +294,7 @@ func upgradeMASAppWithPlan(ctx context.Context, item *model.Item, plan CommandPl
 		}
 	}
 	defer cleanup()
-	var stdout, stderr bytes.Buffer
-	opts.ConfigureCmd(cmd)
-	wireCapture(cmd, &stdout, &stderr)
+	stdout, stderr := bufferCommandOutput(opts, cmd)
 
 	err = cmd.Run()
 	output := stdout.String() + stderr.String()
@@ -575,12 +572,43 @@ func runCmd(ctx context.Context, item *model.Item, opts Options, name string, ar
 	return result
 }
 
-// manualAgentResult marks an item as skipped-manual without running anything.
-// wireCapture always buffers child output while preserving whatever live
-// writer ConfigureCmd attached (terminal in verbose/interactive runs, TUI log
-// streaming otherwise). Diagnosis and classification read this text — without
-// the buffer, a verbose run reduced every brew failure to a bare
-// "exit status 1" and hid refusals like disabled casks.
+// bufferCommandOutput streams child output to the terminal or TUI writer when
+// one is configured and always keeps a buffer of both streams. Diagnosis
+// reads that text: without the buffer a verbose run reduced every failure to
+// a bare "exit status 1" and hid refusals such as disabled casks.
+func bufferCommandOutput(opts Options, cmd *exec.Cmd) (stdout, stderr *bytes.Buffer) {
+	var out, er bytes.Buffer
+	opts.ConfigureCmd(cmd)
+	// ConfigureCmd points both streams at one TUI writer. exec only shares a
+	// single copy goroutine when Stdout and Stderr are the identical Writer,
+	// and wireCapture has to wrap each one, so the shared sink is serialized.
+	if cmd.Stdout != nil && cmd.Stdout == cmd.Stderr {
+		shared := &lockedWriter{w: cmd.Stdout}
+		cmd.Stdout = shared
+		cmd.Stderr = shared
+	}
+	wireCapture(cmd, &out, &er)
+	return &out, &er
+}
+
+// lockedWriter serializes writes. The shared TUI/terminal sink is not safe
+// for the two goroutines exec uses to copy stdout and stderr.
+type lockedWriter struct {
+	mu sync.Mutex
+	w  io.Writer
+}
+
+func (w *lockedWriter) Write(p []byte) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.w == nil {
+		return len(p), nil
+	}
+	return w.w.Write(p)
+}
+
+// wireCapture tees whatever live writer ConfigureCmd attached into the
+// buffers. A nil writer means buffer-only (silent runs).
 func wireCapture(cmd *exec.Cmd, stdout, stderr *bytes.Buffer) {
 	if cmd.Stdout != nil {
 		cmd.Stdout = io.MultiWriter(cmd.Stdout, stdout)
@@ -594,6 +622,7 @@ func wireCapture(cmd *exec.Cmd, stdout, stderr *bytes.Buffer) {
 	}
 }
 
+// manualAgentResult marks an item as skipped-manual without running anything.
 func manualAgentResult(item *model.Item, reason string) *Result {
 	item.Status = model.StatusOutdated
 	return &Result{

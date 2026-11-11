@@ -1,7 +1,6 @@
 package updater
 
 import (
-	"bytes"
 	"context"
 	"os"
 	"os/exec"
@@ -48,38 +47,27 @@ var lookPath = exec.LookPath
 var evalSymlinks = filepath.EvalSymlinks
 
 // runUpdateCmd is the subprocess primitive for the update path: it builds the
-// command, wires buffers (or streams to the terminal when Verbose/Interactive),
-// runs it, and returns the captured stdout/stderr. It is a variable so tests
-// can exercise the update flow (command dispatch + post-update validation)
-// without executing real processes — mirroring the scanner/runner.go seam.
-//
-// Buffering mirrors the cleaner runCmdWithBuilder: verbose or
-// interactive runs attach to the terminal, everything else is captured.
+// command, runs it, and returns the captured stdout/stderr. Output is always
+// buffered and, when a terminal or TUI writer is configured, streamed there
+// at the same time. It is a variable so tests can exercise the update flow
+// (command dispatch + post-update validation) without executing real
+// processes — mirroring the scanner/runner.go seam.
 var runUpdateCmd = func(ctx context.Context, opts Options, name string, args ...string) (stdout, stderr string, err error) {
-	cmd := commandContext(ctx, name, args...)
-	var out, er bytes.Buffer
-	if opts.Output != nil || opts.Verbose || opts.Interactive {
-		opts.ConfigureCmd(cmd)
-	} else {
-		cmd.Stdout = &out
-		cmd.Stderr = &er
-	}
-	err = runGuarded(cmd, inactivityWindow)
-	return out.String(), er.String(), err
+	return captureUpdateCmd(opts, commandContext(ctx, name, args...))
 }
 
 // runElevatedUpdateCmd is the equivalent subprocess seam for commands that
 // require sudo. It receives the unwrapped command so dry-run and execution
-// share the same CommandPlan representation.
+// share the same CommandPlan representation. Output follows the same
+// buffer-and-stream policy as runUpdateCmd.
 var runElevatedUpdateCmd = func(ctx context.Context, opts Options, name string, args ...string) (stdout, stderr string, err error) {
-	cmd := sudoCommand(ctx, name, args...)
-	var out, er bytes.Buffer
-	if opts.Output != nil || opts.Verbose || opts.Interactive {
-		opts.ConfigureCmd(cmd)
-	} else {
-		cmd.Stdout = &out
-		cmd.Stderr = &er
-	}
+	return captureUpdateCmd(opts, sudoCommand(ctx, name, args...))
+}
+
+// captureUpdateCmd runs cmd with the shared output policy: live stream when
+// one is configured, and a full stdout/stderr buffer in every run mode.
+func captureUpdateCmd(opts Options, cmd *exec.Cmd) (stdout, stderr string, err error) {
+	out, er := bufferCommandOutput(opts, cmd)
 	err = runGuarded(cmd, inactivityWindow)
 	return out.String(), er.String(), err
 }
