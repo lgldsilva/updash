@@ -28,6 +28,14 @@ const (
 
 	DefaultDockerBuilderMode = DockerBuilderModeAge
 
+	// Ephemeral-container reap (issue #107): docker container prune only
+	// removes exited/dead containers, so leaked running test/CI containers
+	// survive forever. The reap is opt-in by name patterns (glob, comma
+	// separated) — prod containers never match unless the operator says so —
+	// plus a minimum uptime so fresh runs of the same job are spared.
+	DefaultDockerEphemeralPatterns = ""
+	DefaultDockerEphemeralMaxHours = 12
+
 	DefaultContainerLogMaxMB = 50
 	DefaultHostLogMaxDays    = 30
 	DefaultDiskPressurePct   = 85
@@ -64,6 +72,29 @@ func DockerBuilderMode() string {
 // DockerContainerMaxAge is the docker container prune --filter until= value.
 func DockerContainerMaxAge() string {
 	return envOr("UPDASH_DOCKER_CONTAINER_MAX_AGE", DefaultDockerContainerMaxAge)
+}
+
+// DockerEphemeralPatterns returns the comma-separated glob name patterns that
+// identify ephemeral (test/CI) containers eligible for reaping when running
+// past the TTL. Empty (default) disables the reap entirely.
+func DockerEphemeralPatterns() []string {
+	raw := strings.TrimSpace(os.Getenv("UPDASH_DOCKER_EPHEMERAL_PATTERNS"))
+	if raw == "" {
+		return nil
+	}
+	var out []string
+	for _, p := range strings.Split(raw, ",") {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// DockerEphemeralMaxHours is the minimum uptime a name-matched running
+// container needs before the cleaner stops and removes it.
+func DockerEphemeralMaxHours() int {
+	return envInt("UPDASH_DOCKER_EPHEMERAL_MAX_HOURS", DefaultDockerEphemeralMaxHours)
 }
 
 // ContainerLogMaxMB is the size threshold for truncating container logs.
@@ -134,6 +165,8 @@ func EnvDefaults() string {
 		{"UPDASH_DOCKER_BUILDER_MODE", DockerBuilderMode(), "builder prune: age|all (CI/homelab: all)"},
 		{"UPDASH_DOCKER_BUILDER_MAX_AGE", DockerBuilderMaxAge(), "builder prune until= (mode=age only)"},
 		{"UPDASH_DOCKER_CONTAINER_MAX_AGE", DockerContainerMaxAge(), "docker container prune until="},
+		{"UPDASH_DOCKER_EPHEMERAL_PATTERNS", strings.Join(DockerEphemeralPatterns(), ","), "opt-in: reap running ephemeral containers matching globs (empty=off)"},
+		{"UPDASH_DOCKER_EPHEMERAL_MAX_HOURS", strconv.Itoa(DockerEphemeralMaxHours()), "min uptime before an ephemeral container is reaped"},
 		{"UPDASH_CONTAINER_LOG_MAX_MB", strconv.Itoa(ContainerLogMaxMB()), "container log truncate threshold"},
 		{"UPDASH_HOST_LOG_MAX_DAYS", strconv.Itoa(HostLogMaxDays()), "host log mtime age"},
 		{"UPDASH_DISK_PRESSURE_PCT", strconv.Itoa(DiskPressurePct()), "disk % for aggressive prune"},

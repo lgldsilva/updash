@@ -280,6 +280,18 @@ func (s *DockerCleanSource) Scan(ctx context.Context, plat model.PlatformInfo) (
 		}
 	}
 
+	if patterns := config.DockerEphemeralPatterns(); len(patterns) > 0 {
+		policy := fmt.Sprintf("reap running ephemeral containers matching %s after %dh",
+			strings.Join(patterns, ","), config.DockerEphemeralMaxHours())
+		items = append(items, &model.Item{
+			Name:        "docker ephemeral-reap",
+			Category:    model.CatDockerClean,
+			Status:      model.StatusCleanCandidate,
+			Reclaimable: "leaked test/CI containers",
+			KeepPolicy:  policy,
+		})
+	}
+
 	if len(items) == 0 {
 		items = append(items, &model.Item{
 			Name: binDocker, Category: model.CatDockerClean, Status: model.StatusOK, CurrentVer: "nothing to clean",
