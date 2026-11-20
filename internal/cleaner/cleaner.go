@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -53,6 +54,9 @@ func cleanOne(ctx context.Context, item *model.Item, opts Options) *Result {
 	case model.CatSDKMAN, model.CatSDKClean:
 		return cleanSDKMAN(ctx, item, opts)
 	case model.CatDockerClean:
+		if item.Name == "docker ephemeral-reap" {
+			return cleanDockerEphemeral(ctx, item, opts)
+		}
 		return cleanDocker(ctx, item, opts)
 	case model.CatVSCodeClean:
 		return cleanVSCodeExt(ctx, item, opts)
@@ -225,6 +229,128 @@ func sdkUninstallOne(ctx context.Context, candidate, ver string, opts Options, o
 // Builder mode (age|all): see UPDASH_DOCKER_BUILDER_MODE — "all" for CI/homelab.
 func cleanDocker(ctx context.Context, item *model.Item, opts Options) *Result {
 	return runCmd(ctx, item, opts, cleanerDocker, dockerPruneArgsForItem(item.Name)...)
+}
+
+// cleanDockerEphemeral reaps running ephemeral/test containers that leaked
+// past their TTL (issue #107): `docker container prune` only touches
+// exited/dead containers, so CI/E2E leftovers in `Up` state survive forever.
+// Opt-in by name patterns (config.DockerEphemeralPatterns); a match must also
+// be older than config.DockerEphemeralMaxHours so live job runs are spared.
+func cleanDockerEphemeral(ctx context.Context, item *model.Item, opts Options) *Result {
+	_ = opts // reserved: verbose listing of spared containers
+	patterns := config.DockerEphemeralPatterns()
+	if len(patterns) == 0 {
+		item.Status = model.StatusInfo
+		return &Result{Item: item, Success: true, Output: "ephemeral reap disabled (set UPDASH_DOCKER_EPHEMERAL_PATTERNS to opt in)"}
+	}
+	maxAge := time.Duration(config.DockerEphemeralMaxHours()) * time.Hour
+	// RunningFor is human ("2 days", "3 hours") — use StartedAt for arithmetic.
+	out, err := commandContext(ctx, cleanerDocker, "ps", "--filter", "status=running",
+		"--format", "{{.ID}}\t{{.Names}}\t{{.RunningFor}}").CombinedOutput()
+	if err != nil {
+		// No docker or daemon down — same soft handling as container-logs.
+		item.Status = model.StatusInfo
+		return &Result{Item: item, Success: true, Output: "docker unavailable: " + err.Error()}
+	}
+	var b strings.Builder
+	reaped, failures := 0, 0
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		if line == "" {
+			continue
+		}
+		id, name, runningFor, ok := splitDockerPSLine(line)
+		if !ok {
+			failures++
+			fmt.Fprintf(&b, "skip: unparsable ps line %q\n", line)
+			continue
+		}
+		if !matchesAnyPattern(name, patterns) {
+			continue
+		}
+		age, ageErr := parseDockerRunningFor(runningFor)
+		if ageErr != nil || age < maxAge {
+			continue // fresh run of the same job, or unknown format: leave it
+		}
+		if _, err := commandContext(ctx, cleanerDocker, "stop", "-t", "10", id).CombinedOutput(); err != nil {
+			failures++
+			fmt.Fprintf(&b, "failed to stop %s (%s): %v\n", name, id, err)
+			continue
+		}
+		if _, err := commandContext(ctx, cleanerDocker, "rm", id).CombinedOutput(); err != nil {
+			failures++
+			fmt.Fprintf(&b, "failed to remove %s (%s): %v\n", name, id, err)
+			continue
+		}
+		reaped++
+		fmt.Fprintf(&b, "reaped %s (%s, up %s)\n", name, id, runningFor)
+	}
+	if failures > 0 {
+		item.Status = model.StatusError
+		return &Result{Item: item, Success: false, Error: errCleanupIncomplete, Output: b.String()}
+	}
+	item.Status = model.StatusCleaned
+	item.Freed = "0B"
+	return &Result{Item: item, Success: true, Output: b.String()}
+}
+
+// splitDockerPSLine parses "<id>\t<names>\t<running-for>".
+func splitDockerPSLine(line string) (id, name, runningFor string, ok bool) {
+	parts := strings.Split(line, "\t")
+	if len(parts) != 3 {
+		return "", "", "", false
+	}
+	return parts[0], parts[1], parts[2], true
+}
+
+// matchesAnyPattern reports whether name matches any comma-separated glob
+// from UPDASH_DOCKER_EPHEMERAL_PATTERNS (case-insensitive, like docker names).
+func matchesAnyPattern(name string, patterns []string) bool {
+	lower := strings.ToLower(name)
+	for _, p := range patterns {
+		if ok, err := filepath.Match(strings.ToLower(p), lower); err == nil && ok {
+			return true
+		}
+	}
+	return false
+}
+
+// parseDockerRunningFor converts docker's human RunningFor ("2 days",
+// "About a minute", "3 hours") into a duration estimate. Conservative:
+// unknown units parse to 0 so the container is spared.
+func parseDockerRunningFor(s string) (time.Duration, error) {
+	s = strings.ToLower(strings.TrimSpace(s))
+	s = strings.TrimPrefix(s, "about ")
+	s = strings.TrimSuffix(s, " ago")
+	fields := strings.Fields(s)
+	if len(fields) < 2 {
+		return 0, fmt.Errorf("unparsable running-for %q", s)
+	}
+	var value int64
+	if fields[0] == "a" || fields[0] == "an" {
+		value = 1
+	} else {
+		v, err := strconv.ParseInt(fields[0], 10, 64)
+		if err != nil {
+			return 0, fmt.Errorf("unparsable running-for %q", s)
+		}
+		value = v
+	}
+	unit := strings.TrimSuffix(fields[1], "s")
+	switch unit {
+	case "second":
+		return time.Duration(value) * time.Second, nil
+	case "minute":
+		return time.Duration(value) * time.Minute, nil
+	case "hour":
+		return time.Duration(value) * time.Hour, nil
+	case "day":
+		return time.Duration(value) * 24 * time.Hour, nil
+	case "week", "month", "year":
+		// Weeks/months/years are far beyond any ephemeral TTL — treat as large.
+		return 365 * 24 * time.Hour, nil
+	default:
+		return 0, fmt.Errorf("unknown unit %q", unit)
+	}
 }
 
 // dockerPruneArgsForItem maps a cleanup item name to docker subcommand args
@@ -442,7 +568,7 @@ func containerLogPath(ctx context.Context, id string) (string, error) {
 }
 
 // cleanVSCodeExt removes old versions of VS Code extensions.
-func cleanVSCodeExt(ctx context.Context, item *model.Item, opts Options) *Result {
+func cleanVSCodeExt(_ context.Context, item *model.Item, _ Options) *Result {
 	candidates := vscodeExtDirs()
 	if len(candidates) == 0 {
 		return &Result{Item: item, Success: true, Output: "no extension directories found"}
@@ -547,7 +673,7 @@ func runCmdWithBuilder(ctx context.Context, item *model.Item, cmd *exec.Cmd, opt
 	return result
 }
 
-func executeCmd(ctx context.Context, item *model.Item, cmd *exec.Cmd, opts Options) *Result {
+func executeCmd(_ context.Context, item *model.Item, cmd *exec.Cmd, opts Options) *Result {
 	var stdout, stderr bytes.Buffer
 	if opts.Verbose || opts.Interactive {
 		configureCmd(opts, cmd)
