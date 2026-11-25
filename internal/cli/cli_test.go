@@ -306,10 +306,10 @@ func TestPrintCheckAndVerifyReport(t *testing.T) {
 		if stats.remaining < 1 {
 			t.Fatalf("remaining=%d", stats.remaining)
 		}
-		// Both leftovers classify as failed: git has a failed result, and the
-		// codex agent item is still outdated with no result at all. The count
-		// reflects the classified outcome, not the raw execution counter.
-		if stats.failed != 2 || stats.updated != 1 {
+		// git has a failed result. The codex agent item is still outdated
+		// with no result at all: it was not in this run's plan, so it is
+		// unattempted — not a failure, not remaining.
+		if stats.failed != 1 || stats.remaining != 1 || stats.unattempted != 1 || stats.updated != 1 {
 			t.Fatalf("stats=%+v", stats)
 		}
 	})
@@ -346,7 +346,7 @@ func TestIndexResultsAndClassify(t *testing.T) {
 	// "ainda desatualizado após update" message.
 	rescanned := &model.Item{Name: "x", Status: model.StatusOutdated, Category: model.CatBrew}
 	stats := &verifyStats{}
-	need, man, fail, other := classifyRemaining(
+	g := classifyRemaining(
 		[]*model.SourceSummary{{Items: []*model.Item{rescanned, {Name: "ok", Status: model.StatusOK}}}},
 		m,
 		stats,
@@ -354,16 +354,50 @@ func TestIndexResultsAndClassify(t *testing.T) {
 	if stats.remaining != 1 {
 		t.Fatalf("remaining=%d", stats.remaining)
 	}
-	if len(fail) != 1 || fail[0] != rescanned {
-		t.Fatalf("fail=%+v", fail)
+	if len(g.failed) != 1 || g.failed[0] != rescanned {
+		t.Fatalf("fail=%+v", g.failed)
 	}
 	kind, reason := updater.ClassifyItem(rescanned, m[keyOf(rescanned)])
 	if kind != updater.KindFailed || reason != "boom" {
 		t.Fatalf("kind=%v reason=%q, want KindFailed/boom (cross-scan result lookup regressed)", kind, reason)
 	}
-	_ = need
-	_ = man
-	_ = other
+}
+
+// An outdated item with no result was never in this run's plan (every planned
+// item gets a Result, even on batch failure). It is "unattempted", not failed,
+// and does not count as remaining for the strict exit.
+func TestClassifyRemaining_NoResultIsUnattempted(t *testing.T) {
+	failed := &model.Item{Name: "docker-ce", Category: model.CatApt, Status: model.StatusOutdated}
+	fresh := &model.Item{Name: "ghostty", Category: model.CatApt, Status: model.StatusOutdated}
+	manual := &model.Item{Name: "clion", Category: model.CatBrew, Status: model.StatusOutdated, KeepPolicy: "gerido pelo JetBrains Toolbox"}
+	part := &model.Item{Name: "partial", Category: model.CatBrew, Status: model.StatusOutdated}
+	ok := &model.Item{Name: "done", Category: model.CatBrew, Status: model.StatusOK}
+	m := indexResults([]*updater.Result{
+		{Item: failed, Error: "exit status 100"},
+		{Item: manual, Error: "⊘ " + manual.KeepPolicy},
+		{Item: part, Success: true},
+	})
+	stats := &verifyStats{}
+	g := classifyRemaining(
+		[]*model.SourceSummary{{Items: []*model.Item{failed, fresh, manual, part, ok, nil}}},
+		m,
+		stats,
+	)
+	if stats.remaining != 3 || stats.unattempted != 1 {
+		t.Fatalf("stats=%+v, want remaining=3 unattempted=1", stats)
+	}
+	if len(g.unattempted) != 1 || g.unattempted[0] != fresh {
+		t.Fatalf("unattempted=%+v", g.unattempted)
+	}
+	if len(g.failed) != 1 || g.failed[0] != failed {
+		t.Fatalf("failed=%+v", g.failed)
+	}
+	if len(g.manual) != 1 || g.manual[0] != manual {
+		t.Fatalf("manual=%+v", g.manual)
+	}
+	if len(g.other) != 1 || g.other[0] != part {
+		t.Fatalf("other=%+v", g.other)
+	}
 }
 
 func TestPrintOutdatedLine(t *testing.T) {

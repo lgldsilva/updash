@@ -437,3 +437,19 @@ func TestUpdateOutcomeErrPrecedence(t *testing.T) {
 		t.Fatalf("clean success: %v", err)
 	}
 }
+
+// Items that were never in the plan (packages published after the scan) do
+// not fail the run, in default or strict mode.
+func TestUpdateOutcomeErr_UnattemptedNeverFails(t *testing.T) {
+	for _, cfg := range []Config{{}, {Strict: true}} {
+		if err := updateOutcomeErr(cfg, verifyStats{unattempted: 43}, 0); err != nil {
+			t.Fatalf("cfg=%+v unattempted must not fail: %v", cfg, err)
+		}
+		if shouldFailExit(cfg, verifyStats{unattempted: 43}) {
+			t.Fatalf("cfg=%+v shouldFailExit must be false for unattempted only", cfg)
+		}
+	}
+	if !shouldFailExit(Config{Strict: true}, verifyStats{unattempted: 1, remaining: 1}) {
+		t.Fatal("strict must still fail on a real remaining item")
+	}
+}
