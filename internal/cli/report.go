@@ -10,11 +10,20 @@ import (
 )
 
 type verifyStats struct {
-	updated   int
-	skipped   int
-	manual    int
-	failed    int
-	remaining int
+	updated     int
+	skipped     int
+	manual      int
+	failed      int
+	remaining   int
+	unattempted int
+}
+
+// remainingGroups buckets the outdated items of the verify rescan.
+// unattempted holds items with no Result at all: every planned item gets one
+// (even on batch failure), so they were never in this run's plan — packages
+// published between the apt scan and the plan's `apt-get update`.
+type remainingGroups struct {
+	needPass, manual, failed, other, unattempted []*model.Item
 }
 
 // PrintCheck renders scan results; returns outdated and cleanable counts.
@@ -246,7 +255,7 @@ func PrintVerifyReport(
 	resultByItem := indexResults(results)
 	stats := verifyStats{updated: ok, skipped: skipped, failed: fail}
 
-	needPass, manual, failed, other := classifyRemaining(updates, resultByItem, &stats)
+	groups := classifyRemaining(updates, resultByItem, &stats)
 	// The execution counter (fail) counts every unsuccessful command, but the
 	// exit decision and this report answer a different question: what is still
 	// outdated and NOT resolvable without the user. An item that failed once
@@ -255,22 +264,49 @@ func PrintVerifyReport(
 	// Agents with no freshness channel never rescan as outdated, so a failed
 	// idempotent update is the failure — it must not disappear into rc 0.
 	blind := blindUpdateFailures(updates, results)
-	stats.failed = len(failed) + len(blind)
-	stats.manual = len(manual)
-	printVerifyHeader(ok, stats.failed, skipped)
+	stats.failed = len(groups.failed) + len(blind)
+	stats.manual = len(groups.manual)
+	printVerifyHeader(ok, stats.failed, skipped, stats.unattempted)
 
 	if stats.remaining == 0 && len(blind) == 0 {
-		fmt.Println("\n✓ Verified — nothing outdated remains")
+		printVerifiedClean(stats.unattempted)
+		printVerifyUnattempted(groups.unattempted)
 		return stats
 	}
 	if stats.remaining > 0 {
 		fmt.Printf("\n⚠ %d item(s) still outdated:\n", stats.remaining)
 	}
-	printVerifyGroup("Need password / Terminal", needPass, resultByItem)
-	printVerifyGroup("Manual update only", manual, resultByItem)
-	printVerifyGroup("Failed", appendItems(failed, blind), resultByItem)
-	printVerifyGroup("Others", other, resultByItem)
+	printVerifyGroup("Need password / Terminal", groups.needPass, resultByItem)
+	printVerifyGroup("Manual update only", groups.manual, resultByItem)
+	printVerifyGroup("Failed", appendItems(groups.failed, blind), resultByItem)
+	printVerifyGroup("Others", groups.other, resultByItem)
+	printVerifyUnattempted(groups.unattempted)
 	return stats
+}
+
+// printVerifiedClean closes a report with nothing left to resolve. When only
+// unattempted items remain, the headline says so instead of claiming that
+// nothing is outdated.
+func printVerifiedClean(unattempted int) {
+	if unattempted > 0 {
+		fmt.Println("\n✓ Verified — no planned item is still outdated")
+		return
+	}
+	fmt.Println("\n✓ Verified — nothing outdated remains")
+}
+
+// printVerifyUnattempted lists outdated items that had no result because they
+// were not in this run's plan. They never print the generic "still outdated
+// after update" reason: nothing was attempted against them.
+func printVerifyUnattempted(items []*model.Item) {
+	if len(items) == 0 {
+		return
+	}
+	fmt.Printf("\n  ℹ Not attempted this run (%d item(s) not in this run's plan — package lists may have been refreshed after the scan):\n", len(items))
+	for _, it := range items {
+		printOutdatedLine(it)
+	}
+	fmt.Println("    → run again to pick them up")
 }
 
 // agentFreshnessNote is the parenthetical on an informational agent row.
@@ -368,7 +404,7 @@ func indexResults(results []*updater.Result) map[itemKey]*updater.Result {
 	return m
 }
 
-func printVerifyHeader(ok, fail, skipped int) {
+func printVerifyHeader(ok, fail, skipped, unattempted int) {
 	fmt.Println("\n📋 Report:")
 	fmt.Printf("  ✓ %d updated", ok)
 	if skipped > 0 {
@@ -377,6 +413,9 @@ func printVerifyHeader(ok, fail, skipped int) {
 	if fail > 0 {
 		fmt.Printf(" · ✘ %d failed", fail)
 	}
+	if unattempted > 0 {
+		fmt.Printf(" · ℹ %d not attempted", unattempted)
+	}
 	fmt.Println()
 }
 
@@ -384,27 +423,33 @@ func classifyRemaining(
 	updates []*model.SourceSummary,
 	resultByItem map[itemKey]*updater.Result,
 	stats *verifyStats,
-) (needPass, manual, failed, other []*model.Item) {
+) remainingGroups {
+	var g remainingGroups
 	for _, s := range updates {
 		for _, it := range s.Items {
-			if it.Status != model.StatusOutdated {
+			if it == nil || it.Status != model.StatusOutdated {
+				continue
+			}
+			res := resultByItem[keyOf(it)]
+			if res == nil {
+				stats.unattempted++
+				g.unattempted = append(g.unattempted, it)
 				continue
 			}
 			stats.remaining++
-			kind, _ := updater.ClassifyItem(it, resultByItem[keyOf(it)])
-			switch kind {
+			switch kind, _ := updater.ClassifyItem(it, res); kind {
 			case updater.KindNeedsPassword:
-				needPass = append(needPass, it)
+				g.needPass = append(g.needPass, it)
 			case updater.KindManualOnly:
-				manual = append(manual, it)
+				g.manual = append(g.manual, it)
 			case updater.KindFailed:
-				failed = append(failed, it)
+				g.failed = append(g.failed, it)
 			default:
-				other = append(other, it)
+				g.other = append(g.other, it)
 			}
 		}
 	}
-	return needPass, manual, failed, other
+	return g
 }
 
 func printVerifyGroup(title string, items []*model.Item, results map[itemKey]*updater.Result) {

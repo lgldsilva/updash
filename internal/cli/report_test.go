@@ -24,6 +24,9 @@ func TestShouldFailExit_strict(t *testing.T) {
 	if shouldFailExit(Config{}, verifyStats{remaining: 1, failed: 0}) {
 		t.Fatal("non-strict should not fail on remaining only")
 	}
+	if shouldFailExit(Config{Strict: true}, verifyStats{unattempted: 2}) {
+		t.Fatal("unattempted items are not a failure, even in strict mode")
+	}
 }
 
 func TestItemsNeedPasswordElevation(t *testing.T) {
